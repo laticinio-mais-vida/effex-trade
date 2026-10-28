@@ -1,0 +1,65 @@
+{
+  "expo": {
+    "name": "EFFEX Trade",
+    "slug": "effex-trade",
+    "scheme": "effextrade",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.effex.trade",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "location"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.effex.trade",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B6E4F",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "expo-secure-store",
+        {}
+      ],
+      "expo-image",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "O EFFEX Trade usa sua localização durante a jornada para registrar check-in nos clientes e mostrar sua posição ao supervisor.",
+          "locationWhenInUsePermission": "O EFFEX Trade usa sua localização para validar o check-in no cliente (cerca eletrônica).",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "locationAlwaysPermission": "O EFFEX Trade usa sua localização durante a jornada para registrar check-in nos clientes e mostrar sua posição ao supervisor."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "O EFFEX Trade usa a câmera para registrar as fotos do atendimento (antes/depois, ruptura, vencimento).",
+          "photosPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

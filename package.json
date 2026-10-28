@@ -1,0 +1,12 @@
+{
+  "name": "effex-trade",
+  "private": true,
+  "description": "EFFEX Trade - promotoria de vendas (API, painel administrativo e app mobile)",
+  "scripts": {
+    "install:all": "npm --prefix apps/api install && npm --prefix apps/admin install && npm --prefix apps/mobile install",
+    "db": "npm --prefix apps/api run db:start",
+    "api": "npm --prefix apps/api run dev",
+    "admin": "npm --prefix apps/admin run dev",
+    "mobile": "npm --prefix apps/mobile run start"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.expo/
+web-build/
+apps/api/uploads/
+apps/api/src/generated/
+*.log
+.DS_Store

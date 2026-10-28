@@ -1,0 +1,463 @@
+// EFFEX Trade - modelo de dados da promotoria
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  SUPERVISOR
+  VENDEDOR
+  PROMOTOR
+}
+
+enum VisitStatus {
+  PENDENTE // não feito
+  EM_ATENDIMENTO
+  CONCLUIDA // feito
+  JUSTIFICADA
+  CANCELADA // substituída por outro cliente
+}
+
+enum VisitOrigin {
+  ROTEIRO
+  EXTRA
+  SUBSTITUICAO
+}
+
+enum PhotoType {
+  FACHADA // obrigatória na abertura do atendimento
+  ANTES
+  DEPOIS
+  RUPTURA
+  VENCIMENTO
+  ATIVIDADE_EXTRA
+}
+
+enum AuditStatus {
+  APROVADA
+  REPROVADA
+}
+
+enum ReviewVerdict {
+  CORRETA
+  INCORRETA
+}
+
+enum RequestStatus {
+  PENDENTE
+  APROVADA
+  NEGADA
+  CANCELADA
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  login        String   @unique
+  email        String?
+  phone        String?
+  passwordHash String
+  role         Role
+  active       Boolean  @default(true)
+  supervisorId String?
+  supervisor   User?    @relation("Team", fields: [supervisorId], references: [id])
+  team         User[]   @relation("Team")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  clientsAsSeller   Client[]            @relation("ClientSeller")
+  routeItems        RouteItem[]
+  workDays          WorkDay[]
+  visits            Visit[]
+  pings             LocationPing[]
+  photoAudits       PhotoAudit[]
+  auditReviews      AuditReview[]
+  requests          PermissionRequest[] @relation("RequestPromotor")
+  requestsCreated   PermissionRequest[] @relation("RequestCreator")
+  requestsDecided   PermissionRequest[] @relation("RequestDecider")
+  photosReviewed    Photo[]             @relation("PhotoReviewer")
+  tasksCreated      Task[]              @relation("TaskCreator")
+  tasksAssigned     Task[]              @relation("TaskPromotor")
+  settings          PromotorSetting[]
+  alerts            Alert[]             @relation("AlertPromotor")
+  alertsAcknowledged Alert[]            @relation("AlertAck")
+}
+
+model Client {
+  id             String   @id @default(cuid())
+  code           String?  @unique // código do cliente no ERP
+  name           String
+  tradeName      String?
+  document       String? // CNPJ
+  address        String?
+  city           String?
+  state          String?
+  latitude       Float
+  longitude      Float
+  geofenceRadius Int? // sobrescreve o raio padrão das regras (metros)
+  sellerId       String?
+  seller         User?    @relation("ClientSeller", fields: [sellerId], references: [id])
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  routeItems RouteItem[]
+  visits     Visit[]
+  tasks      Task[]
+  mix        ClientProduct[]
+}
+
+/// Roteiro fixo: quais clientes o promotor atende em cada dia da semana, e em que ordem
+model RouteItem {
+  id         String @id @default(cuid())
+  promotorId String
+  promotor   User   @relation(fields: [promotorId], references: [id], onDelete: Cascade)
+  clientId   String
+  client     Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  weekday    Int // 0 = domingo ... 6 = sábado
+  position   Int
+
+  @@index([promotorId, weekday])
+}
+
+/// Jornada do promotor em uma data. As visitas são geradas a partir do roteiro fixo no início do dia.
+model WorkDay {
+  id         String    @id @default(cuid())
+  promotorId String
+  promotor   User      @relation(fields: [promotorId], references: [id], onDelete: Cascade)
+  date       DateTime  @db.Date
+  /// Ponto de início do trabalho: abertura do primeiro atendimento
+  startedAt  DateTime?
+  startLat   Float?
+  startLng   Float?
+  /// Ponto de fim do trabalho: horário da última atividade (check-out, foto ou justificativa)
+  endedAt    DateTime?
+  endLat     Float?
+  endLng     Float?
+  /// Quando o roteiro foi encerrado (pelo promotor ou pelo sistema)
+  closedAt   DateTime?
+
+  /// Almoço: nenhuma atividade no intervalo; a volta é a abertura (ou justificativa) do próximo cliente
+  lunchStartedAt DateTime?
+  lunchEndedAt   DateTime?
+  lunchLat       Float?
+  lunchLng       Float?
+  createdAt  DateTime  @default(now())
+
+  visits Visit[]
+  alerts Alert[]
+
+  @@unique([promotorId, date])
+}
+
+/// Alerta para o supervisor (ex.: almoço acima do limite). Criado pelo servidor; o supervisor marca "ciente".
+model Alert {
+  id               String    @id @default(cuid())
+  type             String // ALMOCO_LONGO
+  promotorId       String
+  promotor         User      @relation("AlertPromotor", fields: [promotorId], references: [id], onDelete: Cascade)
+  workDayId        String?
+  workDay          WorkDay?  @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  message          String
+  createdAt        DateTime  @default(now())
+  /// Situação acabou (ex.: o promotor voltou do almoço)
+  resolvedAt       DateTime?
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+  acknowledgedBy   User?     @relation("AlertAck", fields: [acknowledgedById], references: [id])
+
+  @@unique([type, workDayId])
+  @@index([acknowledgedAt])
+}
+
+model Visit {
+  id         String      @id @default(cuid())
+  workDayId  String
+  workDay    WorkDay     @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  promotorId String
+  promotor   User        @relation(fields: [promotorId], references: [id])
+  clientId   String
+  client     Client      @relation(fields: [clientId], references: [id])
+  date       DateTime    @db.Date
+  position   Int
+  origin     VisitOrigin @default(ROTEIRO)
+  status     VisitStatus @default(PENDENTE)
+
+  checkinAt       DateTime?
+  checkinLat      Float?
+  checkinLng      Float?
+  checkinAccuracy Float?
+  checkinDistance Float? // metros até o cliente no check-in
+
+  checkoutAt       DateTime?
+  checkoutLat      Float?
+  checkoutLng      Float?
+  checkoutDistance Float?
+
+  geofenceWaived Boolean @default(false) // liberado pelo supervisor para check-in fora da cerca
+  photosWaived   Boolean @default(false) // liberado pelo supervisor sem fotos obrigatórias
+
+  /// Encerrado pelo sistema ao abrir o próximo atendimento (saída = última foto tirada)
+  autoClosed         Boolean   @default(false)
+  /// Promotor confirmou que os produtos do mix ausentes nas fotos de depois são ruptura
+  ruptureConfirmedAt DateTime?
+
+  justificationReasonId String?
+  justificationReason   JustificationReason? @relation(fields: [justificationReasonId], references: [id])
+  justificationText     String?
+  justifiedAt           DateTime?
+  justifyLat            Float?
+  justifyLng            Float?
+
+  notes String?
+
+  replacesVisitId String? @unique
+  replacesVisit   Visit?  @relation("Replacement", fields: [replacesVisitId], references: [id])
+  replacedBy      Visit?  @relation("Replacement")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos          Photo[]
+  requests        PermissionRequest[]
+  ruptures        VisitRupture[]
+  taskCompletions TaskCompletion[]
+  sessions        VisitSession[]
+
+  @@index([date, promotorId])
+  @@index([clientId, date])
+}
+
+/// Cada abertura do atendimento. O promotor pode reabrir um cliente já atendido no mesmo dia e
+/// continuar de onde parou; o tempo no cliente é a soma das aberturas.
+model VisitSession {
+  id               String    @id @default(cuid())
+  visitId          String
+  visit            Visit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  checkinAt        DateTime
+  checkinLat       Float?
+  checkinLng       Float?
+  checkinAccuracy  Float?
+  checkinDistance  Float?
+  checkoutAt       DateTime?
+  checkoutLat      Float?
+  checkoutLng      Float?
+  checkoutDistance Float?
+  autoClosed       Boolean   @default(false)
+
+  @@index([visitId])
+}
+
+model JustificationReason {
+  id       String  @id @default(cuid())
+  label    String
+  active   Boolean @default(true)
+  position Int     @default(0)
+
+  visits Visit[]
+}
+
+model Photo {
+  id        String    @id @default(cuid())
+  visitId   String
+  visit     Visit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  type      PhotoType
+  taskId    String?
+  task      Task?     @relation(fields: [taskId], references: [id])
+  path      String // caminho relativo dentro de UPLOAD_DIR
+  takenAt   DateTime
+  latitude  Float?
+  longitude Float?
+  notes     String?
+  meta      Json? // ex.: { produto, validade, quantidade }
+  createdAt DateTime  @default(now())
+
+  // Avaliação no painel administrativo
+  score        Int?
+  reviewNotes  String?
+  reviewedById String?
+  reviewedBy   User?     @relation("PhotoReviewer", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+
+  audits   PhotoAudit[]
+  products PhotoProduct[]
+
+  @@index([visitId])
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  code      String   @unique // código no ERP
+  name      String
+  brand     String?
+  category  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mixes         ClientProduct[]
+  photoProducts PhotoProduct[]
+  ruptures      VisitRupture[]
+}
+
+/// Mix do cliente: produtos que ele compra no período (fonte: planilha/ERP, a definir)
+model ClientProduct {
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
+
+  @@id([clientId, productId])
+}
+
+/// Produtos identificados pelo promotor numa foto de depois
+model PhotoProduct {
+  photoId   String
+  photo     Photo   @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@id([photoId, productId])
+}
+
+/// Ruptura confirmada: produto do mix do cliente que não apareceu nas fotos de depois
+model VisitRupture {
+  visitId   String
+  visit     Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@id([visitId, productId])
+}
+
+/// Auditoria de foto feita por vendedor (ou supervisor)
+model PhotoAudit {
+  id            String      @id @default(cuid())
+  photoId       String
+  photo         Photo       @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  auditorId     String
+  auditor       User        @relation(fields: [auditorId], references: [id])
+  status        AuditStatus
+  justification String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  review AuditReview?
+
+  @@unique([photoId, auditorId])
+}
+
+/// Auditoria da auditoria: o supervisor confere a decisão do vendedor
+model AuditReview {
+  id           String        @id @default(cuid())
+  auditId      String        @unique
+  audit        PhotoAudit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  supervisorId String
+  supervisor   User          @relation(fields: [supervisorId], references: [id])
+  verdict      ReviewVerdict
+  comment      String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// Solicitação de liberação do promotor (ou liberação direta do supervisor)
+model PermissionRequest {
+  id           String        @id @default(cuid())
+  type         String // ver src/services/permissions.ts
+  status       RequestStatus @default(PENDENTE)
+  date         DateTime      @db.Date
+  promotorId   String
+  promotor     User          @relation("RequestPromotor", fields: [promotorId], references: [id])
+  visitId      String?
+  visit        Visit?        @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  payload      Json?
+  reason       String?
+  latitude     Float?
+  longitude    Float?
+  createdById  String
+  createdBy    User          @relation("RequestCreator", fields: [createdById], references: [id])
+  decidedById  String?
+  decidedBy    User?         @relation("RequestDecider", fields: [decidedById], references: [id])
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime      @default(now())
+
+  @@index([status, date])
+}
+
+/// Atividade extra solicitada ao promotor (ex.: montar ponta de gôndola de campanha)
+model Task {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  clientId      String?
+  client        Client?  @relation(fields: [clientId], references: [id])
+  promotorId    String?
+  promotor      User?    @relation("TaskPromotor", fields: [promotorId], references: [id])
+  startDate     DateTime @db.Date
+  endDate       DateTime @db.Date
+  requiresPhoto Boolean  @default(true)
+  /// Obrigatória: o promotor não encerra o atendimento sem concluí-la
+  required      Boolean  @default(false)
+  active        Boolean  @default(true)
+  createdById   String
+  createdBy     User     @relation("TaskCreator", fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+
+  photos      Photo[]
+  completions TaskCompletion[]
+}
+
+/// Atividade extra concluída num atendimento (com foto ou marcada como feita, conforme a atividade)
+model TaskCompletion {
+  id          String   @id @default(cuid())
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  visitId     String
+  visit       Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  completedAt DateTime @default(now())
+  notes       String?
+
+  @@unique([taskId, visitId])
+}
+
+model LocationPing {
+  id         String   @id @default(cuid())
+  promotorId String
+  promotor   User     @relation(fields: [promotorId], references: [id], onDelete: Cascade)
+  latitude   Float
+  longitude  Float
+  accuracy   Float?
+  mocked     Boolean  @default(false)
+  battery    Float?
+  recordedAt DateTime
+  receivedAt DateTime @default(now())
+
+  @@index([promotorId, recordedAt])
+}
+
+/// Regras configuráveis (chave -> valor JSON). Padrões e validação em src/services/settings.ts
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+/// Exceção de regra para um promotor (sobrescreve a regra geral)
+model PromotorSetting {
+  promotorId String
+  promotor   User     @relation(fields: [promotorId], references: [id], onDelete: Cascade)
+  key        String
+  value      Json
+  updatedAt  DateTime @updatedAt
+
+  @@id([promotorId, key])
+}
