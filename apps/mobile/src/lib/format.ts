@@ -128,6 +128,11 @@ export function formatDistance(meters: number | null | undefined) {
   return meters >= 1000 ? `${(meters / 1000).toFixed(1).replace('.', ',')} km` : `${Math.round(meters)} m`
 }
 
+/** "Salvador - BA" */
+export function placeOf(client: { city: string | null; state?: string | null }) {
+  return [client.city, client.state].filter(Boolean).join(' - ')
+}
+
 /** Data local de hoje AAAA-MM-DD (aparelho). */
 export function todayLocal() {
   const d = new Date()

@@ -7,7 +7,7 @@ import { Empty, ErrorBox, Field, Loading, Modal, PageHead, Pager } from '../ui'
 
 const PAGE_SIZE = 50
 
-/** Normaliza o cabeçalho da planilha: minúsculas, sem acento. */
+/** Normaliza o cabeçalho da planilha: minúsculas, sem acento, espaços viram _ ("Razão social" = razao_social). */
 function readTable(text: string) {
   const table = parseCsv(text)
   const header = (table[0] ?? []).map((h) =>
@@ -15,7 +15,8 @@ function readTable(text: string) {
       .trim()
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[̀-ͯ]/g, ''),
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/\s+/g, '_'),
   )
   return { header, rows: table.slice(1).map((r) => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? '').trim()]))) }
 }
@@ -215,9 +216,12 @@ function ImportProducts({ onClose }: { onClose: () => void }) {
   )
 }
 
+type MixClient = { id: string | null; name: string | null; legalName: string | null; city: string | null; state: string | null }
+const mixClientKey = (c: MixClient) => c.id ?? [c.name, c.legalName, c.city, c.state].join('|').toLowerCase()
+
 function ImportMix({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
-  const [rows, setRows] = useState<{ clientCode: string; productCode: string }[]>([])
+  const [rows, setRows] = useState<{ client: MixClient; productCode: string }[]>([])
   const [problem, setProblem] = useState<string | null>(null)
   const run = useMutation({
     mutationFn: () =>
@@ -230,11 +234,21 @@ function ImportMix({ onClose }: { onClose: () => void }) {
   const onFile = async (file: File) => {
     run.reset()
     const { header, rows } = readTable(await file.text())
-    const missing = ['cliente_codigo', 'produto_codigo'].filter((c) => !header.includes(c))
-    setProblem(missing.length ? `Faltam colunas obrigatórias: ${missing.join(', ')}.` : null)
-    setRows(missing.length ? [] : rows.filter((r) => r.cliente_codigo && r.produto_codigo).map((r) => ({ clientCode: r.cliente_codigo!, productCode: r.produto_codigo! })))
+    const byId = header.includes('cliente_id')
+    const missing = [...(byId ? [] : ['nome_fantasia', 'cidade', 'uf'].filter((c) => !header.includes(c))), ...(header.includes('produto_codigo') ? [] : ['produto_codigo'])]
+    setProblem(missing.length ? `Faltam colunas: ${missing.join(', ')}${byId ? '' : ' (ou use a coluna cliente_id)'}.` : null)
+    setRows(
+      missing.length
+        ? []
+        : rows
+            .filter((r) => r.produto_codigo && (r.cliente_id || r.nome_fantasia || r.razao_social))
+            .map((r) => ({
+              client: { id: r.cliente_id || null, name: r.nome_fantasia || null, legalName: r.razao_social || null, city: r.cidade || null, state: r.uf || null },
+              productCode: r.produto_codigo!,
+            })),
+    )
   }
-  const clients = new Set(rows.map((r) => r.clientCode)).size
+  const clients = new Set(rows.map((r) => mixClientKey(r.client))).size
   return (
     <Modal
       title="Importar mix dos clientes"
@@ -256,7 +270,11 @@ function ImportMix({ onClose }: { onClose: () => void }) {
         <p style={{ margin: 0 }}>
           Uma linha para cada produto que o cliente compra no período. Para cada cliente que aparece na planilha, o mix anterior é trocado pelo da planilha; os demais clientes não mudam.
         </p>
-        <code className="small" style={{ background: 'var(--surface)', padding: 10, borderRadius: 4 }}>cliente_codigo;produto_codigo</code>
+        <code className="small" style={{ background: 'var(--surface)', padding: 10, borderRadius: 4 }}>nome_fantasia;cidade;uf;produto_codigo</code>
+        <p className="small muted" style={{ margin: 0 }}>
+          Com dois clientes de mesmo nome fantasia na cidade, inclua a coluna razao_social para desempatar. Também dá para usar a coluna cliente_id no lugar de
+          nome_fantasia, cidade e uf (o id está na planilha baixada em Clientes).
+        </p>
         <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         {problem && <div className="alert">{problem}</div>}
         {rows.length > 0 && !run.data && (

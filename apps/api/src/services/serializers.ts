@@ -23,25 +23,24 @@ export function serializePhoto(photo: Photo & { products?: { product: Product }[
   }
 }
 
-export function serializeClient(client: Client, defaultRadius?: number) {
+export function serializeClient(client: Client) {
   return {
     id: client.id,
-    code: client.code,
+    /** Nome fantasia */
     name: client.name,
-    tradeName: client.tradeName,
-    document: client.document,
-    address: client.address,
+    /** Razão social */
+    legalName: client.legalName,
     city: client.city,
     state: client.state,
     latitude: client.latitude,
     longitude: client.longitude,
-    geofenceRadius: client.geofenceRadius ?? defaultRadius ?? null,
-    sellerId: client.sellerId,
     active: client.active,
   }
 }
 
-export function serializeUser(user: Pick<User, 'id' | 'name' | 'login' | 'email' | 'phone' | 'role' | 'active' | 'supervisorId' | 'createdAt'>) {
+export function serializeUser(
+  user: Pick<User, 'id' | 'name' | 'login' | 'email' | 'phone' | 'role' | 'active' | 'supervisorId' | 'createdAt'> & { areas?: { state: string; city: string | null }[] },
+) {
   return {
     id: user.id,
     name: user.name,
@@ -51,6 +50,8 @@ export function serializeUser(user: Pick<User, 'id' | 'name' | 'login' | 'email'
     role: user.role,
     active: user.active,
     supervisorId: user.supervisorId,
+    /** Cidades atendidas (sem cidade = a UF inteira) */
+    areas: user.areas?.map((a) => ({ state: a.state, city: a.city })),
     createdAt: user.createdAt,
   }
 }
@@ -65,7 +66,7 @@ type VisitWithRelations = Visit & {
   scheduledVisit?: (ScheduledVisit & { createdBy: { name: string } }) | null
 }
 
-export function serializeVisit(visit: VisitWithRelations, defaultRadius?: number) {
+export function serializeVisit(visit: VisitWithRelations) {
   return {
     id: visit.id,
     date: fromDbDate(visit.date),
@@ -74,7 +75,7 @@ export function serializeVisit(visit: VisitWithRelations, defaultRadius?: number
     status: visit.status,
     /** Estrutura do atendimento (etapas) */
     modules: visit.modules,
-    client: serializeClient(visit.client, defaultRadius),
+    client: serializeClient(visit.client),
     checkinAt: visit.checkinAt,
     checkinDistance: visit.checkinDistance,
     checkoutAt: visit.checkoutAt,

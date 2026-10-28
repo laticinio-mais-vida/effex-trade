@@ -211,7 +211,6 @@ function PhotoViewer({
           <dl className="kv">
             <dt>Cliente</dt>
             <dd>
-              {photo.client.code ? `${photo.client.code} · ` : ''}
               {photo.client.name}
               {photo.client.city ? `, ${photo.client.city}` : ''}
             </dd>

@@ -16,6 +16,9 @@ const reportInclude = {
 type ReportVisit = Prisma.VisitGetPayload<{ include: typeof reportInclude }>
 
 const round = (n: number) => Math.round(n * 10) / 10
+/** Ponto do cliente; sem localização, o trecho fica sem quilometragem. */
+const pointOf = (c: { latitude: number | null; longitude: number | null }): LatLng | null =>
+  c.latitude != null && c.longitude != null ? { latitude: c.latitude, longitude: c.longitude } : null
 
 /**
  * Relatório de execução: tempo em cada cliente, deslocamento entre clientes
@@ -133,10 +136,11 @@ async function computeTravel(dayVisits: ReportVisit[]) {
         travelKm: prev?.travelKm ?? null,
         afterLunch: afterLunch || !!prev?.afterLunch,
       })
-      if (prevClient) legs.push({ visitId: v.id, from: prevClient, to: v.client })
+      const here = pointOf(v.client)
+      if (prevClient && here) legs.push({ visitId: v.id, from: prevClient, to: here })
     }
     prevEnd = s.checkoutAt ?? s.checkinAt
-    prevClient = v.client
+    prevClient = pointOf(v.client)
   }
 
   const distances = await legDistances(legs.map((l) => [l.from, l.to]))
@@ -163,7 +167,7 @@ function toRow(v: ReportVisit, travel?: Travel) {
     status: v.status,
     modules: v.modules,
     stockConfirmedAt: v.stockConfirmedAt,
-    client: { id: v.client.id, code: v.client.code, name: v.client.name, city: v.client.city },
+    client: { id: v.client.id, name: v.client.name, city: v.client.city },
     checkinAt: v.checkinAt,
     checkoutAt: v.checkoutAt,
     // Tempo no cliente = soma das aberturas encerradas

@@ -2,6 +2,7 @@ import type { AuthUser } from '../auth'
 import { isUniqueViolation, prisma, Prisma, type VisitModule } from '../db'
 import { addDays, fromDbDate, toDbDate, todayIn } from '../lib/dates'
 import { badRequest, conflict, notFound } from '../lib/errors'
+import { assertClientInArea, clientPoint } from './clients'
 import { fallsOn, routeRule } from './route-frequency'
 import { promotorScope } from './scope'
 import { serializeClient } from './serializers'
@@ -53,13 +54,17 @@ type ScheduleInput = {
  * e fora da ordem do roteiro; num dia futuro, fica agendada e entra quando o dia for gerado.
  */
 export async function scheduleVisit(user: AuthUser, input: ScheduleInput) {
-  const promotor = await prisma.user.findFirst({ where: { id: input.promotorId, active: true, ...promotorScope(user) }, select: { id: true } })
+  const promotor = await prisma.user.findFirst({ where: { id: input.promotorId, active: true, ...promotorScope(user) }, select: { id: true, name: true, role: true } })
   if (!promotor) throw notFound('Promotor')
   const today = todayIn()
   if (input.date < today) throw badRequest('Escolha hoje ou um dia futuro.')
   if (input.date > addDays(today, SCHEDULE_DAYS_AHEAD)) throw badRequest(`Agende com até ${SCHEDULE_DAYS_AHEAD} dias de antecedência.`)
   const client = await prisma.client.findUnique({ where: { id: input.clientId } })
   if (!client || !client.active) throw notFound('Cliente')
+  // O cliente precisa estar nas cidades de quem agenda e nas do promotor
+  await assertClientInArea({ id: user.sub, role: user.role }, client, 'você')
+  await assertClientInArea(promotor, client)
+  clientPoint(client)
   const modules = input.modules ?? DEFAULT_MODULES
   if (input.activity && !modules.includes('ATIVIDADES')) throw badRequest('Para escrever uma atividade, inclua a etapa de atividade extra.')
   // Só com atividades extras, a visita precisa de uma atividade: sem ela o promotor iria ao cliente sem nada para fazer

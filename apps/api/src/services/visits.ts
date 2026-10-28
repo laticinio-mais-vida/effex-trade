@@ -4,6 +4,7 @@ import { badRequest, conflict, forbidden, notFound, ruleViolation } from '../lib
 import { distanceMeters, formatDistance } from '../lib/geo'
 import type { UploadedImage } from '../lib/multipart'
 import type { LocationInput } from '../lib/validate'
+import { assertClientInArea, clientPoint } from './clients'
 import { productRef, serializePhoto, serializeVisit } from './serializers'
 import { stampPhoto } from './photo-stamp'
 import { getSettings, routeOrderEnforced, type Settings } from './settings'
@@ -178,7 +179,7 @@ function pendingRequiredTasks(visit: FullVisit, ctx: TaskContext) {
 
 function serializeFull(visit: FullVisit, settings: Settings, ctx: TaskContext) {
   return {
-    ...serializeVisit(visit, settings.geofenceRadiusMeters),
+    ...serializeVisit(visit),
     progress: visitProgress(visit, settings),
     tasks: tasksOfVisit(ctx, visit),
   }
@@ -403,6 +404,8 @@ export async function addExtraVisit(promotorId: string, clientId: string) {
   if (!settings.allowExtraVisits) throw forbidden('A inclusão de clientes extras está desativada nas regras.', 'EXTRA_DESATIVADO')
   const client = await prisma.client.findUnique({ where: { id: clientId } })
   if (!client || !client.active) throw notFound('Cliente')
+  await assertClientInArea({ id: promotorId, role: 'PROMOTOR' }, client, 'você')
+  clientPoint(client)
 
   const date = todayIn()
   const workDay = await ensureWorkDay(promotorId, date)
@@ -495,8 +498,9 @@ async function openVisit(promotorId: string, visitId: string, loc: LocationInput
     }
   }
 
-  const radius = visit.client.geofenceRadius ?? settings.geofenceRadiusMeters
-  const distance = distanceMeters(loc.latitude, loc.longitude, visit.client.latitude, visit.client.longitude)
+  const radius = settings.geofenceRadiusMeters
+  const point = clientPoint(visit.client)
+  const distance = distanceMeters(loc.latitude, loc.longitude, point.latitude, point.longitude)
   if (distance > radius && !visit.geofenceWaived) {
     throw ruleViolation(
       `Você está a ${formatDistance(distance)} do cliente. O check-in só é permitido a até ${radius} m. Se estiver no local, peça liberação ao supervisor.`,
@@ -607,8 +611,9 @@ export async function checkout(promotorId: string, visitId: string, loc: Locatio
     })
   }
 
-  const radius = visit.client.geofenceRadius ?? settings.geofenceRadiusMeters
-  const distance = loc ? distanceMeters(loc.latitude, loc.longitude, visit.client.latitude, visit.client.longitude) : null
+  const radius = settings.geofenceRadiusMeters
+  const point = clientPoint(visit.client)
+  const distance = loc ? distanceMeters(loc.latitude, loc.longitude, point.latitude, point.longitude) : null
   if (settings.requireGeofenceOnCheckout && !visit.geofenceWaived) {
     if (distance == null) throw ruleViolation('Ative o GPS: o check-out precisa confirmar que você está no cliente.', 'LOCALIZACAO_OBRIGATORIA')
     if (distance > radius) {
@@ -651,8 +656,11 @@ export async function justify(promotorId: string, visitId: string, input: { reas
       throw ruleViolation('Ative o GPS: a volta do almoço precisa confirmar que você está no cliente.', 'LOCALIZACAO_OBRIGATORIA')
     }
     const here = { latitude: input.latitude, longitude: input.longitude }
-    const inside = (c: { latitude: number; longitude: number; geofenceRadius: number | null }) =>
-      distanceMeters(here.latitude, here.longitude, c.latitude, c.longitude) <= (c.geofenceRadius ?? settings.geofenceRadiusMeters)
+    const distanceTo = (c: { name: string; latitude: number | null; longitude: number | null }) => {
+      const point = clientPoint(c)
+      return distanceMeters(here.latitude, here.longitude, point.latitude, point.longitude)
+    }
+    const inside = (c: { name: string; latitude: number | null; longitude: number | null }) => distanceTo(c) <= settings.geofenceRadiusMeters
     let allowed = visit.geofenceWaived || inside(visit.client)
     if (!allowed) {
       const others = await prisma.visit.findMany({
@@ -664,11 +672,11 @@ export async function justify(promotorId: string, visitId: string, input: { reas
       allowed = !!next && inside(next.client)
     }
     if (!allowed) {
-      const distance = distanceMeters(here.latitude, here.longitude, visit.client.latitude, visit.client.longitude)
+      const distance = distanceTo(visit.client)
       throw ruleViolation(
         `Você está a ${formatDistance(distance)} do cliente. Durante o almoço, a justificativa (volta do almoço) precisa ser feita na cerca deste cliente ou do próximo cliente do roteiro.`,
         'FORA_DA_CERCA',
-        { distance: Math.round(distance), radius: visit.client.geofenceRadius ?? settings.geofenceRadiusMeters },
+        { distance: Math.round(distance), radius: settings.geofenceRadiusMeters },
       )
     }
   }
@@ -725,9 +733,9 @@ export async function confirmStockCount(promotorId: string, visitId: string) {
 // ---------------------------------------------------------------------------
 
 /** Dados gravados na faixa da foto (data e hora, tipo, cliente e promotor). */
-async function stampInfo(promotorId: string, client: { name: string; code: string | null }, type: PhotoType, takenAt: Date) {
+async function stampInfo(promotorId: string, client: { name: string }, type: PhotoType, takenAt: Date) {
   const promotor = await prisma.user.findUnique({ where: { id: promotorId }, select: { name: true } })
-  return { takenAt, type, clientName: client.name, clientCode: client.code, promotorName: promotor?.name ?? '' }
+  return { takenAt, type, clientName: client.name, promotorName: promotor?.name ?? '' }
 }
 
 export async function addPhoto(

@@ -235,14 +235,17 @@ export function ClientPicker({
   onPick,
   onPickMany,
   selectedIds,
-  placeholder = 'Buscar cliente por nome, código ou cidade',
+  placeholder = 'Buscar cliente por nome, razão social ou cidade',
   exclude = [],
+  forPromotorId,
 }: {
   onPick: (c: Client) => void
   onPickMany?: (clients: Client[]) => void
   selectedIds?: string[]
   placeholder?: string
   exclude?: string[]
+  /** Só clientes que podem entrar no roteiro deste promotor: das cidades dele e com localização */
+  forPromotorId?: string
 }) {
   const multi = selectedIds !== undefined
   const [search, setSearch] = useState('')
@@ -259,8 +262,11 @@ export function ClientPicker({
     return () => document.removeEventListener('mousedown', close)
   }, [])
   const { data } = useQuery({
-    queryKey: ['client-search', debounced],
-    queryFn: () => api<Paged<Client>>('/admin/clients', { query: { search: debounced, active: true, pageSize: 20 } }),
+    queryKey: ['client-search', debounced, forPromotorId],
+    queryFn: () =>
+      api<Paged<Client>>('/admin/clients', {
+        query: { search: debounced, active: true, pageSize: 20, ...(forPromotorId ? { promotorId: forPromotorId, located: true } : {}) },
+      }),
     enabled: open,
   })
   const items = data?.items.filter((c) => !exclude.includes(c.id)) ?? []
@@ -305,8 +311,8 @@ export function ClientPicker({
                     {on ? '✓' : ''}
                   </span>
                 )}
-                <strong>{c.code ? `${c.code} · ` : ''}{c.name}</strong>
-                <span className="muted"> {c.city ?? ''}</span>
+                <strong>{c.name}</strong>
+                <span className="muted"> {[c.city, c.state].filter(Boolean).join(' - ')}</span>
               </button>
             )
           })}

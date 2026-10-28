@@ -40,24 +40,36 @@ O banco local fica em `%LOCALAPPDATA%\effex-trade` (fora do OneDrive, porque a s
 
 | Login | Perfil | Observação |
 |---|---|---|
-| `admin` | Administrador | painel completo, altera regras e usuários |
-| `supervisor` | Supervisor (Renata Moura) | painel da equipe e módulo supervisor no app |
-| `vendedor1`, `vendedor2` | Vendedor | auditoria de fotos no app |
-| `promotor1`, `promotor2`, `promotor3` | Promotor | roteiro do dia no app |
+| `admin` | Administrador | painel completo, altera regras e usuários; vê todos os clientes |
+| `supervisor` | Supervisor (Renata Moura) | painel da equipe e módulo supervisor no app; cidades: BA inteira |
+| `vendedor1`, `vendedor2` | Vendedor | auditoria de fotos no app; cidades: Salvador (o 2 também Lauro de Freitas) |
+| `promotor1`, `promotor2`, `promotor3` | Promotor | roteiro do dia no app; cidades: Salvador (o 3 também Lauro de Freitas) |
 
-O seed cria 18 clientes em Salvador-BA, roteiros de segunda a sábado, 3 dias de histórico (visitas, fotos, rastro de GPS, auditorias e conferências) e o dia de hoje em andamento. Rode `npm run db:seed` de novo a qualquer momento para restaurar.
+O seed cria 18 clientes em Salvador-BA (nos roteiros) e 4 em Lauro de Freitas-BA (um deles sem localização), roteiros de segunda a sábado, 3 dias de histórico (visitas, fotos, rastro de GPS, auditorias e conferências) e o dia de hoje em andamento. Rode `npm run db:seed` de novo a qualquer momento para restaurar.
 
-Para testar o check-in com o celular de verdade, cadastre no painel um cliente no endereço onde você está (Clientes > Novo cliente > clique no mapa) e coloque-o no roteiro de hoje do promotor, ou peça a liberação "check-in fora da cerca" pelo app e aprove como supervisor.
+Para testar o check-in com o celular de verdade, cadastre no painel um cliente no lugar onde você está (Clientes > Novo cliente > clique no mapa), numa cidade atendida pelo promotor, e coloque-o no roteiro de hoje dele, ou peça a liberação "check-in fora da cerca" pelo app e aprove como supervisor.
 
 ## O que já funciona
 
 **App do promotor:** roteiro do dia gerado a partir do roteiro fixo, que começa sozinho no primeiro check-in; inclusão de clientes extras (inclusive repetidos); abertura do atendimento com foto da fachada e cerca eletrônica validada na API, bloqueio de GPS falso e de fora da ordem; atendimento guiado (antes, depois identificando os produtos, confirmação de ruptura contra o mix do cliente); fotos só pela câmera (também vencimento e atividade extra); check-out na cerca; encerramento automático do atendimento esquecido; encerramento do roteiro só completo ou com as lojas pendentes justificadas; pedidos de liberação ao supervisor; envio da localização a cada 3 minutos.
 
-**Painel:** visão do dia; mapa com atualização automática (3 min), clientes do dia por status (feito, justificado, não feito, em atendimento), posição e rastro do promotor, filtro por promotor; relatório de execução (tempo em cada cliente, deslocamento, jornadas, rupturas, justificativas, encerramentos automáticos, exportação para planilha); catálogo de produtos e mix dos clientes (com importação por planilha); avaliação de fotos com nota e observação; liberações; correções de auditoria com PDF para o vendedor; cadastros (usuários, clientes com mapa e importação por planilha, roteiros com seleção de vários clientes e frequência por dia, atividades extras, motivos) e regras.
+**Painel:** visão do dia; mapa com atualização automática (3 min), clientes do dia por status (feito, justificado, não feito, em atendimento), posição e rastro do promotor, filtro por promotor; relatório de execução (tempo em cada cliente, deslocamento, jornadas, rupturas, justificativas, encerramentos automáticos, exportação para planilha); catálogo de produtos e mix dos clientes (com importação por planilha); avaliação de fotos com nota e observação; liberações; correções de auditoria com PDF para o vendedor; cadastros (usuários de todos os perfis com as cidades atendidas, clientes com mapa e planilha para baixar e importar a localização, roteiros com seleção de vários clientes e frequência por dia, atividades extras, motivos) e regras.
 
 **Supervisor (app):** caixa de pedidos de liberação, liberação direta (inverter ordem, substituir cliente, liberar sem fotos, check-in fora da cerca), visita pontual (incluir um cliente para o promotor hoje ou num dia futuro, com recado), auditoria das fotos dos promotores e conferência das auditorias dos vendedores.
 
-**Vendedor (app):** auditoria das fotos dos seus clientes, aprovando ou reprovando com justificativa.
+**Vendedor (app):** auditoria das fotos dos clientes das suas cidades, aprovando ou reprovando com justificativa.
+
+## Clientes e cidades dos usuários
+
+O cadastro do cliente tem só **nome fantasia** (o nome mostrado em todo o sistema), **razão social**, **cidade**, **UF** e **localização** (latitude e longitude). Do banco de dados da empresa virão só os nomes; a localização entra pelo painel:
+
+1. Em **Clientes**, use **Baixar planilha** (ou "Baixar planilha deles", só os sem localização). A planilha tem `id;razao_social;nome_fantasia;cidade;uf;latitude;longitude`.
+2. Preencha latitude e longitude (com vírgula ou ponto; no lugar das duas, também vale uma coluna `coordenadas` com o texto copiado do Google Maps, ex.: `-12.9714, -38.5014`).
+3. **Importar planilha** (só administrador). A linha com `id` altera aquele cliente; sem `id`, o cliente é procurado pelo nome fantasia (ou razão social) na mesma cidade e UF, sem diferença de acento e maiúsculas, e é cadastrado se não existir. Com dois clientes de mesmo nome fantasia na cidade, a razão social desempata; se nem ela resolver, a linha volta pedindo o `id`. Latitude e longitude vazias mantêm a localização atual.
+
+Cliente **sem localização** fica cadastrado, mas não entra em roteiro, visita pontual, cliente extra nem substituição (não há como validar a cerca). Depois de ter localização, ela não pode ser apagada, só corrigida. O raio da cerca é o das regras, igual para todos os clientes.
+
+**Promotor, vendedor e supervisor** têm no cadastro (Usuários) as **cidades atendidas**: UF + cidade, ou a UF inteira. Só os clientes dessas cidades aparecem para eles: o promotor na busca de cliente extra e de substituição, o supervisor na visita pontual e na substituição (cruzando também com as cidades do promotor escolhido) e na lista de clientes do painel, o vendedor e o supervisor nas fotos para auditar. O roteiro do promotor só aceita clientes das cidades dele; se uma cidade sair do cadastro, os clientes dela ficam marcados em vermelho em Roteiros e o dia só é salvo depois de tirá-los. O administrador vê todos. A comparação das cidades ignora acento e maiúsculas ("Vitória" = "VITORIA").
 
 ## Regras do promotor
 
@@ -83,9 +95,9 @@ Ficam em `apps/api/src/services/settings.ts` e são ligadas e desligadas no pain
 | Ponto | Início do trabalho = abertura do primeiro atendimento. Fim do trabalho = horário da última atividade (check-out, foto ou justificativa em campo), e não o horário em que o roteiro foi encerrado (que fica registrado à parte). |
 | Almoço | Botão "Iniciar almoço" abaixo de "Incluir cliente extra". Durante o almoço nenhuma atividade é feita; a volta é a abertura do próximo cliente (ou a justificativa dele, se estiver fechado, feita na cerca dele ou do cliente seguinte). Um almoço por dia, só depois do primeiro atendimento. Não há tempo mínimo nem horário fixo, mas se o almoço passar de 2h (configurável) o supervisor recebe um alerta no app e no painel, até marcar "ciente". O almoço sai do deslocamento e das horas trabalhadas. |
 
-Também: raio da cerca (com exceção por cliente), bloqueio de GPS falso, precisão mínima do GPS, ordem obrigatória do roteiro, clientes extras e limite por dia, tempo mínimo no cliente, tamanho mínimo da justificativa, intervalo de rastreamento, atualização do mapa e escala da nota das fotos.
+Também: raio da cerca, bloqueio de GPS falso, precisão mínima do GPS, ordem obrigatória do roteiro, clientes extras e limite por dia, tempo mínimo no cliente, tamanho mínimo da justificativa, intervalo de rastreamento, atualização do mapa e escala da nota das fotos.
 
-O **mix do cliente** (o que ele compra no período) é a base do contraste de ruptura. Enquanto a fonte definitiva não está ligada, ele é carregado no painel em **Produtos e mix** (planilha `cliente_codigo;produto_codigo`) ou editado no cadastro de cada cliente.
+O **mix do cliente** (o que ele compra no período) é a base do contraste de ruptura. Enquanto a fonte definitiva não está ligada, ele é carregado no painel em **Produtos e mix** (planilha `nome_fantasia;cidade;uf;produto_codigo`, ou `cliente_id;produto_codigo` com o id da planilha de clientes) ou editado no cadastro de cada cliente.
 
 Para criar uma regra nova: acrescente o campo em `settingsSchema`, `defaultSettings` e `settingsMeta` (o painel monta o formulário sozinho) e aplique a regra no serviço correspondente (normalmente `src/services/visits.ts`).
 

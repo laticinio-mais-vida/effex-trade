@@ -23,17 +23,17 @@ export interface User {
   supervisor?: { id: string; name: string } | null
 }
 
+/** Clientes que chegam ao app sempre têm localização (a API não deixa entrar em roteiro sem ela). */
 export interface Client {
   id: string
-  code: string | null
+  /** Nome fantasia */
   name: string
-  tradeName: string | null
-  address: string | null
+  /** Razão social */
+  legalName: string | null
   city: string | null
   state: string | null
   latitude: number
   longitude: number
-  geofenceRadius: number | null
 }
 
 export interface Product {
@@ -206,7 +206,7 @@ export interface PermissionRequest {
   status: RequestStatus
   date: string
   promotor: { id: string; name: string }
-  visit: { id: string; position: number; status: VisitStatus; client: { id: string; name: string; code: string | null } } | null
+  visit: { id: string; position: number; status: VisitStatus; client: { id: string; name: string; city: string | null } } | null
   payload: Record<string, any> | null
   reason: string | null
   createdBy: { id: string; name: string; role: Role }
@@ -234,7 +234,7 @@ export interface Audit {
 
 export interface AuditPhoto extends Photo {
   visit: { id: string; date: string; checkinAt: string | null; checkoutAt: string | null }
-  client: { id: string; code: string | null; name: string; city: string | null }
+  client: { id: string; name: string; city: string | null }
   promotor: { id: string; name: string }
   myAudit: Audit | null
   otherAudits: Audit[]
@@ -249,7 +249,7 @@ export interface VendorAudit {
   review: { verdict: ReviewVerdict; comment: string | null; supervisor: { id: string; name: string }; createdAt: string } | null
   photo: Photo
   visit: { id: string; date: string }
-  client: { id: string; code: string | null; name: string; city: string | null }
+  client: { id: string; name: string; city: string | null }
   promotor: { id: string; name: string }
 }
 

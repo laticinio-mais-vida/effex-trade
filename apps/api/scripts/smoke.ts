@@ -303,9 +303,9 @@ check('liberar cliente da ordem com o dia já liberado recusado', r.status === 4
 
 console.log('Justificativa como volta do almoço (na cerca)')
 const supervisorId = (await call(supervisor, 'GET', '/auth/me')).data.id
-let testUser = await call(admin, 'POST', '/admin/users', { name: 'Promotor Teste', login: 'promotor.teste', password: '123456', role: 'PROMOTOR', supervisorId })
+let testUser = await call(admin, 'POST', '/admin/users', { name: 'Promotor Teste', login: 'promotor.teste', password: '123456', role: 'PROMOTOR', supervisorId, areas: [{ state: 'BA', city: 'Salvador' }] })
 const testId = testUser.status === 200 ? testUser.data.id : (await call(admin, 'GET', '/admin/users?search=promotor.teste')).data[0].id
-const testClients = ((await call(admin, 'GET', '/admin/clients?pageSize=200')).data.items as any[]).slice(-3)
+const testClients = ((await call(admin, 'GET', '/admin/clients?pageSize=200&located=true&state=BA&city=Salvador')).data.items as any[]).slice(-3)
 await call(admin, 'PUT', `/admin/routes/${testId}/${weekday}`, { clientIds: testClients.map((c) => c.id) })
 const tester = await login('promotor.teste')
 const tDay = (await call(tester, 'GET', '/promotor/day')).data
@@ -348,7 +348,7 @@ console.log('Roteiro com frequência (quinzenal, mensal e personalizado)')
 const d1 = '2027-01-07'
 const w1 = 4
 const weekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay()
-const allClients = (await call(admin, 'GET', '/admin/clients?pageSize=200')).data.items as any[]
+const allClients = (await call(admin, 'GET', '/admin/clients?pageSize=200&located=true&state=BA&city=Salvador')).data.items as any[]
 const [fa, fb, fc, fd] = allClients
 // Só a quinta no roteiro do promotor de teste (o dia de hoje dele já foi gerado e não muda)
 await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, clientIds: [] })) })
@@ -530,8 +530,13 @@ check('supervisor marcou auditoria incorreta', r.status === 200 && r.data.review
 console.log('Painel: produtos, mix, relatórios, regras e PDF')
 r = await call(admin, 'GET', '/admin/products')
 check('catálogo de produtos', r.status === 200 && r.data.items.length > 0, r.data)
-r = await call(admin, 'POST', '/admin/mix/import', { rows: [{ clientCode: first.client.code, productCode: 'P001' }, { clientCode: '99999', productCode: 'P001' }] })
-check('importação de mix (com código desconhecido)', r.status === 200 && r.data.clients === 1 && r.data.unknownClients.includes('99999'), r.data)
+r = await call(admin, 'POST', '/admin/mix/import', {
+  rows: [
+    { client: { id: first.client.id }, productCode: 'P001' },
+    { client: { name: 'Cliente Inexistente', city: 'Salvador', state: 'BA' }, productCode: 'P001' },
+  ],
+})
+check('importação de mix (com cliente desconhecido)', r.status === 200 && r.data.clients === 1 && r.data.unknownClients.includes('Cliente Inexistente (Salvador - BA)'), r.data)
 r = await call(admin, 'GET', `/admin/clients/${first.client.id}/mix`)
 check('mix substituído pelo do arquivo', r.status === 200 && r.data.length === 1 && r.data[0].code === 'P001', r.data)
 r = await call(admin, 'GET', '/admin/reports/visits')
@@ -554,6 +559,79 @@ const vend = (await call(admin, 'GET', '/admin/lookups')).data.vendedores.find((
 r = await call(admin, 'GET', `/admin/audit-errors/pdf?vendedorId=${vend.id}`)
 const pdf = Buffer.from(r.data as ArrayBuffer)
 check('PDF gerado', r.status === 200 && pdf.subarray(0, 4).toString() === '%PDF', { status: r.status, size: pdf.length })
+
+console.log('Usuários de cada perfil e cidades atendidas')
+for (const role of ['PROMOTOR', 'VENDEDOR', 'SUPERVISOR', 'ADMIN']) {
+  const login = `teste.${role.toLowerCase()}`
+  const areas = role === 'ADMIN' ? [] : [{ state: 'BA', city: 'Lauro de Freitas' }]
+  r = await call(admin, 'POST', '/admin/users', { name: `Teste ${role}`, login, password: '123456', role, areas })
+  check(`administrador cria ${role.toLowerCase()}`, r.status === 200 || r.status === 409, r.data)
+}
+r = await call(admin, 'POST', '/admin/users', { name: 'Sem Cidade', login: 'teste.semcidade', password: '123456', role: 'VENDEDOR' })
+check('vendedor sem cidade recusado', r.status === 400 && r.data.code === 'CIDADE_OBRIGATORIA', r.data)
+r = await call(supervisor, 'POST', '/admin/users', { name: 'X', login: 'teste.x', password: '123456', role: 'ADMIN' })
+check('supervisor não cria usuários', r.status === 403, r.data)
+r = await call(admin, 'GET', '/admin/users?search=promotor1')
+check('usuário vem com as cidades', r.data[0]?.areas?.some((a: any) => a.city === 'Salvador'), r.data[0])
+
+const lauroOnly = await login('teste.vendedor')
+const p1 = await login('promotor1')
+const p1Id = (await call(p1, 'GET', '/auth/me')).data.id
+const cityOf = (list: any[]) => new Set(list.map((c) => c.city))
+r = await call(p1, 'GET', '/promotor/clients')
+check('promotor só vê clientes das cidades dele', r.status === 200 && r.data.length > 0 && [...cityOf(r.data)].every((c) => c === 'Salvador'), [...cityOf(r.data)])
+r = await call(promotor, 'GET', '/promotor/clients?search=Lauro')
+check('promotor de duas cidades vê as duas', r.data.some((c: any) => c.city === 'Lauro de Freitas'), r.data)
+check('cliente sem localização não aparece para o promotor', !r.data.some((c: any) => c.latitude == null), r.data)
+const lauro = (await call(admin, 'GET', '/admin/clients?state=BA&city=Lauro%20de%20Freitas&pageSize=50')).data
+const lauroLocated = lauro.items.find((c: any) => c.latitude != null)
+const unlocated = lauro.items.find((c: any) => c.latitude == null)
+check('lista de clientes conta os sem localização', lauro.missingLocation >= 1 && !!unlocated, lauro)
+r = await call(p1, 'POST', '/promotor/visits', { clientId: lauroLocated.id })
+check('cliente extra fora das cidades do promotor recusado', r.status === 403 && r.data.code === 'CLIENTE_FORA_DA_AREA', r.data)
+r = await call(admin, 'PUT', `/admin/routes/${p1Id}/0`, { clientIds: [lauroLocated.id] })
+check('roteiro com cliente fora das cidades recusado', r.status === 400 && r.data.code === 'CLIENTE_FORA_DA_AREA', r.data)
+r = await call(admin, 'PUT', `/admin/routes/${promotorId}/0`, { clientIds: [unlocated.id] })
+check('roteiro com cliente sem localização recusado', r.status === 400 && r.data.code === 'CLIENTE_SEM_LOCALIZACAO', r.data)
+r = await call(supervisor, 'GET', `/supervisor/clients?promotorId=${p1Id}&search=Lauro`)
+check('supervisor só vê clientes das cidades do promotor escolhido', r.status === 200 && r.data.length === 0, r.data)
+r = await call(admin, 'GET', `/admin/clients?promotorId=${p1Id}&located=true&pageSize=200`)
+check('busca do roteiro só com clientes das cidades do promotor', r.data.items.length > 0 && r.data.items.every((c: any) => c.city === 'Salvador'), r.data.total)
+check('vendedor de outra cidade não vê as fotos de Salvador', (await call(lauroOnly, 'GET', '/audit/summary')).data.pending === 0)
+check('vendedor de Salvador vê as fotos de Salvador', (await call(vendedor, 'GET', '/audit/summary')).data.pending > 0)
+
+console.log('Cadastro e importação de clientes')
+r = await call(admin, 'POST', '/admin/clients', { name: 'Mercado Teste', legalName: 'Teste Ltda', city: 'Salvador', state: 'BA', latitude: -12.97 })
+check('latitude sem longitude recusada', r.status === 400, r.data)
+r = await call(admin, 'POST', '/admin/clients', { name: 'Mercado Teste', city: 'Salvador', state: 'XX' })
+check('UF inválida recusada', r.status === 400, r.data)
+r = await call(admin, 'POST', '/admin/clients', { name: 'Mercadinho Só Nome', legalName: 'Só Nome ME', city: 'SALVADOR', state: 'ba' })
+check('cliente sem localização cadastrado', r.status === 200 && r.data.latitude === null && r.data.state === 'BA', r.data)
+r = await call(admin, 'GET', '/admin/client-cities')
+check('cidades com grafias diferentes viram uma só', r.data.filter((c: any) => c.state === 'BA' && c.city.toLowerCase() === 'salvador').length === 1, r.data)
+r = await call(admin, 'POST', '/admin/clients/import', {
+  clients: [
+    { line: 2, id: unlocated.id, latitude: -12.9001, longitude: -38.33 },
+    { line: 3, name: 'MERCADINHO SO NOME', city: 'Salvador', state: 'BA', latitude: -12.95, longitude: -38.45 },
+    { line: 4, name: 'Padaria Nova Importada', legalName: 'Padaria Nova Ltda', city: 'Vitória', state: 'ES', latitude: -20.3155, longitude: -40.3128 },
+    { line: 5, name: 'Padaria Nova Importada', city: 'VITORIA', state: 'ES' },
+    { line: 6, id: 'nao-existe', latitude: 1, longitude: 1 },
+  ],
+})
+check(
+  'importação: por id, pelo nome sem acento e cadastro novo',
+  r.status === 200 && r.data.updated === 3 && r.data.created === 1 && r.data.located === 3 && r.data.problems.length === 1 && r.data.problems[0].line === 6,
+  r.data,
+)
+r = await call(promotor, 'GET', '/promotor/clients?search=Portão')
+check('cliente com localização importada passa a aparecer', r.data.some((c: any) => c.id === unlocated.id), r.data)
+await call(admin, 'POST', '/admin/clients', { name: 'Padaria Nova Importada', legalName: 'Outra Padaria Ltda', city: 'Vitória', state: 'ES' })
+r = await call(admin, 'POST', '/admin/clients/import', { clients: [{ line: 2, name: 'Padaria Nova Importada', city: 'Vitoria', state: 'ES', latitude: -20.3, longitude: -40.3 }] })
+check('nome repetido na cidade sem razão social: pede o id', r.data.problems[0]?.message.includes('mais de um cliente'), r.data)
+r = await call(admin, 'POST', '/admin/clients/import', {
+  clients: [{ line: 2, name: 'Padaria Nova Importada', legalName: 'Outra Padaria Ltda', city: 'Vitoria', state: 'ES', latitude: -20.3, longitude: -40.3 }],
+})
+check('razão social desempata o nome repetido', r.data.updated === 1 && r.data.problems.length === 0, r.data)
 
 await prisma.$disconnect()
 console.log(failures === 0 ? '\nTudo certo.' : `\n${failures} verificação(ões) falharam.`)

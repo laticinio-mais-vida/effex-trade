@@ -1,4 +1,4 @@
-import type { DistanceMode, PhotoType, RequestStatus, Role, TaskRecurrence, VisitModule, VisitOrigin, VisitStatus } from './types'
+import type { Area, DistanceMode, PhotoType, RequestStatus, Role, TaskRecurrence, VisitModule, VisitOrigin, VisitStatus } from './types'
 
 export const TZ = (import.meta.env.VITE_TZ as string | undefined) ?? 'America/Bahia'
 
@@ -104,6 +104,11 @@ export const photoTypeLabel: Record<PhotoType, string> = {
 }
 
 export const roleLabel: Record<Role, string> = { ADMIN: 'Administrador', SUPERVISOR: 'Supervisor', VENDEDOR: 'Vendedor', PROMOTOR: 'Promotor' }
+
+/** "Salvador - BA" ou "BA (todas as cidades)" */
+export const areaLabel = (a: Area) => (a.city ? `${a.city} - ${a.state}` : `${a.state} (todas as cidades)`)
+
+export const UFS = ['AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO']
 
 export const requestStatusLabel: Record<RequestStatus, string> = { PENDENTE: 'Aguardando', APROVADA: 'Aprovada', NEGADA: 'Negada', CANCELADA: 'Cancelada' }
 

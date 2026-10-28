@@ -5,6 +5,7 @@ import { Banner, Button, EmptyState, Field, Muted, Screen } from '@/components/u
 import { useDay } from '@/features/promotor/DayContext'
 import { ReorderList } from '@/features/ReorderList'
 import { api, errorMessage } from '@/lib/api'
+import { placeOf } from '@/lib/format'
 import { getQuickLocation } from '@/lib/location'
 
 /** Pedido de alteração da ordem dos clientes pendentes (ex.: antecipar um cliente). */
@@ -44,7 +45,7 @@ export default function AlterarOrdem() {
     <Screen>
       <Muted>Use as setas para propor a nova sequência dos clientes ainda não atendidos. A mudança só vale depois da aprovação do supervisor.</Muted>
       <ReorderList
-        items={pending.map((v) => ({ id: v.id, title: v.client.name, subtitle: v.client.address }))}
+        items={pending.map((v) => ({ id: v.id, title: v.client.name, subtitle: placeOf(v.client) }))}
         order={order}
         original={original}
         onChange={setOrder}

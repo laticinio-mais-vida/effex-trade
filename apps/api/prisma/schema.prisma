@@ -97,7 +97,7 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  clientsAsSeller   Client[]            @relation("ClientSeller")
+  areas             UserArea[]
   routeItems        RouteItem[]
   workDays          WorkDay[]
   visits            Visit[]
@@ -117,29 +117,39 @@ model User {
   scheduledCreated  ScheduledVisit[]    @relation("ScheduledCreator")
 }
 
+/// Cidade (ou UF inteira, sem cidade) atendida por promotor, vendedor ou supervisor: só os clientes dela aparecem para ele
+model UserArea {
+  id     String  @id @default(cuid())
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  state  String // UF
+  city   String? // vazio = todas as cidades da UF
+
+  @@index([userId])
+}
+
 model Client {
-  id             String   @id @default(cuid())
-  code           String?  @unique // código do cliente no ERP
-  name           String
-  tradeName      String?
-  document       String? // CNPJ
-  address        String?
-  city           String?
-  state          String?
-  latitude       Float
-  longitude      Float
-  geofenceRadius Int? // sobrescreve o raio padrão das regras (metros)
-  sellerId       String?
-  seller         User?    @relation("ClientSeller", fields: [sellerId], references: [id])
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String // nome fantasia (é o nome mostrado em todo o sistema)
+  legalName String? // razão social
+  city      String?
+  /// Cidade sem acento, em minúsculas: é por ela que o cliente casa com as cidades dos usuários (ver src/lib/cities.ts)
+  cityKey   String?
+  state     String?
+  /// Sem localização o cliente não entra em roteiro nem visita (não há como validar a cerca)
+  latitude  Float?
+  longitude Float?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   routeItems      RouteItem[]
   visits          Visit[]
   tasks           Task[]
   mix             ClientProduct[]
   scheduledVisits ScheduledVisit[]
+
+  @@index([state, cityKey])
 }
 
 /// Roteiro fixo: quais clientes o promotor atende em cada dia da semana, e em que ordem

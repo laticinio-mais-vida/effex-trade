@@ -7,7 +7,7 @@ import { ReorderList } from '@/features/ReorderList'
 import { VisitCard } from '@/features/VisitCard'
 import { api, errorMessage } from '@/lib/api'
 import { emitBadgesChanged } from '@/lib/events'
-import { addDays, DEFAULT_MODULES, formatLongDate, formatShortDay, formatTime, isDefaultStructure, MODULE_ORDER, moduleLabels, structureLabel } from '@/lib/format'
+import { addDays, DEFAULT_MODULES, formatLongDate, formatShortDay, formatTime, isDefaultStructure, MODULE_ORDER, moduleLabels, placeOf, structureLabel } from '@/lib/format'
 import { colors, radius, space } from '@/lib/theme'
 import type { Client, PermissionTypeDef, ScheduledVisit, SupervisorDay, Visit, VisitModule } from '@/lib/types'
 import { useQuery } from '@/lib/useQuery'
@@ -67,6 +67,9 @@ export default function PromotorDia() {
   const orderApplies = !!day.routeOrderEnforced && !day.workDay?.routeOrderWaived && dayOpen
   const visitTypes = visit ? applicableTypes(visit, types, orderApplies) : []
   const upcoming = (day.scheduled ?? []).filter((s) => s.date > day.date)
+  /** Só clientes das cidades do supervisor e deste promotor */
+  const searchClients = (search: string) =>
+    api<Client[]>(`/supervisor/clients?promotorId=${encodeURIComponent(id)}${search ? `&search=${encodeURIComponent(search)}` : ''}`)
   // Hoje só entra enquanto o promotor não encerrou o roteiro
   const scheduleDates = Array.from({ length: (day.scheduleDaysAhead ?? 30) + 1 }, (_, i) => addDays(day.date, i)).filter((d) => d !== day.date || dayOpen)
 
@@ -253,11 +256,7 @@ export default function PromotorDia() {
               <>
                 <Text style={styles.label}>Cliente substituto</Text>
                 {client ? <Banner tone="success" text={`Selecionado: ${client.name}`} /> : null}
-                <ClientSearch
-                  fetcher={(search) => api<Client[]>(`/supervisor/clients${search ? `?search=${encodeURIComponent(search)}` : ''}`)}
-                  onSelect={setClient}
-                  selectedId={client?.id}
-                />
+                <ClientSearch fetcher={searchClients} onSelect={setClient} selectedId={client?.id} />
               </>
             ) : null}
             {type ? (
@@ -283,7 +282,7 @@ export default function PromotorDia() {
       </Sheet>
 
       <Sheet visible={reordering} title="Alterar ordem dos pendentes" onClose={closeAll}>
-        <ReorderList items={pending.map((v) => ({ id: v.id, title: v.client.name, subtitle: v.client.address }))} order={order} original={original} onChange={setOrder} />
+        <ReorderList items={pending.map((v) => ({ id: v.id, title: v.client.name, subtitle: placeOf(v.client) }))} order={order} original={original} onChange={setOrder} />
         <Field label="Observação para o promotor" value={note} onChangeText={setNote} multiline placeholder="Opcional" />
         {error ? <Banner tone="danger" text={error} /> : null}
         <Button title="Aplicar nova ordem" loading={busy} disabled={!orderChanged} onPress={() => grant({ type: 'ALTERAR_ORDEM', payload: { order } })} />
@@ -310,16 +309,13 @@ export default function PromotorDia() {
         <Text style={styles.label}>Cliente</Text>
         {client ? (
           <Card>
-            <Text style={[styles.text, { fontWeight: '700' }]}>
-              {client.code ? `${client.code} · ` : ''}
-              {client.name}
-            </Text>
-            {client.address || client.city ? <Muted>{[client.address, client.city].filter(Boolean).join(' · ')}</Muted> : null}
+            <Text style={[styles.text, { fontWeight: '700' }]}>{client.name}</Text>
+            {client.city ? <Muted>{placeOf(client)}</Muted> : null}
             <Button title="Trocar cliente" variant="ghost" small onPress={() => setClient(null)} />
           </Card>
         ) : (
           <ClientSearch
-            fetcher={(search) => api<Client[]>(`/supervisor/clients${search ? `?search=${encodeURIComponent(search)}` : ''}`)}
+            fetcher={searchClients}
             onSelect={setClient}
             note={(c) => (scheduleDate === day.date && busyToday(day.visits, c.id) ? 'Já está no roteiro de hoje deste promotor' : null)}
           />
@@ -410,12 +406,7 @@ function UpcomingCard({ item, today, onRemove }: { item: ScheduledVisit; today: 
       <Text style={[styles.sectionTitle, { fontSize: 16 }]} numberOfLines={2}>
         {item.client.name}
       </Text>
-      {item.client.address ? (
-        <Muted numberOfLines={1}>
-          {item.client.address}
-          {item.client.city ? ` · ${item.client.city}` : ''}
-        </Muted>
-      ) : null}
+      {item.client.city ? <Muted numberOfLines={1}>{placeOf(item.client)}</Muted> : null}
       {!isDefaultStructure(item.modules) ? <Muted>Estrutura: {structureLabel(item.modules)}</Muted> : null}
       {item.activity ? <Muted>Atividade: {item.activity.title}</Muted> : null}
       {item.note ? <Muted>Recado: {item.note}</Muted> : null}

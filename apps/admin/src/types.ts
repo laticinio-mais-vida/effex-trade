@@ -12,6 +12,9 @@ export type Ref = { id: string; name: string }
 export type ProductRef = { id: string; code: string; name: string; brand: string | null }
 export type Product = ProductRef & { category: string | null; active: boolean; mixClients: number }
 
+/** Cidade atendida pelo usuário; sem cidade = a UF inteira. */
+export type Area = { state: string; city: string | null }
+
 export type User = {
   id: string
   name: string
@@ -22,25 +25,27 @@ export type User = {
   active: boolean
   supervisorId: string | null
   supervisor?: Ref | null
+  areas: Area[]
   createdAt: string
 }
 
 export type Client = {
   id: string
-  code: string | null
+  /** Nome fantasia */
   name: string
-  tradeName: string | null
-  document: string | null
-  address: string | null
+  /** Razão social */
+  legalName: string | null
   city: string | null
   state: string | null
-  latitude: number
-  longitude: number
-  geofenceRadius: number | null
-  sellerId: string | null
+  /** Sem localização o cliente não entra em roteiro */
+  latitude: number | null
+  longitude: number | null
   active: boolean
-  seller?: Ref | null
 }
+export type LocatedClient = Client & { latitude: number; longitude: number }
+
+/** Cidade com clientes cadastrados */
+export type ClientCity = { state: string; city: string; clients: number }
 
 export type Paged<T> = { total: number; page: number; pageSize: number; items: T[] }
 
@@ -102,7 +107,7 @@ export type MapData = {
     checkinAt: string | null
     checkoutAt: string | null
     justification: { reason: string | null; text: string | null } | null
-    client: { id: string; code: string | null; name: string; address: string | null; city: string | null; latitude: number; longitude: number }
+    client: { id: string; name: string; city: string | null; state: string | null; latitude: number | null; longitude: number | null }
   }[]
   trail: { latitude: number; longitude: number; recordedAt: string }[]
 }
@@ -116,7 +121,7 @@ export type ReportRow = {
   status: VisitStatus
   modules: VisitModule[]
   stockConfirmedAt: string | null
-  client: { id: string; code: string | null; name: string; city: string | null }
+  client: { id: string; name: string; city: string | null }
   checkinAt: string | null
   checkoutAt: string | null
   durationMin: number | null
@@ -199,7 +204,7 @@ export type PhotoItem = {
   reviewedAt: string | null
   products?: ProductRef[]
   visit: { id: string; date: string; status: VisitStatus }
-  client: { id: string; name: string; code: string | null; city: string | null }
+  client: { id: string; name: string; city: string | null }
   promotor: Ref
   task: { id: string; title: string } | null
   reviewedBy: Ref | null
@@ -220,7 +225,7 @@ export type PermissionRequest = {
   status: RequestStatus
   date: string
   promotor: Ref
-  visit: { id: string; position: number; status: VisitStatus; client: { id: string; name: string; code: string | null } } | null
+  visit: { id: string; position: number; status: VisitStatus; client: { id: string; name: string; city: string | null } } | null
   payload: Record<string, unknown> | null
   reason: string | null
   createdBy: Ref & { role: Role }
@@ -246,7 +251,7 @@ export type AuditErrors = {
     reviewedAt: string
     photo: { id: string; type: PhotoType; url: string; takenAt: string; notes: string | null }
     visitDate: string
-    client: { name: string; code: string | null; city: string | null }
+    client: { name: string; city: string | null }
     promotor: string
   }[]
 }
@@ -266,7 +271,7 @@ export type Task = {
   active: boolean
   /** Escrita pelo supervisor numa visita pontual */
   scheduledVisitId: string | null
-  client: { id: string; name: string; code: string | null } | null
+  client: { id: string; name: string; city: string | null } | null
   promotor: Ref | null
   createdBy: Ref
   photoCount: number
@@ -296,5 +301,6 @@ export type VisitSessionInfo = { checkinAt: string; checkoutAt: string | null; a
 export type FrequencyType = 'SEMANAL' | 'QUINZENAL' | 'MENSAL' | 'DIAS' | 'SEMANAS'
 /** Frequência do cliente no roteiro. interval: DIAS = de X em X dias; SEMANAS = semanas puladas. startDate = primeira visita. */
 export type Frequency = { type: FrequencyType; interval: number | null; startDate: string | null }
-export type RouteClient = Client & { frequency: Frequency; modules: VisitModule[] }
+/** Cliente do roteiro (sempre com localização). outsideArea: fora das cidades do promotor (precisa sair do roteiro). */
+export type RouteClient = LocatedClient & { frequency: Frequency; modules: VisitModule[]; outsideArea?: boolean }
 export type RouteDay = { weekday: number; clients: RouteClient[] }

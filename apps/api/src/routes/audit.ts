@@ -32,7 +32,7 @@ export function serializeAuditPhoto(photo: AuditPhoto, userId: string) {
   return {
     ...serializePhoto(photo),
     visit: { id: photo.visit.id, date: fromDbDate(photo.visit.date), checkinAt: photo.visit.checkinAt, checkoutAt: photo.visit.checkoutAt },
-    client: { id: photo.visit.client.id, code: photo.visit.client.code, name: photo.visit.client.name, city: photo.visit.client.city },
+    client: { id: photo.visit.client.id, name: photo.visit.client.name, city: photo.visit.client.city },
     promotor: photo.visit.promotor,
     myAudit: mine ? serializeAudit(mine) : null,
     otherAudits: photo.audits.filter((a) => a.auditorId !== userId).map(serializeAudit),
@@ -49,12 +49,12 @@ const listQuery = z.object({
   ...zPage,
 })
 
-function auditWhere(user: AuthUser, q: z.infer<typeof listQuery>): Prisma.PhotoWhereInput {
+async function auditWhere(user: AuthUser, q: z.infer<typeof listQuery>): Promise<Prisma.PhotoWhereInput> {
   const to = q.to ?? todayIn()
   const from = q.from ?? addDays(to, -7)
   return {
     AND: [
-      photoScope(user),
+      await photoScope(user),
       { visit: { date: { gte: toDbDate(from), lte: toDbDate(to) } } },
       q.clientId ? { visit: { clientId: q.clientId } } : {},
       q.promotorId ? { visit: { promotorId: q.promotorId } } : {},
@@ -65,13 +65,13 @@ function auditWhere(user: AuthUser, q: z.infer<typeof listQuery>): Prisma.PhotoW
   }
 }
 
-/** Auditoria de fotos pelo vendedor (fotos dos seus clientes) e pelo supervisor (fotos da equipe). */
+/** Auditoria de fotos pelo vendedor e pelo supervisor: fotos dos clientes das cidades de cada um. */
 export async function auditRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireRole('VENDEDOR', 'SUPERVISOR', 'ADMIN'))
 
   app.get('/photos', async (req) => {
     const q = parse(listQuery, req.query)
-    const where = auditWhere(req.user, q)
+    const where = await auditWhere(req.user, q)
     const [total, photos] = await Promise.all([
       prisma.photo.count({ where }),
       prisma.photo.findMany({
@@ -86,16 +86,16 @@ export async function auditRoutes(app: FastifyInstance) {
   })
 
   app.get('/summary', async (req) => {
-    const pending = await prisma.photo.count({ where: auditWhere(req.user, parse(listQuery, {})) })
+    const pending = await prisma.photo.count({ where: await auditWhere(req.user, parse(listQuery, {})) })
     return { pending }
   })
 
   /** Opções para os filtros do app (clientes e promotores com fotos no escopo do usuário). */
   app.get('/filters', async (req) => {
-    const scope = photoScope(req.user)
+    const scope = await photoScope(req.user)
     const visits = await prisma.visit.findMany({
       where: { photos: { some: scope }, date: { gte: toDbDate(addDays(todayIn(), -60)) } },
-      select: { client: { select: { id: true, name: true, code: true } }, promotor: { select: { id: true, name: true } } },
+      select: { client: { select: { id: true, name: true, city: true } }, promotor: { select: { id: true, name: true } } },
       distinct: ['clientId', 'promotorId'],
     })
     const clients = new Map(visits.map((v) => [v.client.id, v.client]))
@@ -117,7 +117,7 @@ export async function auditRoutes(app: FastifyInstance) {
         }),
       req.body,
     )
-    const photo = await prisma.photo.findFirst({ where: { AND: [{ id }, photoScope(req.user)] } })
+    const photo = await prisma.photo.findFirst({ where: { AND: [{ id }, await photoScope(req.user)] } })
     if (!photo) throw notFound('Foto')
 
     const existing = await prisma.photoAudit.findUnique({ where: { photoId_auditorId: { photoId: id, auditorId: req.user.sub } }, include: { review: true } })

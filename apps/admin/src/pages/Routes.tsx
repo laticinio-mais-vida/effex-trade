@@ -3,7 +3,7 @@ import L from 'leaflet'
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from 'react-leaflet'
 import { api } from '../api'
-import { DEFAULT_MODULES, distanceModeLabel, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
+import { areaLabel, DEFAULT_MODULES, distanceModeLabel, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
 import {
   DAYS_INTERVAL,
   fmtShortDay,
@@ -18,7 +18,7 @@ import {
   withType,
 } from '../routeFrequency'
 import { distanceMeters, pathMeters, suggestOrder } from '../routeOrder'
-import type { Client, DistanceMode, Frequency, FrequencyType, Ref, RouteClient, RouteDay, Task, VisitModule } from '../types'
+import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, Task, VisitModule } from '../types'
 import { ClientPicker, Empty, ErrorBox, Field, Loading, PageHead, Tabs, useLookups } from '../ui'
 import { TaskForm } from './Tasks'
 
@@ -31,7 +31,7 @@ const sameRoute = (a: RouteClient[], b: RouteClient[]) =>
   a.every((c, i) => c.id === b[i]!.id && sameFrequency(c.frequency, b[i]!.frequency) && c.modules.join() === b[i]!.modules.join())
 const onlyActivities = (modules: VisitModule[]) => modules.length === 1 && modules[0] === 'ATIVIDADES'
 
-function Fit({ clients }: { clients: Client[] }) {
+function Fit({ clients }: { clients: LocatedClient[] }) {
   const map = useMap()
   const key = clients.map((c) => c.id).join()
   useEffect(() => {
@@ -45,7 +45,7 @@ function Fit({ clients }: { clients: Client[] }) {
  * Distâncias entre os clientes do dia vindas da API: pelas ruas quando há servidor de rotas, senão em linha reta.
  * Só busca de novo quando muda o conjunto de clientes (reordenar não muda); enquanto isso, o par que falta vai em linha reta.
  */
-function useDistances(list: Client[]) {
+function useDistances(list: LocatedClient[]) {
   const ids = [...new Set(list.map((c) => c.id))].sort()
   const query = useQuery({
     queryKey: ['route-distances', ids.join()],
@@ -55,7 +55,7 @@ function useDistances(list: Client[]) {
     placeholderData: keepPreviousData,
   })
   const index = new Map(query.data?.clientIds.map((id, i) => [id, i]))
-  const dist = (a: Client, b: Client) => {
+  const dist = (a: LocatedClient, b: LocatedClient) => {
     const i = index.get(a.id)
     const j = index.get(b.id)
     return i != null && j != null ? query.data!.meters[i]![j]! : distanceMeters(a, b)
@@ -87,11 +87,11 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const qc = useQueryClient()
   const lookups = useLookups()
   const [weekday, setWeekday] = useState(1)
-  const query = useQuery({ queryKey: ['route', promotorId], queryFn: () => api<{ promotor: Ref; weekdays: RouteDay[] }>(`/admin/routes/${promotorId}`) })
+  const query = useQuery({ queryKey: ['route', promotorId], queryFn: () => api<{ promotor: Ref & { areas: Area[] }; weekdays: RouteDay[] }>(`/admin/routes/${promotorId}`) })
   /** Alterações ainda não salvas, por dia da semana; salvar grava todos os dias alterados de uma vez. */
   const [drafts, setDrafts] = useState<Partial<Record<number, RouteClient[]>>>({})
   /** Clientes marcados para entrar no roteiro e a frequência escolhida em cada dia marcado. */
-  const [adding, setAdding] = useState<{ clients: Client[]; days: Partial<Record<number, Frequency>>; modules: VisitModule[] } | null>(null)
+  const [adding, setAdding] = useState<{ clients: LocatedClient[]; days: Partial<Record<number, Frequency>>; modules: VisitModule[] } | null>(null)
   /** Cliente da lista do dia com a frequência e a estrutura abertas para edição. */
   const [editingFreq, setEditingFreq] = useState<string | null>(null)
   /** Atalho para cadastrar atividade extra para um cliente deste promotor. */
@@ -109,6 +109,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const dirtyDays = WEEK_ORDER.filter((d) => drafts[d])
   const dirty = dirtyDays.length > 0
   const incomplete = dirtyDays.flatMap((d) => listOf(d).filter((c) => frequencyError(c.frequency)).map((c) => `${c.name} (${dayName(d)})`))
+  const outsideCount = new Set(WEEK_ORDER.flatMap((d) => listOf(d).filter((c) => c.outsideArea).map((c) => c.id))).size
   const suggestion = suggested?.weekday === weekday && Math.abs(suggested.after - km) < 1 ? suggested : null
 
   /** Troca a lista de um ou mais dias; o dia que volta a ficar igual ao salvo deixa de contar como alteração. */
@@ -162,7 +163,9 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
 
   const inDay = (d: number, clientId: string) => listOf(d).some((c) => c.id === clientId)
   /** Seleção de vários clientes: cada clique na busca marca ou desmarca. O dia aberto já vem marcado como semanal. */
-  const pick = (picked: Client[]) =>
+  const pick = (found: Client[]) => {
+    // A busca já traz só clientes com localização; o filtro garante o tipo
+    const picked = found.filter((c): c is LocatedClient => c.latitude != null && c.longitude != null)
     setAdding((a) => {
       const current = a?.clients ?? []
       const has = (id: string) => current.some((c) => c.id === id)
@@ -173,6 +176,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
       if (a) return { ...a, clients }
       return { clients, days: clients.every((c) => inDay(weekday, c.id)) ? {} : { [weekday]: WEEKLY }, modules: DEFAULT_MODULES }
     })
+  }
   const removeFromSelection = (clientId: string) =>
     setAdding((a) => (a && a.clients.length > 1 ? { ...a, clients: a.clients.filter((c) => c.id !== clientId) } : null))
   const toggleAddDay = (d: number) =>
@@ -247,11 +251,29 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
               onPick={(c) => pick([c])}
               onPickMany={pick}
               selectedIds={adding?.clients.map((c) => c.id) ?? []}
-              placeholder="Buscar e marcar clientes por nome, código ou cidade"
+              forPromotorId={promotorId}
+              placeholder="Buscar e marcar clientes das cidades do promotor"
             />
           </Field>
         )}
       </div>
+      {query.data && (
+        <p className="small muted" style={{ margin: '-4px 0 12px' }}>
+          {query.data.promotor.areas.length > 0 ? (
+            <>
+              Cidades do promotor: {query.data.promotor.areas.map(areaLabel).join(', ')}. Só aparecem clientes dessas cidades e com localização cadastrada.
+            </>
+          ) : (
+            <span style={{ color: 'var(--notdone)' }}>Este promotor não tem cidades cadastradas: inclua as cidades dele em Usuários para montar o roteiro.</span>
+          )}
+        </p>
+      )}
+      {outsideCount > 0 && (
+        <div className="alert">
+          {outsideCount === 1 ? '1 cliente do roteiro fica' : `${outsideCount} clientes do roteiro ficam`} fora das cidades do promotor (marcados em vermelho). Tire-os do
+          roteiro ou inclua a cidade no cadastro do promotor; enquanto isso, o dia com eles não pode ser salvo.
+        </div>
+      )}
 
       {adding && (
         <AddClients
@@ -342,9 +364,9 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                           </button>
                           <span className="route-num">{i + 1}</span>
                           <span>
-                            {c.code && <span className="muted">{c.code} </span>}
                             {c.name}
-                            <div className="small muted">{[c.address, c.city].filter(Boolean).join(', ')}</div>
+                            <div className="small muted">{[c.city, c.state].filter(Boolean).join(' - ')}</div>
+                            {c.outsideArea && <div className="small" style={{ color: 'var(--notdone)' }}>Fora das cidades do promotor</div>}
                             <button
                               type="button"
                               className={`freq-chip${c.frequency.type === 'SEMANAL' && isDefaultStructure(c.modules) ? '' : ' custom'}${frequencyError(c.frequency) ? ' bad' : ''}`}
@@ -569,9 +591,8 @@ function AddClients({
         <div className="small muted">Continue buscando acima para marcar mais clientes.</div>
         <ul className="client-chips">
           {clients.map((c) => (
-            <li key={c.id} className="client-chip" title={[c.address, c.city].filter(Boolean).join(', ')}>
+            <li key={c.id} className="client-chip" title={[c.legalName, c.city, c.state].filter(Boolean).join(' · ')}>
               <span>
-                {c.code && <span className="muted">{c.code} </span>}
                 {c.name}
               </span>
               <button type="button" aria-label={`Tirar ${c.name} da seleção`} onClick={() => onRemoveClient(c.id)}>

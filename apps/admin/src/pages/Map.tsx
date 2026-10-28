@@ -10,6 +10,11 @@ import { ErrorBox, ExecBar, Field, StatusPill } from '../ui'
 
 const STALE_MIN = 15
 
+type MapVisit = MapData['visits'][number]
+/** Visitas de clientes com localização (os sem localização não têm como aparecer no mapa). */
+const located = (visits: MapVisit[]) =>
+  visits.filter((v): v is MapVisit & { client: { latitude: number; longitude: number } } => v.client.latitude != null && v.client.longitude != null)
+
 function pinIcon(status: string, label: string | number) {
   return L.divIcon({ className: '', html: `<div class="pin ${status}">${label}</div>`, iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -14] })
 }
@@ -70,7 +75,7 @@ export function MapPage() {
   const points = useMemo<[number, number][]>(() => {
     if (!data) return []
     return [
-      ...data.visits.map((v) => [v.client.latitude, v.client.longitude] as [number, number]),
+      ...located(data.visits).map((v) => [v.client.latitude, v.client.longitude] as [number, number]),
       ...data.promotores.filter((p) => p.lastPing).map((p) => [p.lastPing!.latitude, p.lastPing!.longitude] as [number, number]),
     ]
   }, [data])
@@ -174,12 +179,12 @@ export function MapPage() {
           {data && data.trail.length > 1 && (
             <Polyline positions={data.trail.map((t) => [t.latitude, t.longitude] as [number, number])} pathOptions={{ color: '#14213d', weight: 3, opacity: 0.55, dashArray: '6 6' }} />
           )}
-          {data?.visits.map((v) => (
+          {located(data?.visits ?? []).map((v) => (
             <Marker key={v.id} position={[v.client.latitude, v.client.longitude]} icon={pinIcon(v.status, v.position)}>
               <Popup>
-                <strong>{v.client.code ? `${v.client.code} · ` : ''}{v.client.name}</strong>
+                <strong>{v.client.name}</strong>
                 <br />
-                {v.client.address}
+                {[v.client.city, v.client.state].filter(Boolean).join(' - ')}
                 <br />
                 Promotor: {names.get(v.promotorId) ?? '—'} · {v.position}º do roteiro ({originLabel[v.origin]})
                 <br />

@@ -14,7 +14,7 @@ import type { Audit, AuditPhoto, Paged, PhotoType } from '@/lib/types'
 
 type Status = 'pendentes' | 'auditadas' | 'todas'
 type Filters = { clientId: string | null; promotorId: string | null; type: PhotoType | null }
-type FilterOptions = { clients: { id: string; name: string; code: string | null }[]; promotores: { id: string; name: string }[] }
+type FilterOptions = { clients: { id: string; name: string; city: string | null }[]; promotores: { id: string; name: string }[] }
 
 const PAGE_SIZE = 20
 
@@ -150,7 +150,7 @@ export function PhotoAuditScreen() {
         visible={picker === 'client'}
         title="Filtrar por cliente"
         value={filters.clientId ?? '__all'}
-        options={[{ value: '__all', label: 'Todos os clientes' }, ...options.clients.map((c) => ({ value: c.id, label: c.name, detail: c.code ?? undefined }))]}
+        options={[{ value: '__all', label: 'Todos os clientes' }, ...options.clients.map((c) => ({ value: c.id, label: c.name, detail: c.city ?? undefined }))]}
         onSelect={(v) => setFilters((f) => ({ ...f, clientId: v === '__all' ? null : v }))}
         onClose={() => setPicker(null)}
       />

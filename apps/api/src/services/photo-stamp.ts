@@ -25,7 +25,7 @@ export function stampDate(date: Date) {
  */
 export async function stampPhoto(
   buffer: Buffer,
-  info: { takenAt: Date; type: PhotoType; clientName: string; clientCode?: string | null; promotorName: string },
+  info: { takenAt: Date; type: PhotoType; clientName: string; promotorName: string },
 ): Promise<Buffer> {
   let base: { data: Buffer; info: { width: number; height: number } }
   let format: string | undefined
@@ -42,7 +42,7 @@ export async function stampPhoto(
   const charsPerLine = Math.floor((width - pad * 2) / (font * 0.5))
 
   const line1 = `${stampDate(info.takenAt)} · ${photoTypeLabels[info.type]}`
-  const line2 = truncate(`${info.clientCode ? `${info.clientCode} ` : ''}${info.clientName} · ${info.promotorName}`, charsPerLine)
+  const line2 = truncate(`${info.clientName} · ${info.promotorName}`, charsPerLine)
   const svg = `<svg width="${width}" height="${bar}" xmlns="http://www.w3.org/2000/svg">
   <rect width="100%" height="100%" fill="rgba(0,0,0,0.62)"/>
   <text x="${pad}" y="${Math.round(font * 1.25)}" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${font}" font-weight="700" fill="#F5C518">${esc(line1)}</text>

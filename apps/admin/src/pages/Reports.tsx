@@ -49,14 +49,13 @@ export function ReportsPage() {
     if (!data) return
     downloadCsv(
       `execucao-${range.from}-a-${range.to}.csv`,
-      ['Data', 'Promotor', 'Ordem', 'Origem', 'Estrutura', 'Código', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', data.travelKmSource ? `Deslocamento (km ${distanceModeLabel[data.travelKmSource]})` : 'Deslocamento (km)', 'Distância no check-in (m)', 'Fotos', 'Rupturas', 'Contagem de estoque', 'Motivo', 'Justificativa', 'Liberações'],
+      ['Data', 'Promotor', 'Ordem', 'Origem', 'Estrutura', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', data.travelKmSource ? `Deslocamento (km ${distanceModeLabel[data.travelKmSource]})` : 'Deslocamento (km)', 'Distância no check-in (m)', 'Fotos', 'Rupturas', 'Contagem de estoque', 'Motivo', 'Justificativa', 'Liberações'],
       data.rows.map((r) => [
         fmtDate(r.date),
         r.promotor.name,
         r.position,
         originLabel[r.origin],
         structureLabel(r.modules),
-        r.client.code,
         r.client.name,
         r.client.city,
         visitStatusLabel[r.status],
@@ -320,7 +319,6 @@ function Visits({ rows }: { rows: ReportRow[] }) {
               <td className="nowrap">{r.promotor.name}</td>
               <td className="r">{r.position}</td>
               <td>
-                {r.client.code && <span className="muted">{r.client.code} </span>}
                 {r.client.name}
                 {r.origin !== 'ROTEIRO' && (
                   <>

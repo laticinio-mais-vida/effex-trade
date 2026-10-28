@@ -51,7 +51,7 @@ export async function auditErrorsData(vendedorId: string, from: string, to: stri
         notes: a.photo.notes,
       },
       visitDate: fromDbDate(a.photo.visit.date),
-      client: { name: a.photo.visit.client.name, code: a.photo.visit.client.code, city: a.photo.visit.client.city },
+      client: { name: a.photo.visit.client.name, city: a.photo.visit.client.city },
       promotor: a.photo.visit.promotor.name,
     })),
   }
@@ -131,7 +131,7 @@ export async function auditErrorsPdf(vendedorId: string, from: string, to: strin
 
     const tx = left + imgW + 14
     const tw = width - imgW - 14
-    doc.fillColor(INK).font('Helvetica-Bold').fontSize(11).text(`${item.client.code ? `${item.client.code} · ` : ''}${item.client.name}`, tx, y, { width: tw })
+    doc.fillColor(INK).font('Helvetica-Bold').fontSize(11).text(`${item.client.name}${item.client.city ? ` · ${item.client.city}` : ''}`, tx, y, { width: tw })
     doc.fillColor(MUTED).font('Helvetica').fontSize(9)
     doc.text(`Foto: ${photoTypeLabels[item.photo.type]}   ·   Visita: ${fmtDate(item.visitDate)}   ·   Promotor: ${item.promotor}`, { width: tw })
     doc.moveDown(0.4)

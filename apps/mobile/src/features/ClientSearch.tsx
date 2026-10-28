@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, Text, View } from 'react-native'
 import { Card, Field, Muted, styles } from '@/components/ui'
 import { errorMessage } from '@/lib/api'
+import { placeOf } from '@/lib/format'
 import { colors } from '@/lib/theme'
 import type { Client } from '@/lib/types'
 
@@ -47,7 +48,7 @@ export function ClientSearch({
 
   return (
     <View style={{ gap: 10 }}>
-      <Field value={search} onChangeText={setSearch} placeholder="Nome, código ou bairro do cliente" autoCorrect={false} />
+      <Field value={search} onChangeText={setSearch} placeholder="Nome ou cidade do cliente" autoCorrect={false} />
       {loading ? <ActivityIndicator color={colors.primary} /> : null}
       {error ? <Text style={styles.errorSmall}>{error}</Text> : null}
       {!loading && results.length === 0 && !error ? <Muted>Nenhum cliente encontrado.</Muted> : null}
@@ -55,16 +56,8 @@ export function ClientSearch({
         const extra = note?.(c)
         return (
           <Card key={c.id} onPress={() => onSelect(c)} style={selectedId === c.id && { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.primarySoft }}>
-            <Text style={[styles.text, { fontWeight: '700' }]}>
-              {c.code ? `${c.code} · ` : ''}
-              {c.name}
-            </Text>
-            {c.address || c.city ? (
-              <Muted>
-                {c.address}
-                {c.city ? ` · ${c.city}` : ''}
-              </Muted>
-            ) : null}
+            <Text style={[styles.text, { fontWeight: '700' }]}>{c.name}</Text>
+            {c.city ? <Muted>{placeOf(c)}</Muted> : null}
             {extra ? <Text style={{ color: colors.warning, fontSize: 13 }}>{extra}</Text> : null}
           </Card>
         )

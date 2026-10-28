@@ -14,7 +14,8 @@ import {
 } from '../services/permissions'
 import { alertInclude, checkLunchAlerts, serializeAlert } from '../services/alerts'
 import { cancelScheduled, listScheduled, scheduleVisit, SCHEDULE_DAYS_AHEAD } from '../services/scheduled-visits'
-import { promotorScope } from '../services/scope'
+import { clientSearch, located } from '../services/clients'
+import { areaWhere, clientScope, loadAreas, promotorScope } from '../services/scope'
 import { zModules } from '../services/visit-structure'
 import { serializeClient, serializePhoto, serializeVisit } from '../services/serializers'
 import { getSettings, routeOrderEnforced } from '../services/settings'
@@ -43,7 +44,7 @@ function serializeVendorAudit(a: VendorAudit) {
     review: a.review ? { verdict: a.review.verdict, comment: a.review.comment, supervisor: a.review.supervisor, createdAt: a.review.createdAt } : null,
     photo: serializePhoto(a.photo),
     visit: { id: a.photo.visit.id, date: fromDbDate(a.photo.visit.date) },
-    client: { id: a.photo.visit.client.id, code: a.photo.visit.client.code, name: a.photo.visit.client.name, city: a.photo.visit.client.city },
+    client: { id: a.photo.visit.client.id, name: a.photo.visit.client.name, city: a.photo.visit.client.city },
     promotor: a.photo.visit.promotor,
   }
 }
@@ -152,7 +153,7 @@ export async function supervisorRoutes(app: FastifyInstance) {
       date,
       workDay: workDay ? { startedAt: workDay.startedAt, endedAt: workDay.endedAt, closedAt: workDay.closedAt, routeOrderWaived: workDay.routeOrderWaived } : null,
       routeOrderEnforced: routeOrderEnforced(settings, date),
-      visits: visits.map((v) => serializeVisit(v, settings.geofenceRadiusMeters)),
+      visits: visits.map((v) => serializeVisit(v)),
       /** Visitas pontuais de hoje em diante (as de hoje também aparecem em visits) */
       scheduled: await listScheduled(req.user, id),
       scheduleDaysAhead: SCHEDULE_DAYS_AHEAD,
@@ -181,17 +182,21 @@ export async function supervisorRoutes(app: FastifyInstance) {
     return { ok: true }
   })
 
+  /** Clientes das cidades do supervisor (e, com promotorId, também das cidades do promotor), com localização. */
   app.get('/clients', async (req) => {
-    const q = parse(z.object({ search: z.string().trim().optional() }), req.query)
+    const q = parse(z.object({ search: z.string().trim().optional(), promotorId: zId.optional() }), req.query)
+    let promotorArea: Prisma.ClientWhereInput = {}
+    if (q.promotorId) {
+      const promotor = await prisma.user.findFirst({ where: { id: q.promotorId, ...promotorScope(req.user) }, select: { id: true } })
+      if (!promotor) throw notFound('Promotor')
+      promotorArea = areaWhere(await loadAreas(promotor.id))
+    }
     const clients = await prisma.client.findMany({
-      where: {
-        active: true,
-        ...(q.search ? { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { code: { contains: q.search } }, { city: { contains: q.search, mode: 'insensitive' } }] } : {}),
-      },
+      where: { AND: [await clientScope(req.user), promotorArea, located, { active: true }, q.search ? clientSearch(q.search) : {}] },
       orderBy: { name: 'asc' },
       take: 50,
     })
-    return clients.map((c) => serializeClient(c))
+    return clients.map(serializeClient)
   })
 
   app.get('/permission-types', async () => listPermissionTypes())

@@ -1,5 +1,5 @@
 /**
- * Dados de demonstração: usuários, clientes em Salvador-BA, roteiros, 3 dias de histórico
+ * Dados de demonstração: usuários com as cidades atendidas, clientes em Salvador e Lauro de Freitas (BA), roteiros, 3 dias de histórico
  * (visitas, fotos, rastro de GPS, auditorias) e o dia de hoje em andamento.
  * Apaga tudo antes de inserir. Senha de todos os usuários: 123456
  */
@@ -8,6 +8,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { prisma, type PhotoType, type Visit } from '../src/db'
 import { env } from '../src/env'
+import { cityKey } from '../src/lib/cities'
 import { addDays, localDayRange, toDbDate, todayIn } from '../src/lib/dates'
 import { stampPhoto } from '../src/services/photo-stamp'
 import { ensureWorkDay } from '../src/services/workdays'
@@ -36,26 +37,38 @@ async function clear() {
   await rm(join(env.uploadDir, 'seed'), { recursive: true, force: true })
 }
 
-const CLIENTS: [string, string, string, number, number][] = [
-  ['1001', 'Supermercado Pituba Center', 'Pituba', -12.9975, -38.4567],
-  ['1002', 'Mercado Bom Sabor', 'Itaigara', -12.99, -38.462],
-  ['1003', 'Atacarejo Costa Azul', 'Costa Azul', -12.993, -38.444],
-  ['1004', 'Mercadinho Boca do Rio', 'Boca do Rio', -12.981, -38.425],
-  ['1005', 'Supermercado Imbuí', 'Imbuí', -12.972, -38.435],
-  ['1006', 'Empório Pernambués', 'Pernambués', -12.975, -38.46],
-  ['1007', 'Supermercado Barra Sul', 'Barra', -13.005, -38.53],
-  ['1008', 'Mercado Federação', 'Federação', -13.001, -38.509],
-  ['1009', 'Hiper Rio Vermelho', 'Rio Vermelho', -13.011, -38.49],
-  ['1010', 'Mercadinho Brotas', 'Brotas', -12.987, -38.495],
-  ['1011', 'Supermercado Lapinha', 'Lapinha', -12.96, -38.5],
-  ['1012', 'Atacado Calçada', 'Calçada', -12.944, -38.505],
-  ['1013', 'Supermercado Itapuã', 'Itapuã', -12.948, -38.365],
-  ['1014', 'Mercado Stella Maris', 'Stella Maris', -12.938, -38.336],
-  ['1015', 'Hiper Paralela', 'Paralela', -12.937, -38.412],
-  ['1016', 'Mercadinho Cabula', 'Cabula', -12.951, -38.46],
-  ['1017', 'Supermercado Liberdade', 'Liberdade', -12.948, -38.495],
-  ['1018', 'Mercado Ribeira', 'Ribeira', -12.917, -38.504],
+/** Nome fantasia, razão social e localização. Os 18 primeiros (Salvador) entram nos roteiros. */
+const CLIENTS: [string, string, number, number][] = [
+  ['Supermercado Pituba Center', 'Pituba Center Comércio de Alimentos Ltda', -12.9975, -38.4567],
+  ['Mercado Bom Sabor', 'Bom Sabor Mercearia Ltda', -12.99, -38.462],
+  ['Atacarejo Costa Azul', 'Costa Azul Atacado e Varejo Ltda', -12.993, -38.444],
+  ['Mercadinho Boca do Rio', 'J. Souza Mercadinho ME', -12.981, -38.425],
+  ['Supermercado Imbuí', 'Imbuí Supermercados Ltda', -12.972, -38.435],
+  ['Empório Pernambués', 'Empório Pernambués Comércio Ltda', -12.975, -38.46],
+  ['Supermercado Barra Sul', 'Barra Sul Supermercados S.A.', -13.005, -38.53],
+  ['Mercado Federação', 'M. Oliveira Alimentos Ltda', -13.001, -38.509],
+  ['Hiper Rio Vermelho', 'Hiper Rio Vermelho Comércio S.A.', -13.011, -38.49],
+  ['Mercadinho Brotas', 'Brotas Mercearia e Frios ME', -12.987, -38.495],
+  ['Supermercado Lapinha', 'Lapinha Supermercados Ltda', -12.96, -38.5],
+  ['Atacado Calçada', 'Calçada Distribuidora de Alimentos Ltda', -12.944, -38.505],
+  ['Supermercado Itapuã', 'Itapuã Supermercados Ltda', -12.948, -38.365],
+  ['Mercado Stella Maris', 'Stella Maris Comércio de Alimentos Ltda', -12.938, -38.336],
+  ['Hiper Paralela', 'Hiper Paralela Comércio S.A.', -12.937, -38.412],
+  ['Mercadinho Cabula', 'R. Santos Mercadinho ME', -12.951, -38.46],
+  ['Supermercado Liberdade', 'Liberdade Supermercados Ltda', -12.948, -38.495],
+  ['Mercado Ribeira', 'Ribeira Mercearia Ltda', -12.917, -38.504],
 ]
+
+/** Lauro de Freitas: só aparecem para quem atende a cidade. O último ainda não tem localização (veio só o nome). */
+const LAURO_CLIENTS: [string, string, number | null, number | null][] = [
+  ['Supermercado Vilas do Atlântico', 'Vilas Supermercados Ltda', -12.8865, -38.307],
+  ['Mercado Ipitanga', 'Ipitanga Comércio de Alimentos Ltda', -12.899, -38.329],
+  ['Atacarejo Lauro Centro', 'Lauro Centro Atacado e Varejo Ltda', -12.8953, -38.3268],
+  ['Mercadinho Portão', 'Portão Mercearia ME', null, null],
+]
+
+const SALVADOR = { state: 'BA', city: 'Salvador' }
+const LAURO = { state: 'BA', city: 'Lauro de Freitas' }
 
 const REASONS = [
   'Loja fechada',
@@ -102,7 +115,6 @@ async function savePhoto(
     takenAt,
     type,
     clientName: visit.client.name,
-    clientCode: visit.client.code,
     promotorName: visit.promotor.name,
   })
   await mkdir(join(env.uploadDir, 'seed'), { recursive: true })
@@ -179,7 +191,7 @@ async function simulateDay(
       allResolved = false
       continue
     }
-    const point: [number, number] = [visit.client.latitude, visit.client.longitude]
+    const point: [number, number] = [visit.client.latitude!, visit.client.longitude!]
 
     // Almoço por volta do meio-dia: sem atividades; a volta é a abertura (ou justificativa) do próximo cliente
     if (started && !lunchDone && clock >= 11 * 60 + 40) {
@@ -328,7 +340,7 @@ async function simulateDay(
 
   if (reopenIndex != null && started && untilMinute >= 24 * 60 && lastPoint) {
     const visit = visits[reopenIndex]!
-    const point: [number, number] = [visit.client.latitude, visit.client.longitude]
+    const point: [number, number] = [visit.client.latitude!, visit.client.longitude!]
     const travel = between(10, 25)
     pings.push(...pingsBetween(promotorId, at(date, clock), at(date, clock + travel), lastPoint, point))
     clock += travel
@@ -378,37 +390,32 @@ async function main() {
   await clear()
 
   const passwordHash = await bcrypt.hash('123456', 10)
-  const mk = (login: string, name: string, role: 'ADMIN' | 'SUPERVISOR' | 'VENDEDOR' | 'PROMOTOR', supervisorId?: string) =>
-    prisma.user.create({ data: { login, name, role, passwordHash, supervisorId, phone: '(71) 9' + between(1000, 9999) + '-' + between(1000, 9999) } })
+  type Area = { state: string; city: string | null }
+  const mk = (login: string, name: string, role: 'ADMIN' | 'SUPERVISOR' | 'VENDEDOR' | 'PROMOTOR', areas: Area[], supervisorId?: string) =>
+    prisma.user.create({
+      data: { login, name, role, passwordHash, supervisorId, phone: '(71) 9' + between(1000, 9999) + '-' + between(1000, 9999), areas: { create: areas } },
+    })
 
-  const admin = await mk('admin', 'Administrador', 'ADMIN')
-  const supervisor = await mk('supervisor', 'Renata Moura', 'SUPERVISOR')
-  const vend1 = await mk('vendedor1', 'Carlos Menezes', 'VENDEDOR', supervisor.id)
-  const vend2 = await mk('vendedor2', 'Patrícia Lima', 'VENDEDOR', supervisor.id)
+  // Cidades atendidas: a supervisora vê a Bahia inteira; Patrícia e Lucas também atendem Lauro de Freitas
+  const admin = await mk('admin', 'Administrador', 'ADMIN', [])
+  const supervisor = await mk('supervisor', 'Renata Moura', 'SUPERVISOR', [{ state: 'BA', city: null }])
+  const vend1 = await mk('vendedor1', 'Carlos Menezes', 'VENDEDOR', [SALVADOR], supervisor.id)
+  const vend2 = await mk('vendedor2', 'Patrícia Lima', 'VENDEDOR', [SALVADOR, LAURO], supervisor.id)
   const promotores = [
-    await mk('promotor1', 'João Santos', 'PROMOTOR', supervisor.id),
-    await mk('promotor2', 'Ana Ribeiro', 'PROMOTOR', supervisor.id),
-    await mk('promotor3', 'Lucas Oliveira', 'PROMOTOR', supervisor.id),
+    await mk('promotor1', 'João Santos', 'PROMOTOR', [SALVADOR], supervisor.id),
+    await mk('promotor2', 'Ana Ribeiro', 'PROMOTOR', [SALVADOR], supervisor.id),
+    await mk('promotor3', 'Lucas Oliveira', 'PROMOTOR', [SALVADOR, LAURO], supervisor.id),
   ]
 
   const clients = []
-  for (const [i, [code, name, district, lat, lng]] of CLIENTS.entries()) {
-    clients.push(
-      await prisma.client.create({
-        data: {
-          code,
-          name,
-          address: `Rua Exemplo, ${100 + i * 7} - ${district}`,
-          city: 'Salvador',
-          state: 'BA',
-          latitude: lat,
-          longitude: lng,
-          sellerId: i < 9 ? vend1.id : vend2.id,
-          geofenceRadius: i === 14 ? 300 : null, // Hiper Paralela: estacionamento grande
-        },
-      }),
-    )
+  for (const [name, legalName, latitude, longitude] of CLIENTS) {
+    clients.push(await prisma.client.create({ data: { name, legalName, ...SALVADOR, cityKey: cityKey(SALVADOR.city), latitude, longitude } }))
   }
+  for (const [name, legalName, latitude, longitude] of LAURO_CLIENTS) {
+    await prisma.client.create({ data: { name, legalName, ...LAURO, cityKey: cityKey(LAURO.city), latitude, longitude } })
+  }
+  // Quem audita as fotos de cada cliente no histórico (os dois vendedores atendem Salvador)
+  const auditorOf = new Map(clients.map((c, i) => [c.id, i < 9 ? vend1 : vend2]))
 
   // Catálogo e mix: cada cliente compra de 6 a 9 produtos (no real, virá do ERP/planilha)
   const products = []
@@ -559,7 +566,7 @@ async function main() {
           promotorId: promotores[1]!.id,
           visitId: outside.id,
           reason: 'Estou na porta da loja mas o GPS marca a quase 400 m. Prédio alto do lado.',
-          latitude: outside.client.latitude + 0.003,
+          latitude: outside.client.latitude! + 0.003,
           longitude: outside.client.longitude,
           createdById: promotores[1]!.id,
         },
@@ -576,7 +583,7 @@ async function main() {
   const rejectReasons = ['Foto escura, não dá para ver a gôndola.', 'Foto não mostra a frente dos produtos.', 'Gôndola desorganizada, produtos misturados.', 'Foto tirada muito de perto.']
   let audits = 0
   for (const photo of photos) {
-    const seller = photo.visit.client.sellerId === vend1.id ? vend1 : vend2
+    const seller = auditorOf.get(photo.visit.clientId) ?? vend2
     if (rand() > (seller.id === vend1.id ? 0.85 : 0.5)) continue
     const reject = rand() < 0.18
     const audit = await prisma.photoAudit.create({

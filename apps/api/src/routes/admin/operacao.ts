@@ -9,7 +9,7 @@ import { ALERT_LUNCH, alertInclude, checkLunchAlerts, serializeAlert } from '../
 import { auditErrorsData, auditErrorsPdf } from '../../services/audit-errors'
 import { requestInclude, serializeRequest } from '../../services/permissions'
 import { visitReport } from '../../services/reports'
-import { assertAdmin, promotorScope } from '../../services/scope'
+import { assertAdmin, inAreas, promotorScope } from '../../services/scope'
 import { serializePhoto } from '../../services/serializers'
 import {
   clearPromotorSettings,
@@ -47,15 +47,20 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
   // ---------------- Regras ----------------
   /**
    * Regras gerais, exceções por promotor e, para o atalho "promotores de um vendedor", quais vendedores
-   * cada promotor atende (pelos clientes do roteiro fixo).
+   * cada promotor atende (clientes do roteiro fixo nas cidades do vendedor).
    */
   app.get('/settings', async () => {
-    const routes = await prisma.routeItem.findMany({ select: { promotorId: true, client: { select: { sellerId: true } } } })
+    const [routes, sellers] = await Promise.all([
+      prisma.routeItem.findMany({ select: { promotorId: true, client: { select: { state: true, cityKey: true } } } }),
+      prisma.user.findMany({ where: { role: 'VENDEDOR' }, select: { id: true, areas: { select: { state: true, city: true } } } }),
+    ])
     const promotorSellers: Record<string, string[]> = {}
     for (const r of routes) {
-      if (!r.client.sellerId) continue
-      const list = (promotorSellers[r.promotorId] ??= [])
-      if (!list.includes(r.client.sellerId)) list.push(r.client.sellerId)
+      for (const seller of sellers) {
+        if (!inAreas(r.client, seller.areas)) continue
+        const list = (promotorSellers[r.promotorId] ??= [])
+        if (!list.includes(seller.id)) list.push(seller.id)
+      }
     }
     return { values: await getSettings(), defaults: defaultSettings, meta: settingsMeta, overrides: await listPromotorOverrides(), promotorSellers }
   })
@@ -193,7 +198,7 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
         checkinAt: v.checkinAt,
         checkoutAt: v.checkoutAt,
         justification: v.justifiedAt ? { reason: v.justificationReason?.label ?? null, text: v.justificationText } : null,
-        client: { id: v.client.id, code: v.client.code, name: v.client.name, address: v.client.address, city: v.client.city, latitude: v.client.latitude, longitude: v.client.longitude },
+        client: { id: v.client.id, name: v.client.name, city: v.client.city, state: v.client.state, latitude: v.client.latitude, longitude: v.client.longitude },
       })),
       trail,
     }
@@ -235,7 +240,7 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
       prisma.photo.findMany({
         where,
         include: {
-          visit: { include: { client: { select: { id: true, name: true, code: true, city: true } }, promotor: { select: { id: true, name: true } } } },
+          visit: { include: { client: { select: { id: true, name: true, city: true } }, promotor: { select: { id: true, name: true } } } },
           reviewedBy: { select: { id: true, name: true } },
           audits: { include: { auditor: { select: { id: true, name: true, role: true } }, review: true } },
           task: { select: { id: true, title: true } },

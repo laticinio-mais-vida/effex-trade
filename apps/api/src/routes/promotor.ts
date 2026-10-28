@@ -13,8 +13,9 @@ import {
   requestInclude,
   serializeRequest,
 } from '../services/permissions'
+import { clientSearch, located } from '../services/clients'
+import { clientScope } from '../services/scope'
 import { serializeClient } from '../services/serializers'
-import { getSettings } from '../services/settings'
 import {
   addExtraVisit,
   addPhoto,
@@ -84,21 +85,17 @@ export async function promotorRoutes(app: FastifyInstance) {
     return listProductsForVisit(req.user.sub, q.visitId, q.search)
   })
 
-  /** Busca de clientes para incluir como extra ou pedir substituição. */
+  /** Busca de clientes para incluir como extra ou pedir substituição: só os das cidades do promotor, com localização. */
   app.get('/clients', async (req) => {
     const q = parse(z.object({ search: z.string().trim().optional() }), req.query)
-    const settings = await getSettings(req.user.sub)
     const clients = await prisma.client.findMany({
       where: {
-        active: true,
-        ...(q.search
-          ? { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { tradeName: { contains: q.search, mode: 'insensitive' } }, { code: { contains: q.search } }, { city: { contains: q.search, mode: 'insensitive' } }] }
-          : {}),
+        AND: [await clientScope(req.user), located, { active: true }, q.search ? clientSearch(q.search) : {}],
       },
       orderBy: { name: 'asc' },
       take: 50,
     })
-    return clients.map((c) => serializeClient(c, settings.geofenceRadiusMeters))
+    return clients.map(serializeClient)
   })
 
   app.post('/visits', async (req) => {

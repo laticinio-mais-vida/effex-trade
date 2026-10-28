@@ -4,6 +4,7 @@ import { requireRole } from '../../auth'
 import { isUniqueViolation, prisma } from '../../db'
 import { badRequest, conflict, notFound } from '../../lib/errors'
 import { parse, zId, zIdParam, zPage, zQueryBool } from '../../lib/validate'
+import { clientMatcher } from '../../services/clients'
 import { productRef } from '../../services/serializers'
 
 const productBody = z.object({
@@ -88,29 +89,41 @@ export async function adminProdutosRoutes(app: FastifyInstance) {
   })
 
   /**
-   * Importa o mix (linhas cliente x produto). Para cada cliente presente no arquivo, o mix
-   * é substituído pelo do arquivo; clientes fora do arquivo ficam como estão.
+   * Importa o mix (linhas cliente x produto). O cliente vem pelo id (planilha de clientes baixada do painel) ou
+   * pelo nome fantasia com cidade e UF. Para cada cliente presente no arquivo, o mix é substituído pelo do arquivo;
+   * clientes fora do arquivo ficam como estão.
    */
   app.post('/mix/import', async (req) => {
+    const zText = z.string().trim().max(200).nullish()
     const body = parse(
-      z.object({ rows: z.array(z.object({ clientCode: z.string().trim().min(1), productCode: z.string().trim().min(1) })).min(1).max(100_000) }),
+      z.object({
+        rows: z
+          .array(z.object({ client: z.object({ id: zText, name: zText, legalName: zText, city: zText, state: zText }), productCode: z.string().trim().min(1) }))
+          .min(1)
+          .max(100_000),
+      }),
       req.body,
     )
-    const [clients, products] = await Promise.all([
-      prisma.client.findMany({ where: { code: { in: [...new Set(body.rows.map((r) => r.clientCode))] } }, select: { id: true, code: true } }),
+    const [matcher, products] = await Promise.all([
+      clientMatcher(),
       prisma.product.findMany({ where: { code: { in: [...new Set(body.rows.map((r) => r.productCode))] } }, select: { id: true, code: true } }),
     ])
-    const clientByCode = new Map(clients.map((c) => [c.code!, c.id]))
     const productByCode = new Map(products.map((p) => [p.code, p.id]))
-    const unknownClients = [...new Set(body.rows.filter((r) => !clientByCode.has(r.clientCode)).map((r) => r.clientCode))]
+    const unknownClients = new Set<string>()
     const unknownProducts = [...new Set(body.rows.filter((r) => !productByCode.has(r.productCode)).map((r) => r.productCode))]
 
     const mix = new Map<string, Set<string>>()
     for (const r of body.rows) {
-      const clientId = clientByCode.get(r.clientCode)
+      const ref = { ...r.client, state: r.client.state?.toUpperCase() }
+      const found = matcher.match(ref)
+      if ('error' in found) {
+        const label = ref.id ? `id ${ref.id}` : `${ref.name || ref.legalName || '(sem nome)'} (${[ref.city, ref.state].filter(Boolean).join(' - ') || 'sem cidade'})`
+        unknownClients.add(found.error === 'AMBIGUO' ? `${label}: mais de um cliente com este nome, use o id` : label)
+        continue
+      }
       const productId = productByCode.get(r.productCode)
-      if (!clientId || !productId) continue
-      mix.set(clientId, (mix.get(clientId) ?? new Set()).add(productId))
+      if (!productId) continue
+      mix.set(found.client.id, (mix.get(found.client.id) ?? new Set()).add(productId))
     }
     await prisma.$transaction(async (tx) => {
       for (const [clientId, productIds] of mix) {
@@ -121,7 +134,7 @@ export async function adminProdutosRoutes(app: FastifyInstance) {
     return {
       clients: mix.size,
       rows: [...mix.values()].reduce((s, set) => s + set.size, 0),
-      unknownClients,
+      unknownClients: [...unknownClients],
       unknownProducts,
     }
   })

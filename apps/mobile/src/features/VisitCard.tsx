@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native'
 import { Badge, Card, Row, styles } from '@/components/ui'
-import { formatMinutes, formatSessions, isDefaultStructure, originLabels, structureLabel, visitMinutes, visitStatusInfo } from '@/lib/format'
+import { formatMinutes, formatSessions, isDefaultStructure, originLabels, placeOf, structureLabel, visitMinutes, visitStatusInfo } from '@/lib/format'
 import { colors, space } from '@/lib/theme'
 import type { Visit } from '@/lib/types'
 
@@ -31,10 +31,9 @@ export function VisitCard({ visit, isNext, onPress }: { visit: Visit; isNext?: b
           <Text style={[styles.sectionTitle, { fontSize: 16 }]} numberOfLines={2}>
             {visit.client.name}
           </Text>
-          {visit.client.address ? (
+          {visit.client.city ? (
             <Text style={styles.muted} numberOfLines={1}>
-              {visit.client.address}
-              {visit.client.city ? ` · ${visit.client.city}` : ''}
+              {placeOf(visit.client)}
             </Text>
           ) : null}
           <Row style={{ marginTop: 2 }}>

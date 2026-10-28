@@ -47,8 +47,7 @@ export function RequestCard({ request, showPromotor, actions }: { request: Permi
       {showPromotor ? <Text style={[styles.text, { fontWeight: '600' }]}>{request.promotor.name}</Text> : null}
       {request.visit ? (
         <Text style={styles.text}>
-          Cliente: {request.visit.client.code ? `${request.visit.client.code} · ` : ''}
-          {request.visit.client.name} (#{request.visit.position})
+          Cliente: {request.visit.client.name} (#{request.visit.position})
         </Text>
       ) : null}
       <PayloadDetails request={request} />

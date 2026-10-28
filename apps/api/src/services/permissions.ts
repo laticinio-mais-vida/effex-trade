@@ -4,6 +4,7 @@ import type { AuthUser } from '../auth'
 import { fromDbDate, toDbDate, todayIn } from '../lib/dates'
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors'
 import { parse } from '../lib/validate'
+import { assertClientInArea, clientPoint } from './clients'
 import { getSettings, routeOrderEnforced } from './settings'
 
 /**
@@ -138,11 +139,13 @@ export const permissionTypes: PermissionType[] = [
     description: 'Troca o cliente desta visita por outro cliente.',
     needsVisit: true,
     payloadSchema: z.object({ clientId: z.string().min(1, 'informe o cliente substituto') }),
-    async validate({ tx, visit, payload }) {
+    async validate({ tx, promotorId, visit, payload }) {
       if (visit!.status !== 'PENDENTE') throw conflict('A visita não está mais pendente.')
       if (payload.clientId === visit!.clientId) throw badRequest('Escolha um cliente diferente do atual.')
       const client = await tx.client.findUnique({ where: { id: payload.clientId } })
       if (!client || !client.active) throw notFound('Cliente substituto')
+      await assertClientInArea({ id: promotorId, role: 'PROMOTOR' }, client, 'este promotor')
+      clientPoint(client)
       return { clientId: client.id, clientName: client.name, replacedClientName: visit!.client.name }
     },
     async apply({ tx, visit, payload }) {
@@ -269,7 +272,7 @@ export const requestInclude = {
   promotor: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true, role: true } },
   decidedBy: { select: { id: true, name: true } },
-  visit: { select: { id: true, position: true, status: true, client: { select: { id: true, name: true, code: true } } } },
+  visit: { select: { id: true, position: true, status: true, client: { select: { id: true, name: true, city: true } } } },
 } satisfies Prisma.PermissionRequestInclude
 
 type RequestWithRelations = Prisma.PermissionRequestGetPayload<{ include: typeof requestInclude }>

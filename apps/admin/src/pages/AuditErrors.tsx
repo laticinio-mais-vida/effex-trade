@@ -98,7 +98,6 @@ export function AuditErrorsPage() {
                   </a>
                   <div className="stack" style={{ gap: 6 }}>
                     <h3>
-                      {item.client.code ? `${item.client.code} · ` : ''}
                       {item.client.name}
                     </h3>
                     <span className="muted small">

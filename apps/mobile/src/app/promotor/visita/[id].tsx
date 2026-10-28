@@ -21,6 +21,7 @@ import {
   minutesSince,
   originLabels,
   photoTypeLabels,
+  placeOf,
   recurrenceLabels,
   structureLabel,
   visitMinutes,
@@ -143,7 +144,7 @@ export default function VisitaScreen() {
     !!day.nextVisitId &&
     !isNext
   const nextVisit = day.visits.find((v) => v.id === day.nextVisitId)
-  const radius = visit.client.geofenceRadius ?? rules.geofenceRadiusMeters
+  const radius = rules.geofenceRadiusMeters
   const needsFacade = rules.requireFacadePhotoOnCheckin && !visit.photosWaived
   const sessions = visit.sessions ?? []
   const reopened = sessions.length > 1
@@ -571,13 +572,8 @@ export default function VisitaScreen() {
           <Muted>#{visit.position} do roteiro</Muted>
         </Row>
         <Text style={styles.title}>{visit.client.name}</Text>
-        {visit.client.code ? <Muted>Código {visit.client.code}</Muted> : null}
-        {visit.client.address ? (
-          <Muted>
-            {visit.client.address}
-            {visit.client.city ? ` · ${visit.client.city}` : ''}
-          </Muted>
-        ) : null}
+        {visit.client.legalName && visit.client.legalName !== visit.client.name ? <Muted>{visit.client.legalName}</Muted> : null}
+        {visit.client.city ? <Muted>{placeOf(visit.client)}</Muted> : null}
         <Pressable onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${visit.client.latitude},${visit.client.longitude}`)}>
           <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>Abrir no mapa / como chegar</Text>
         </Pressable>
