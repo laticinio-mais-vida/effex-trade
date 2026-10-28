@@ -128,5 +128,7 @@ export const permissionLabels: Record<string, string> = {
   CHECKIN_FORA_CERCA: 'Check-in fora da cerca eletrônica',
   DISPENSA_FOTOS: 'Liberar sem fotos obrigatórias',
   ALTERAR_ORDEM: 'Alterar ordem de atendimento',
+  LIVRE_ORDEM_CLIENTE: 'Atender cliente fora da ordem',
+  LIVRE_ORDEM_DIA: 'Dia sem ordem do roteiro',
   SUBSTITUIR_CLIENTE: 'Substituir cliente do roteiro',
 }

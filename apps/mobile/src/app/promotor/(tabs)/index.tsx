@@ -2,7 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { Alert, Text, View } from 'react-native'
 import { Banner, Button, Card, EmptyState, ErrorView, LoadingView, Muted, Row, Screen, SectionTitle, styles } from '@/components/ui'
-import { dayClosed, onLunch, useDay } from '@/features/promotor/DayContext'
+import { dayClosed, onLunch, permissionLabels, useDay } from '@/features/promotor/DayContext'
 import { VisitCard } from '@/features/VisitCard'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { formatLongDate, formatTime } from '@/lib/format'
@@ -23,7 +23,7 @@ const trackingText = {
 
 export default function MeuDia() {
   const router = useRouter()
-  const { day, loading, error, refreshing, refresh, reload, tracking } = useDay()
+  const { day, requests, loading, error, refreshing, refresh, reload, tracking } = useDay()
   const [startingLunch, setStartingLunch] = useState(false)
 
   useFocusEffect(
@@ -50,6 +50,7 @@ export default function MeuDia() {
   const canStartLunch = canAct && day.rules.lunchBreakEnabled && started && !wd?.lunchStartedAt
   const lunchAlert = day.rules.lunchAlertMinutes ?? 0
   const lunchAlertText = lunchAlert > 0 ? `Se o almoço passar de ${formatLimit(lunchAlert)}, seu supervisor é avisado.` : null
+  const dayOrderRequest = requests.find((r) => r.type === 'LIVRE_ORDEM_DIA' && r.status === 'PENDENTE')
 
   function startLunch() {
     Alert.alert('Iniciar almoço?', ['Durante o almoço nenhuma atividade pode ser feita. A volta do almoço é a abertura do próximo cliente.', lunchAlertText].filter(Boolean).join(' '), [
@@ -149,7 +150,24 @@ export default function MeuDia() {
         Clientes do dia
       </SectionTitle>
       {canAct && lunch ? <Muted>Toque no próximo cliente para abrir o atendimento (volta do almoço) ou justificá-lo.</Muted> : null}
-      {canAct && !lunch && day.rules.enforceRouteOrder && pending.length > 0 ? <Muted>Siga a ordem do roteiro. Clientes extras podem ser atendidos a qualquer momento.</Muted> : null}
+      {canAct && !lunch && day.rules.enforceRouteOrder && pending.length > 0 ? (
+        <>
+          <Muted>Siga a ordem do roteiro. Clientes extras podem ser atendidos a qualquer momento.</Muted>
+          {dayOrderRequest ? (
+            <Banner tone="warning" text={`Aguardando supervisor: ${permissionLabels.LIVRE_ORDEM_DIA}`} />
+          ) : pending.length >= 2 ? (
+            <Row>
+              <Button
+                title="Pedir para não seguir a ordem hoje"
+                variant="ghost"
+                small
+                onPress={() => router.push({ pathname: '/promotor/pedido', params: { type: 'LIVRE_ORDEM_DIA' } })}
+              />
+            </Row>
+          ) : null}
+        </>
+      ) : null}
+      {canAct && wd?.routeOrderWaived ? <Banner tone="success" text="O supervisor liberou a ordem do roteiro hoje: atenda os clientes na sequência que preferir." /> : null}
 
       {visits.length === 0 ? <EmptyState title="Nenhum cliente no roteiro de hoje" text={canAct ? 'Você pode incluir um cliente extra abaixo.' : undefined} /> : null}
       {visits.map((v) => (

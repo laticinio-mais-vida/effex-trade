@@ -15,4 +15,6 @@ export const env = {
   uploadDir: resolve(process.env.UPLOAD_DIR ?? './uploads'),
   /** Fuso usado para definir "hoje" (roteiro do dia, relatórios). */
   timezone: process.env.TZ_APP ?? 'America/Bahia',
+  /** Servidor OSRM próprio para distâncias pelas ruas (ver infra/osrm). Sem ele, as distâncias ficam em linha reta. */
+  osrmUrl: process.env.OSRM_URL?.trim().replace(/\/+$/, '') || null,
 }

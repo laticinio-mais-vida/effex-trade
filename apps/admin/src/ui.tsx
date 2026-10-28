@@ -227,8 +227,24 @@ export function ProductPicker({ onPick, exclude = [] }: { onPick: (p: Product) =
   )
 }
 
-/** Campo de busca de cliente com lista de resultados. */
-export function ClientPicker({ onPick, placeholder = 'Buscar cliente por nome, código ou cidade', exclude = [] }: { onPick: (c: Client) => void; placeholder?: string; exclude?: string[] }) {
+/**
+ * Campo de busca de cliente com lista de resultados. Com `selectedIds`, marca vários: cada clique marca ou desmarca,
+ * a lista continua aberta e `onPickMany` marca (ou desmarca) todos os resultados da busca.
+ */
+export function ClientPicker({
+  onPick,
+  onPickMany,
+  selectedIds,
+  placeholder = 'Buscar cliente por nome, código ou cidade',
+  exclude = [],
+}: {
+  onPick: (c: Client) => void
+  onPickMany?: (clients: Client[]) => void
+  selectedIds?: string[]
+  placeholder?: string
+  exclude?: string[]
+}) {
+  const multi = selectedIds !== undefined
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [debounced, setDebounced] = useState('')
@@ -264,20 +280,36 @@ export function ClientPicker({ onPick, placeholder = 'Buscar cliente por nome, c
       {open && (
         <div className="picker-list">
           {items.length === 0 && <div className="muted small" style={{ padding: 10 }}>Nenhum cliente encontrado.</div>}
-          {items.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => {
-                onPick(c)
-                setSearch('')
-                setOpen(false)
-              }}
-            >
-              <strong>{c.code ? `${c.code} · ` : ''}{c.name}</strong>
-              <span className="muted"> {c.city ?? ''}</span>
+          {multi && onPickMany && items.length > 1 && (
+            <button type="button" className="picker-all" onClick={() => onPickMany(items)}>
+              {items.every((c) => selectedIds.includes(c.id)) ? `Desmarcar os ${items.length} resultados` : `Marcar os ${items.length} resultados`}
             </button>
-          ))}
+          )}
+          {items.map((c) => {
+            const on = multi && selectedIds.includes(c.id)
+            return (
+              <button
+                key={c.id}
+                type="button"
+                className={on ? 'on' : undefined}
+                aria-pressed={multi ? on : undefined}
+                onClick={() => {
+                  onPick(c)
+                  if (multi) return
+                  setSearch('')
+                  setOpen(false)
+                }}
+              >
+                {multi && (
+                  <span className="picker-check" aria-hidden="true">
+                    {on ? '✓' : ''}
+                  </span>
+                )}
+                <strong>{c.code ? `${c.code} · ` : ''}{c.name}</strong>
+                <span className="muted"> {c.city ?? ''}</span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

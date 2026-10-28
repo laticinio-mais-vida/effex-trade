@@ -1,8 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { api } from '../api'
-import { addDays, downloadCsv, fmtDate, fmtMinutes, fmtNumber, fmtTime, fmtTimeOn, originLabel, today, visitStatusLabel } from '../format'
-import type { Report, ReportRow, VisitStatus } from '../types'
+import {
+  addDays,
+  distanceModeLabel,
+  downloadCsv,
+  fmtDate,
+  fmtMinutes,
+  fmtNumber,
+  fmtTime,
+  fmtTimeOn,
+  isDefaultStructure,
+  originLabel,
+  structureLabel,
+  today,
+  visitStatusLabel,
+} from '../format'
+import type { DistanceMode, Report, ReportRow, VisitStatus } from '../types'
 import { DateRange, Empty, ErrorBox, Loading, PageHead, PromotorSelect, Segmented, StatusPill, Tabs } from '../ui'
 
 type Tab = 'resumo' | 'jornadas' | 'visitas' | 'rupturas' | 'justificativas'
@@ -12,6 +26,8 @@ const permissionShort: Record<string, string> = {
   CHECKIN_FORA_CERCA: 'Cerca',
   DISPENSA_FOTOS: 'Sem fotos',
   ALTERAR_ORDEM: 'Ordem',
+  LIVRE_ORDEM_CLIENTE: 'Fora da ordem',
+  LIVRE_ORDEM_DIA: 'Dia sem ordem',
   SUBSTITUIR_CLIENTE: 'Substituição',
 }
 
@@ -33,12 +49,13 @@ export function ReportsPage() {
     if (!data) return
     downloadCsv(
       `execucao-${range.from}-a-${range.to}.csv`,
-      ['Data', 'Promotor', 'Ordem', 'Origem', 'Código', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', 'Deslocamento (km)', 'Distância no check-in (m)', 'Fotos', 'Rupturas', 'Motivo', 'Justificativa', 'Liberações'],
+      ['Data', 'Promotor', 'Ordem', 'Origem', 'Estrutura', 'Código', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', data.travelKmSource ? `Deslocamento (km ${distanceModeLabel[data.travelKmSource]})` : 'Deslocamento (km)', 'Distância no check-in (m)', 'Fotos', 'Rupturas', 'Contagem de estoque', 'Motivo', 'Justificativa', 'Liberações'],
       data.rows.map((r) => [
         fmtDate(r.date),
         r.promotor.name,
         r.position,
         originLabel[r.origin],
+        structureLabel(r.modules),
         r.client.code,
         r.client.name,
         r.client.city,
@@ -53,6 +70,7 @@ export function ReportsPage() {
         r.checkinDistance,
         r.photoCount,
         r.ruptures.map((p) => p.name).join(', '),
+        r.modules.includes('ESTOQUE') ? (r.stockConfirmedAt ? `confirmada ${fmtTime(r.stockConfirmedAt)}` : 'não confirmada') : '',
         r.justification?.reason,
         r.justification?.text,
         r.approvedRequests.map((t) => permissionShort[t] ?? t).join(', '),
@@ -91,6 +109,7 @@ export function ReportsPage() {
       {data && data.rows.length === 0 && <Empty>Nenhuma visita no período. Ajuste as datas ou o promotor.</Empty>}
       {data && data.rows.length > 0 && (
         <>
+          {['resumo', 'jornadas', 'visitas'].includes(tab) && <KmNote source={data.travelKmSource} />}
           {tab === 'resumo' && <Summary data={data} />}
           {tab === 'jornadas' && <Days data={data} />}
           {tab === 'visitas' && (
@@ -116,6 +135,20 @@ export function ReportsPage() {
         </>
       )}
     </div>
+  )
+}
+
+function KmNote({ source }: { source: DistanceMode | null }) {
+  if (!source) return null
+  const why: Record<DistanceMode, string> = {
+    ruas: 'Caminho mais curto de carro entre um cliente e o seguinte; é uma aproximação do trajeto feito.',
+    linha_reta: 'O servidor de rotas não está configurado ou não respondeu.',
+    misto: 'O servidor de rotas não respondeu em alguns trechos.',
+  }
+  return (
+    <p className="small muted" style={{ margin: '0 0 10px' }}>
+      Km de deslocamento {distanceModeLabel[source]}. {why[source]}
+    </p>
   )
 }
 
@@ -162,7 +195,10 @@ function Summary({ data }: { data: Report }) {
               <td className="r">{fmtMinutes(s.avgClientMin)}</td>
               <td className="r">{fmtMinutes(s.totalClientMin)}</td>
               <td className="r">{fmtMinutes(s.avgTravelMin)}</td>
-              <td className="r">{fmtMinutes(s.totalTravelMin)}</td>
+              <td className="r">
+                {fmtMinutes(s.totalTravelMin)}
+                {s.totalTravelKm != null && <div className="small muted">{fmtNumber(s.totalTravelKm, 1)} km</div>}
+              </td>
               <td className="r">{s.ruptures}</td>
               <td className="r" style={{ color: s.autoClosed ? 'var(--justified)' : undefined }}>
                 {s.autoClosed}
@@ -203,7 +239,16 @@ function Days({ data }: { data: Report }) {
           {data.days.map((d) => (
             <tr key={`${d.date}-${d.promotor.id}`}>
               <td className="num">{fmtDate(d.date)}</td>
-              <td className="nowrap">{d.promotor.name}</td>
+              <td className="nowrap">
+                {d.promotor.name}
+                {d.routeOrderWaived && (
+                  <div>
+                    <span className="chip warn" title="O supervisor liberou o dia inteiro da ordem do roteiro">
+                      dia sem ordem
+                    </span>
+                  </div>
+                )}
+              </td>
               <td className="num">{fmtTime(d.workStart)}</td>
               <td className="num nowrap">
                 {d.lunchStart ? (
@@ -234,7 +279,10 @@ function Days({ data }: { data: Report }) {
                 {d.notDone}
               </td>
               <td className="r">{fmtMinutes(d.clientMin)}</td>
-              <td className="r">{fmtMinutes(d.travelMin)}</td>
+              <td className="r">
+                {fmtMinutes(d.travelMin)}
+                {d.travelKm != null && <div className="small muted">{fmtNumber(d.travelKm, 1)} km</div>}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -279,6 +327,12 @@ function Visits({ rows }: { rows: ReportRow[] }) {
                     {' '}
                     <span className="chip">{originLabel[r.origin]}</span>
                   </>
+                )}
+                {!isDefaultStructure(r.modules) && (
+                  <div className="small muted" title="Estrutura do atendimento">
+                    {structureLabel(r.modules)}
+                    {r.modules.includes('ESTOQUE') && (r.stockConfirmedAt ? ` · contagem confirmada às ${fmtTime(r.stockConfirmedAt)}` : ' · contagem não confirmada')}
+                  </div>
                 )}
               </td>
               <td>

@@ -1,0 +1,12 @@
+# Servidor de rotas (OSRM) da EFFEX Trade. Antes de subir pela primeira vez, rode: bash preparar-mapa.sh
+# Subir: docker compose up -d    Ver se está no ar: docker compose logs -f osrm
+services:
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v26.10.0-debian
+    command: osrm-routed --algorithm mld --max-table-size 200 /data/mapa.osrm
+    volumes:
+      - ./dados/atual:/data:ro
+    # Só a API usa o OSRM: a porta fica presa à própria máquina. Não abra para a internet.
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: unless-stopped

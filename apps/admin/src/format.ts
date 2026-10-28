@@ -1,4 +1,4 @@
-import type { PhotoType, RequestStatus, Role, VisitOrigin, VisitStatus } from './types'
+import type { DistanceMode, PhotoType, RequestStatus, Role, TaskRecurrence, VisitModule, VisitOrigin, VisitStatus } from './types'
 
 export const TZ = (import.meta.env.VITE_TZ as string | undefined) ?? 'America/Bahia'
 
@@ -76,7 +76,23 @@ export const visitStatusLabel: Record<VisitStatus, string> = {
   CANCELADA: 'Substituído',
 }
 
-export const originLabel: Record<VisitOrigin, string> = { ROTEIRO: 'Roteiro', EXTRA: 'Extra', SUBSTITUICAO: 'Substituição' }
+export const moduleLabel: Record<VisitModule, string> = { FOTOS: 'Padrão', ATIVIDADES: 'Atividade extra', ESTOQUE: 'Contagem de estoque' }
+export const MODULE_ORDER: VisitModule[] = ['FOTOS', 'ATIVIDADES', 'ESTOQUE']
+/** Estrutura de todo cliente novo no roteiro: padrão + atividade extra. */
+export const DEFAULT_MODULES: VisitModule[] = ['FOTOS', 'ATIVIDADES']
+export const isDefaultStructure = (modules: VisitModule[]) => modules.join() === DEFAULT_MODULES.join()
+/** "Padrão + atividade extra", "Contagem de estoque"... */
+export const structureLabel = (modules: VisitModule[]) => MODULE_ORDER.filter((m) => modules.includes(m)).map((m) => moduleLabel[m]).join(' + ')
+
+export const recurrenceLabel: Record<TaskRecurrence, string> = {
+  TODA_VISITA: 'Toda visita',
+  PONTUAL: 'Uma vez (pontual)',
+  SEMANAL: 'Semanal',
+  QUINZENAL: 'Quinzenal',
+  MENSAL: 'Mensal',
+}
+
+export const originLabel: Record<VisitOrigin, string> = { ROTEIRO: 'Roteiro', EXTRA: 'Extra', SUBSTITUICAO: 'Substituição', PONTUAL: 'Pontual' }
 
 export const photoTypeLabel: Record<PhotoType, string> = {
   FACHADA: 'Fachada',
@@ -92,6 +108,12 @@ export const roleLabel: Record<Role, string> = { ADMIN: 'Administrador', SUPERVI
 export const requestStatusLabel: Record<RequestStatus, string> = { PENDENTE: 'Aguardando', APROVADA: 'Aprovada', NEGADA: 'Negada', CANCELADA: 'Cancelada' }
 
 export const weekdayLabel = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+
+export const distanceModeLabel: Record<DistanceMode, string> = {
+  ruas: 'pelas ruas',
+  linha_reta: 'em linha reta',
+  misto: 'parte pelas ruas, parte em linha reta',
+}
 
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/)

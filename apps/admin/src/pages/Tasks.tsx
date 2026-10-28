@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api'
-import { addDays, fmtDate, today } from '../format'
-import type { Client, Task } from '../types'
+import { addDays, fmtDate, recurrenceLabel, today } from '../format'
+import type { Client, Task, TaskRecurrence } from '../types'
 import { ClientPicker, Empty, ErrorBox, Field, Loading, Modal, PageHead, useLookups } from '../ui'
 
 export function TasksPage() {
@@ -14,7 +14,7 @@ export function TasksPage() {
     <div>
       <PageHead
         title="Atividades extras"
-        description="Tarefas pedidas ao promotor além do roteiro, como montar uma ponta de gôndola de campanha. Aparecem no app durante o atendimento; podem exigir foto ou só a confirmação do promotor, e podem ser obrigatórias para encerrar o atendimento."
+        description="Tarefas pedidas ao promotor além do roteiro, como colocar placas de preço ou montar uma ponta de gôndola. Aparecem no atendimento dos clientes cuja estrutura tem atividade extra, na recorrência escolhida (uma vez, toda semana...); podem exigir foto ou só a confirmação do promotor, e podem ser obrigatórias para encerrar o atendimento."
         actions={
           <button className="btn primary" onClick={() => setEditing('new')}>
             Nova atividade
@@ -33,6 +33,7 @@ export function TasksPage() {
                 <th>Cliente</th>
                 <th>Promotor</th>
                 <th>Período</th>
+                <th>Recorrência</th>
                 <th>Conclusão</th>
                 <th className="r">Concluídas</th>
                 <th>Situação</th>
@@ -40,7 +41,8 @@ export function TasksPage() {
             </thead>
             <tbody>
               {query.data.map((t) => {
-                const current = t.active && t.startDate <= t0 && t.endDate >= t0
+                const ended = !!t.endDate && t.endDate < t0
+                const current = t.active && t.startDate <= t0 && !ended
                 return (
                   <tr key={t.id} className="clickable" onClick={() => setEditing(t)}>
                     <td>
@@ -49,8 +51,10 @@ export function TasksPage() {
                     </td>
                     <td>{t.client?.name ?? <span className="muted">Todos os clientes</span>}</td>
                     <td>{t.promotor?.name ?? <span className="muted">Todos os promotores</span>}</td>
-                    <td className="num">
-                      {fmtDate(t.startDate)} a {fmtDate(t.endDate)}
+                    <td className="num">{t.endDate ? `${fmtDate(t.startDate)} a ${fmtDate(t.endDate)}` : `Desde ${fmtDate(t.startDate)}`}</td>
+                    <td>
+                      {recurrenceLabel[t.recurrence]}
+                      {t.scheduledVisitId && <div className="small muted">Visita pontual</div>}
                     </td>
                     <td>
                       {t.requiresPhoto ? 'Com foto' : 'Marcar como feita'}
@@ -61,7 +65,7 @@ export function TasksPage() {
                       )}
                     </td>
                     <td className="r">{t.completionCount}</td>
-                    <td>{!t.active ? <span className="muted">Desativada</span> : current ? 'Em andamento' : t.endDate < t0 ? <span className="muted">Encerrada</span> : 'Agendada'}</td>
+                    <td>{!t.active ? <span className="muted">Desativada</span> : current ? 'Em andamento' : ended ? <span className="muted">Encerrada</span> : 'Agendada'}</td>
                   </tr>
                 )
               })}
@@ -74,16 +78,35 @@ export function TasksPage() {
   )
 }
 
-function TaskForm({ task, onClose }: { task: Task | null; onClose: () => void }) {
+const RECURRENCES: TaskRecurrence[] = ['PONTUAL', 'SEMANAL', 'QUINZENAL', 'MENSAL', 'TODA_VISITA']
+const recurrenceHelp: Record<TaskRecurrence, string> = {
+  TODA_VISITA: 'Aparece em todas as visitas ao cliente dentro do período.',
+  PONTUAL: 'Feita uma vez em cada cliente; depois de concluída não aparece mais.',
+  SEMANAL: 'Uma vez por semana (segunda a domingo) em cada cliente.',
+  QUINZENAL: 'Uma vez a cada duas semanas em cada cliente, contadas a partir da semana de início.',
+  MENSAL: 'Uma vez por mês em cada cliente.',
+}
+
+/** Formulário da atividade. `preset` abre já com cliente e promotor (atalho da tela de Roteiros). */
+export function TaskForm({
+  task,
+  preset,
+  onClose,
+}: {
+  task: Task | null
+  preset?: { client: Pick<Client, 'id' | 'name'>; promotorId: string }
+  onClose: () => void
+}) {
   const qc = useQueryClient()
   const lookups = useLookups()
   const [form, setForm] = useState({
     title: task?.title ?? '',
     description: task?.description ?? '',
-    client: (task?.client ?? null) as Pick<Client, 'id' | 'name'> | null,
-    promotorId: task?.promotorId ?? '',
+    client: (task?.client ?? preset?.client ?? null) as Pick<Client, 'id' | 'name'> | null,
+    promotorId: task?.promotorId ?? preset?.promotorId ?? '',
     startDate: task?.startDate ?? today(),
-    endDate: task?.endDate ?? addDays(today(), 7),
+    endDate: task ? task.endDate : preset ? null : addDays(today(), 7),
+    recurrence: task?.recurrence ?? (preset ? 'SEMANAL' : 'TODA_VISITA') as TaskRecurrence,
     requiresPhoto: task?.requiresPhoto ?? true,
     required: task?.required ?? false,
     active: task?.active ?? true,
@@ -97,6 +120,7 @@ function TaskForm({ task, onClose }: { task: Task | null; onClose: () => void })
         promotorId: form.promotorId || null,
         startDate: form.startDate,
         endDate: form.endDate,
+        recurrence: form.recurrence,
         requiresPhoto: form.requiresPhoto,
         required: form.required,
         active: form.active,
@@ -105,6 +129,7 @@ function TaskForm({ task, onClose }: { task: Task | null; onClose: () => void })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['client-tasks'] })
       onClose()
     },
   })
@@ -154,11 +179,39 @@ function TaskForm({ task, onClose }: { task: Task | null; onClose: () => void })
             ))}
           </select>
         </Field>
+        <Field label="Recorrência" className="full">
+          <select className="input" value={form.recurrence} onChange={(e) => setForm({ ...form, recurrence: e.target.value as TaskRecurrence })}>
+            {RECURRENCES.map((r) => (
+              <option key={r} value={r}>
+                {recurrenceLabel[r]}
+              </option>
+            ))}
+          </select>
+          <span className="small muted" style={{ fontWeight: 400, whiteSpace: 'normal' }}>
+            {recurrenceHelp[form.recurrence]}
+          </span>
+        </Field>
         <Field label="Início">
           <input className="input" type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
         </Field>
         <Field label="Fim">
-          <input className="input" type="date" value={form.endDate} min={form.startDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
+          {form.endDate === null ? (
+            <div className="btn-row">
+              <span className="muted" style={{ fontWeight: 400 }}>
+                Sem data de fim
+              </span>
+              <button type="button" className="btn small" onClick={() => setForm({ ...form, endDate: addDays(form.startDate, 30) })}>
+                Definir data
+              </button>
+            </div>
+          ) : (
+            <div className="btn-row">
+              <input className="input" type="date" value={form.endDate} min={form.startDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
+              <button type="button" className="btn small" onClick={() => setForm({ ...form, endDate: null })}>
+                Sem fim
+              </button>
+            </div>
+          )}
         </Field>
         <label className="check full">
           <input type="checkbox" checked={form.requiresPhoto} onChange={(e) => setForm({ ...form, requiresPhoto: e.target.checked })} />

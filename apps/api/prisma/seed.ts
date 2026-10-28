@@ -22,6 +22,7 @@ async function clear() {
   await prisma.photoAudit.deleteMany()
   await prisma.photo.deleteMany()
   await prisma.permissionRequest.deleteMany()
+  await prisma.scheduledVisit.deleteMany()
   await prisma.visit.deleteMany()
   await prisma.workDay.deleteMany()
   await prisma.locationPing.deleteMany()
@@ -138,7 +139,7 @@ function pingsBetween(promotorId: string, from: Date, to: Date, a: [number, numb
   return out
 }
 
-type SeedTask = { id: string; clientId: string | null; promotorId: string | null; requiresPhoto: boolean; required: boolean; startDate: Date; endDate: Date }
+type SeedTask = { id: string; clientId: string | null; promotorId: string | null; requiresPhoto: boolean; required: boolean; startDate: Date; endDate: Date | null }
 
 /** done = atendimento completo; forgot = esqueceu o check-out e o sistema encerrou na última foto. */
 type Outcome = 'done' | 'justified' | 'pending' | 'forgot'
@@ -272,7 +273,7 @@ async function simulateDay(
     // Atividades extras do dia: as obrigatórias sempre são feitas; as de foto concluem ao fotografar
     const day = toDbDate(date)
     const applicable = tasks.filter(
-      (t) => (t.clientId === null || t.clientId === visit.clientId) && (t.promotorId === null || t.promotorId === promotorId) && t.startDate <= day && t.endDate >= day,
+      (t) => (t.clientId === null || t.clientId === visit.clientId) && (t.promotorId === null || t.promotorId === promotorId) && t.startDate <= day && (t.endDate === null || t.endDate >= day),
     )
     for (const [k, task] of applicable.entries()) {
       if (!task.required && rand() > 0.7) continue

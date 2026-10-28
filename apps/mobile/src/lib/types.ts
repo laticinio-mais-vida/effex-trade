@@ -2,7 +2,10 @@
 
 export type Role = 'ADMIN' | 'SUPERVISOR' | 'VENDEDOR' | 'PROMOTOR'
 export type VisitStatus = 'PENDENTE' | 'EM_ATENDIMENTO' | 'CONCLUIDA' | 'JUSTIFICADA' | 'CANCELADA'
-export type VisitOrigin = 'ROTEIRO' | 'EXTRA' | 'SUBSTITUICAO'
+export type VisitOrigin = 'ROTEIRO' | 'EXTRA' | 'SUBSTITUICAO' | 'PONTUAL'
+/** Etapas do atendimento: padrão (fotos antes, depois e ruptura), atividades extras e contagem de estoque. */
+export type VisitModule = 'FOTOS' | 'ATIVIDADES' | 'ESTOQUE'
+export type TaskRecurrence = 'TODA_VISITA' | 'PONTUAL' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL'
 export type PhotoType = 'FACHADA' | 'ANTES' | 'DEPOIS' | 'RUPTURA' | 'VENCIMENTO' | 'ATIVIDADE_EXTRA'
 export type AuditStatus = 'APROVADA' | 'REPROVADA'
 export type ReviewVerdict = 'CORRETA' | 'INCORRETA'
@@ -61,11 +64,13 @@ export interface Photo {
   products?: Product[]
 }
 
-export type VisitStep = 'ANTES' | 'DEPOIS' | 'PRODUTOS' | 'RUPTURA' | 'CHECKOUT'
+export type VisitStep = 'ANTES' | 'DEPOIS' | 'PRODUTOS' | 'RUPTURA' | 'ESTOQUE' | 'CHECKOUT'
 
 /** Sequência obrigatória do atendimento: fachada -> antes -> depois com produtos -> ruptura -> check-out. */
 export interface VisitProgress {
+  /** A sequência de fotos vale nesta visita (estrutura com a etapa padrão, regra ligada e fotos não dispensadas). */
   enforced: boolean
+  stockConfirmed?: boolean
   facade: boolean
   before: number
   after: number
@@ -89,6 +94,7 @@ export interface VisitTask {
   id: string
   title: string
   description: string | null
+  recurrence?: TaskRecurrence
   requiresPhoto: boolean
   /** Obrigatória: o check-out só sai com ela concluída. */
   required: boolean
@@ -110,12 +116,18 @@ export interface Visit {
   position: number
   origin: VisitOrigin
   status: VisitStatus
+  /** Estrutura do atendimento. */
+  modules?: VisitModule[]
+  /** Promotor confirmou a contagem de estoque (etapa feita fora do app). */
+  stockConfirmedAt?: string | null
   client: Client
   checkinAt: string | null
   checkinDistance: number | null
   checkoutAt: string | null
   geofenceWaived: boolean
   photosWaived: boolean
+  /** Liberado pelo supervisor da ordem do roteiro: pode ser atendido a qualquer momento. */
+  routeOrderWaived?: boolean
   /** Encerrado pelo sistema ao abrir o próximo atendimento (saída = última foto). */
   autoClosed?: boolean
   ruptureConfirmedAt?: string | null
@@ -128,6 +140,8 @@ export interface Visit {
   photos?: Photo[]
   requests?: { id: string; type: string; status: RequestStatus; createdAt: string; decisionNote: string | null }[]
   tasks?: VisitTask[]
+  /** Incluída pelo supervisor como visita pontual, com o recado dele. */
+  scheduled?: { id: string; note: string | null; createdBy: string }
 }
 
 /** Resposta do check-in ou da reabertura: a visita aberta e os atendimentos esquecidos que foram encerrados. */
@@ -175,6 +189,8 @@ export interface Day {
     closedAt?: string | null
     lunchStartedAt?: string | null
     lunchEndedAt?: string | null
+    /** Supervisor liberou o dia inteiro da ordem do roteiro (rules.enforceRouteOrder já vem desligado). */
+    routeOrderWaived?: boolean
   } | null
   rules: DayRules
   nextVisitId: string | null
@@ -273,6 +289,27 @@ export interface Team {
 export interface SupervisorDay {
   promotor: { id: string; name: string }
   date: string
-  workDay: { startedAt: string | null; endedAt: string | null } | null
+  workDay: { startedAt: string | null; endedAt: string | null; closedAt?: string | null; routeOrderWaived?: boolean } | null
+  /** A ordem do roteiro é obrigatória neste dia pelas regras do promotor (sem contar liberações). */
+  routeOrderEnforced?: boolean
   visits: Visit[]
+  /** Visitas pontuais de hoje em diante (as de hoje também estão em visits). */
+  scheduled?: ScheduledVisit[]
+  /** Até quantos dias à frente dá para agendar uma visita pontual. */
+  scheduleDaysAhead?: number
+}
+
+/** Visita pontual: cliente incluído pelo supervisor num único dia do promotor, fora do roteiro fixo. */
+export interface ScheduledVisit {
+  id: string
+  date: string
+  note: string | null
+  modules: VisitModule[]
+  /** Atividade escrita pelo supervisor para esta visita. */
+  activity: { id: string; title: string; requiresPhoto: boolean } | null
+  client: Client
+  createdBy: { id: string; name: string }
+  createdAt: string
+  /** Visita do dia, quando o dia já foi gerado (hoje). */
+  visit: { id: string; status: VisitStatus } | null
 }

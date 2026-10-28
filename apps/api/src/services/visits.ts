@@ -1,4 +1,4 @@
-import { prisma, Prisma, type PhotoType, type Visit } from '../db'
+import { prisma, Prisma, type PhotoType, type Visit, type VisitModule } from '../db'
 import { fromDbDate, minutesBetween, toDbDate, todayIn } from '../lib/dates'
 import { badRequest, conflict, forbidden, notFound, ruleViolation } from '../lib/errors'
 import { distanceMeters, formatDistance } from '../lib/geo'
@@ -8,6 +8,7 @@ import { productRef, serializePhoto, serializeVisit } from './serializers'
 import { stampPhoto } from './photo-stamp'
 import { getSettings, routeOrderEnforced, type Settings } from './settings'
 import { removeUpload, saveUpload } from './storage'
+import { loadTaskContext, tasksOfVisit, type TaskContext } from './tasks'
 import { ensureWorkDay } from './workdays'
 
 const visitInclude = {
@@ -18,6 +19,7 @@ const visitInclude = {
   ruptures: { include: { product: true }, orderBy: { product: { name: 'asc' } } },
   taskCompletions: true,
   sessions: { orderBy: { checkinAt: 'asc' } },
+  scheduledVisit: { include: { createdBy: { select: { name: true } } } },
 } satisfies Prisma.VisitInclude
 
 type Tx = Prisma.TransactionClient
@@ -45,6 +47,12 @@ function assertNotOnLunch(wd: LunchState) {
     throw ruleViolation('Você está no horário de almoço. Nenhuma atividade pode ser feita agora; a volta do almoço é a abertura do próximo cliente.', 'EM_ALMOCO')
   }
 }
+
+/** Origens que ficam fora da ordem do roteiro: incluídas no dia pelo promotor (extra) ou pelo supervisor (pontual). */
+const OUTSIDE_ORDER = ['EXTRA', 'PONTUAL'] as const
+
+/** Entra na ordem do roteiro: extras, pontuais e os liberados pelo supervisor ficam fora (atendidos a qualquer momento). */
+const inRouteOrder = (v: { origin: string; routeOrderWaived: boolean }) => !(OUTSIDE_ORDER as readonly string[]).includes(v.origin) && !v.routeOrderWaived
 
 /** Roteiro encerrado (pelo promotor ou pelo sistema). */
 const isClosed = (wd: { closedAt: Date | null; endedAt: Date | null }) => !!(wd.closedAt ?? wd.endedAt)
@@ -82,41 +90,27 @@ async function assertProductsInMix(clientId: string, productIds: string[]) {
   }
 }
 
-/** Tarefas (atividades extras) ativas na data que se aplicam ao promotor e aos clientes informados. */
-async function activeTasks(promotorId: string, date: string, clientIds: string[]) {
-  const day = toDbDate(date)
-  return prisma.task.findMany({
-    where: {
-      active: true,
-      startDate: { lte: day },
-      endDate: { gte: day },
-      AND: [
-        { OR: [{ promotorId }, { promotorId: null }] },
-        { OR: [{ clientId: { in: clientIds } }, { clientId: null }] },
-      ],
-    },
-    orderBy: { createdAt: 'asc' },
-  })
-}
-
 // ---------------------------------------------------------------------------
-// Sequência do atendimento: fachada (no check-in) -> antes -> depois com produtos -> confirmação de ruptura
+// Estrutura do atendimento: fachada (no check-in) e as etapas da visita, em qualquer combinação:
+// padrão (antes -> depois com produtos -> confirmação de ruptura), atividades extras e contagem de estoque
 // ---------------------------------------------------------------------------
 
 type SequenceInput = {
+  modules: VisitModule[]
   photosWaived: boolean
   ruptureConfirmedAt: Date | null
+  stockConfirmedAt: Date | null
   photos: { type: PhotoType; products?: unknown[] }[]
 }
 
-export type VisitStep = 'ANTES' | 'DEPOIS' | 'PRODUTOS' | 'RUPTURA' | 'CHECKOUT'
+export type VisitStep = 'ANTES' | 'DEPOIS' | 'PRODUTOS' | 'RUPTURA' | 'ESTOQUE' | 'CHECKOUT'
 
-/** Situação da sequência obrigatória e qual o próximo passo do promotor. */
+/** Situação das etapas obrigatórias e qual o próximo passo do promotor. `enforced`: a sequência de fotos vale nesta visita. */
 export function visitProgress(visit: SequenceInput, settings: Settings) {
   const before = visit.photos.filter((p) => p.type === 'ANTES').length
   const after = visit.photos.filter((p) => p.type === 'DEPOIS')
   const afterWithoutProducts = after.filter((p) => (p.products?.length ?? 0) === 0).length
-  const enforced = settings.enforceVisitSequence && !visit.photosWaived
+  const enforced = visit.modules.includes('FOTOS') && settings.enforceVisitSequence && !visit.photosWaived
   const missing: VisitStep[] = []
   if (enforced) {
     if (before === 0) missing.push('ANTES')
@@ -124,6 +118,8 @@ export function visitProgress(visit: SequenceInput, settings: Settings) {
     else if (afterWithoutProducts > 0) missing.push('PRODUTOS')
     if (!visit.ruptureConfirmedAt) missing.push('RUPTURA')
   }
+  // A contagem é feita fora do app; o promotor só confirma, e a dispensa de fotos não a dispensa
+  if (visit.modules.includes('ESTOQUE') && !visit.stockConfirmedAt) missing.push('ESTOQUE')
   return {
     enforced,
     facade: visit.photos.some((p) => p.type === 'FACHADA'),
@@ -131,6 +127,7 @@ export function visitProgress(visit: SequenceInput, settings: Settings) {
     after: after.length,
     afterWithoutProducts,
     ruptureConfirmed: !!visit.ruptureConfirmedAt,
+    stockConfirmed: !!visit.stockConfirmedAt,
     missing,
     next: (missing[0] === 'PRODUTOS' ? 'DEPOIS' : (missing[0] ?? 'CHECKOUT')) as VisitStep,
   }
@@ -141,7 +138,15 @@ const stepMessages: Record<VisitStep, string> = {
   DEPOIS: 'tire as fotos de depois',
   PRODUTOS: 'identifique os produtos em todas as fotos de depois',
   RUPTURA: 'confirme as rupturas',
+  ESTOQUE: 'confirme a contagem de estoque',
   CHECKOUT: '',
+}
+
+/** Fotos de antes e depois e a ruptura só existem na estrutura com a etapa padrão. */
+function assertPhotoStep(visit: { modules: VisitModule[] }) {
+  if (!visit.modules.includes('FOTOS')) {
+    throw ruleViolation('Este atendimento não tem a etapa de fotos de antes, depois e ruptura.', 'ETAPA_INEXISTENTE')
+  }
 }
 
 /** Qualquer mudança nas fotos de depois invalida a confirmação de ruptura (a ordem precisa ser refeita). */
@@ -163,46 +168,29 @@ async function assertProducts(productIds: string[]) {
 
 type FullVisit = Prisma.VisitGetPayload<{ include: typeof visitInclude }>
 
-type ActiveTask = Awaited<ReturnType<typeof activeTasks>>[number]
-
-/** Atividades da visita. Ao reabrir o cliente, as atividades já feitas continuam feitas. */
-function visitTasks(visit: FullVisit, tasks: ActiveTask[]) {
-  return tasks
-    .filter((t) => !t.clientId || t.clientId === visit.clientId)
-    .map((t) => {
-      const completion = visit.taskCompletions.find((c) => c.taskId === t.id)
-      return {
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        requiresPhoto: t.requiresPhoto,
-        required: t.required,
-        done: !!completion,
-        completedAt: completion?.completedAt ?? null,
-        notes: completion?.notes ?? null,
-      }
-    })
-}
+/** Atividades da visita com a recorrência aplicada (só na estrutura com atividades extras). */
+const visitTaskContext = (promotorId: string, visit: { date: Date; clientId: string }) => loadTaskContext(promotorId, fromDbDate(visit.date), [visit.clientId])
 
 /** Atividades obrigatórias ainda não concluídas (as de foto não travam se o supervisor dispensou as fotos). */
-function pendingRequiredTasks(visit: FullVisit, tasks: ActiveTask[]) {
-  return visitTasks(visit, tasks).filter((t) => t.required && !t.done && !(t.requiresPhoto && visit.photosWaived))
+function pendingRequiredTasks(visit: FullVisit, ctx: TaskContext) {
+  return tasksOfVisit(ctx, visit).filter((t) => t.required && !t.done && !(t.requiresPhoto && visit.photosWaived))
 }
 
-function serializeFull(visit: FullVisit, settings: Settings, tasks: ActiveTask[]) {
+function serializeFull(visit: FullVisit, settings: Settings, ctx: TaskContext) {
   return {
     ...serializeVisit(visit, settings.geofenceRadiusMeters),
     progress: visitProgress(visit, settings),
-    tasks: visitTasks(visit, tasks),
+    tasks: tasksOfVisit(ctx, visit),
   }
 }
+
+const noTasks: TaskContext = { tasks: [], history: [] }
 
 export async function getVisitDetail(promotorId: string, visitId: string) {
   await loadOwnVisit(promotorId, visitId)
   const settings = await getSettings(promotorId)
   const visit = await prisma.visit.findUniqueOrThrow({ where: { id: visitId }, include: visitInclude })
-  const tasks = await activeTasks(promotorId, fromDbDate(visit.date), [visit.clientId])
-  return serializeFull(visit, settings, tasks)
+  return serializeFull(visit, settings, await visitTaskContext(promotorId, visit))
 }
 
 export async function getDayForPromotor(promotorId: string, date: string) {
@@ -217,10 +205,11 @@ export async function getDayForPromotor(promotorId: string, date: string) {
   const visits = workDay
     ? await prisma.visit.findMany({ where: { workDayId: workDay.id, status: { not: 'CANCELADA' } }, include: visitInclude, orderBy: { position: 'asc' } })
     : []
-  const tasks = await activeTasks(promotorId, date, visits.map((v) => v.clientId))
+  const taskCtx = await loadTaskContext(promotorId, date, visits.map((v) => v.clientId))
   const reasons = await prisma.justificationReason.findMany({ where: { active: true }, orderBy: [{ position: 'asc' }, { label: 'asc' }] })
 
-  const next = visits.find((v) => v.status === 'PENDENTE' && v.origin !== 'EXTRA')
+  const orderEnforced = routeOrderEnforced(settings, date) && !workDay?.routeOrderWaived
+  const next = visits.find((v) => v.status === 'PENDENTE' && inRouteOrder(v))
   return {
     date,
     isToday: date === today,
@@ -232,11 +221,12 @@ export async function getDayForPromotor(promotorId: string, date: string) {
           closedAt: workDay.closedAt,
           lunchStartedAt: workDay.lunchStartedAt,
           lunchEndedAt: workDay.lunchEndedAt,
+          routeOrderWaived: workDay.routeOrderWaived,
         }
       : null,
     rules: {
       geofenceRadiusMeters: settings.geofenceRadiusMeters,
-      enforceRouteOrder: routeOrderEnforced(settings, date),
+      enforceRouteOrder: orderEnforced,
       requireFacadePhotoOnCheckin: settings.requireFacadePhotoOnCheckin,
       enforceVisitSequence: settings.enforceVisitSequence,
       afterPhotoWarningMinutes: settings.afterPhotoWarningMinutes,
@@ -253,9 +243,9 @@ export async function getDayForPromotor(promotorId: string, date: string) {
       justificationMinLength: settings.justificationMinLength,
       trackingIntervalMinutes: settings.trackingIntervalMinutes,
     },
-    nextVisitId: routeOrderEnforced(settings, date) ? (next?.id ?? null) : null,
+    nextVisitId: orderEnforced ? (next?.id ?? null) : null,
     inProgressVisitId: visits.find((v) => v.status === 'EM_ATENDIMENTO')?.id ?? null,
-    visits: visits.map((v) => serializeFull(v, settings, tasks)),
+    visits: visits.map((v) => serializeFull(v, settings, taskCtx)),
     reasons: reasons.map((r) => ({ id: r.id, label: r.label })),
   }
 }
@@ -435,7 +425,7 @@ export async function addExtraVisit(promotorId: string, clientId: string) {
     data: { workDayId: workDay.id, promotorId, clientId, date: toDbDate(date), position: (last._max.position ?? 0) + 1, origin: 'EXTRA' },
     include: visitInclude,
   })
-  return serializeFull(visit, settings, [])
+  return serializeFull(visit, settings, await visitTaskContext(promotorId, visit))
 }
 
 export async function removeExtraVisit(promotorId: string, visitId: string) {
@@ -492,9 +482,9 @@ async function openVisit(promotorId: string, visitId: string, loc: LocationInput
     throw conflict(`Finalize o atendimento em ${open[0]!.client.name} antes de iniciar outro.`, 'ATENDIMENTO_EM_ANDAMENTO', { visitId: open[0]!.id })
   }
 
-  if (mode === 'checkin' && routeOrderEnforced(settings, fromDbDate(visit.date)) && visit.origin !== 'EXTRA') {
+  if (mode === 'checkin' && routeOrderEnforced(settings, fromDbDate(visit.date)) && !visit.workDay.routeOrderWaived && inRouteOrder(visit)) {
     const next = await prisma.visit.findFirst({
-      where: { workDayId: visit.workDayId, status: 'PENDENTE', origin: { not: 'EXTRA' } },
+      where: { workDayId: visit.workDayId, status: 'PENDENTE', origin: { notIn: [...OUTSIDE_ORDER] }, routeOrderWaived: false },
       orderBy: { position: 'asc' },
       include: { client: true },
     })
@@ -577,8 +567,7 @@ async function openVisit(promotorId: string, visitId: string, loc: LocationInput
       }
       return { autoClosed, lunchEndedAt: lunch.count > 0 ? now : null, visit: await tx.visit.findUniqueOrThrow({ where: { id: visit.id }, include: visitInclude }) }
     })
-    const tasks = await activeTasks(promotorId, fromDbDate(visit.date), [visit.clientId])
-    return { ...serializeFull(result.visit, settings, tasks), autoClosedVisits: result.autoClosed, lunchEndedAt: result.lunchEndedAt, reopened: mode === 'reopen' }
+    return { ...serializeFull(result.visit, settings, await visitTaskContext(promotorId, visit)), autoClosedVisits: result.autoClosed, lunchEndedAt: result.lunchEndedAt, reopened: mode === 'reopen' }
   } catch (error) {
     if (facadePath) await removeUpload(facadePath)
     throw error
@@ -597,8 +586,8 @@ export async function checkout(promotorId: string, visitId: string, loc: Locatio
   if (progress.missing.length > 0) {
     throw ruleViolation(`Antes do check-out, ${progress.missing.map((m) => stepMessages[m]).join(', ')}.`, 'SEQUENCIA_INCOMPLETA', { missing: progress.missing })
   }
-  const tasks = await activeTasks(promotorId, fromDbDate(visit.date), [visit.clientId])
-  const pendingTasks = pendingRequiredTasks(full, tasks)
+  const taskCtx = await visitTaskContext(promotorId, visit)
+  const pendingTasks = pendingRequiredTasks(full, taskCtx)
   if (pendingTasks.length > 0) {
     throw ruleViolation(
       `Conclua ${pendingTasks.length === 1 ? 'a atividade obrigatória' : 'as atividades obrigatórias'} antes do check-out: ${pendingTasks.map((t) => t.title).join('; ')}.`,
@@ -639,7 +628,7 @@ export async function checkout(promotorId: string, visitId: string, loc: Locatio
       include: visitInclude,
     })
   })
-  return serializeFull(updated, settings, tasks)
+  return serializeFull(updated, settings, taskCtx)
 }
 
 export async function justify(promotorId: string, visitId: string, input: { reasonId: string; text?: string; latitude?: number; longitude?: number }) {
@@ -701,7 +690,7 @@ export async function justify(promotorId: string, visitId: string, input: { reas
       include: visitInclude,
     })
   })
-  return serializeFull(updated, settings, [])
+  return serializeFull(updated, settings, noTasks)
 }
 
 /** Conclui uma atividade extra que não exige foto (as de foto concluem ao enviar a foto). */
@@ -709,7 +698,8 @@ export async function completeTask(promotorId: string, visitId: string, taskId: 
   const visit = await loadOwnVisit(promotorId, visitId)
   assertInProgress(visit)
   assertNotOnLunch(visit.workDay)
-  const [task] = (await activeTasks(promotorId, fromDbDate(visit.date), [visit.clientId])).filter((t) => t.id === taskId)
+  const full = await prisma.visit.findUniqueOrThrow({ where: { id: visitId }, include: visitInclude })
+  const task = tasksOfVisit(await visitTaskContext(promotorId, visit), full).find((t) => t.id === taskId)
   if (!task) throw notFound('Atividade extra')
   if (task.requiresPhoto && !visit.photosWaived) throw ruleViolation('Esta atividade exige foto: conclua tirando a foto da atividade.', 'FOTO_OBRIGATORIA')
   await prisma.taskCompletion.upsert({
@@ -717,6 +707,16 @@ export async function completeTask(promotorId: string, visitId: string, taskId: 
     create: { taskId, visitId, notes: notes?.trim() || null },
     update: { notes: notes?.trim() || null, completedAt: new Date() },
   })
+  return getVisitDetail(promotorId, visitId)
+}
+
+/** Etapa de contagem de estoque: a contagem é feita fora do app; o promotor só confirma que fez. */
+export async function confirmStockCount(promotorId: string, visitId: string) {
+  const visit = await loadOwnVisit(promotorId, visitId)
+  assertInProgress(visit)
+  assertNotOnLunch(visit.workDay)
+  if (!visit.modules.includes('ESTOQUE')) throw ruleViolation('Este atendimento não tem a etapa de contagem de estoque.', 'ETAPA_INEXISTENTE')
+  if (!visit.stockConfirmedAt) await prisma.visit.update({ where: { id: visitId }, data: { stockConfirmedAt: new Date() } })
   return getVisitDetail(promotorId, visitId)
 }
 
@@ -750,6 +750,7 @@ export async function addPhoto(
   assertInProgress(visit)
   assertNotOnLunch(visit.workDay)
   if (input.type === 'FACHADA') throw badRequest('A foto da fachada é tirada na abertura do atendimento.')
+  if (input.type === 'ANTES' || input.type === 'DEPOIS') assertPhotoStep(visit)
   if (input.productIds?.length && input.type !== 'DEPOIS') throw badRequest('Produtos só são identificados nas fotos de depois.')
 
   const photos = await prisma.photo.findMany({ where: { visitId }, select: { type: true } })
@@ -767,7 +768,8 @@ export async function addPhoto(
   await assertProductsInMix(visit.clientId, productIds)
 
   if (input.taskId) {
-    const [task] = await activeTasks(promotorId, fromDbDate(visit.date), [visit.clientId]).then((list) => list.filter((t) => t.id === input.taskId))
+    const full = await prisma.visit.findUniqueOrThrow({ where: { id: visitId }, include: visitInclude })
+    const task = tasksOfVisit(await visitTaskContext(promotorId, visit), full).find((t) => t.id === input.taskId)
     if (!task) throw badRequest('Atividade extra não encontrada para este cliente.')
   }
 
@@ -889,9 +891,10 @@ export async function confirmRupture(promotorId: string, visitId: string, produc
   const visit = await loadOwnVisit(promotorId, visitId)
   assertInProgress(visit)
   assertNotOnLunch(visit.workDay)
+  assertPhotoStep(visit)
   const full = await prisma.visit.findUniqueOrThrow({ where: { id: visitId }, include: visitInclude })
   const progress = visitProgress({ ...full, ruptureConfirmedAt: null }, settings)
-  const before = progress.missing.filter((m) => m !== 'RUPTURA')
+  const before = progress.missing.filter((m) => m !== 'RUPTURA' && m !== 'ESTOQUE')
   if (progress.enforced && before.length > 0) {
     throw ruleViolation(`Antes de confirmar a ruptura, ${before.map((m) => stepMessages[m]).join(', ')}.`, 'SEQUENCIA', { missing: before })
   }

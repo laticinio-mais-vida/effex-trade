@@ -2,11 +2,14 @@ import bcrypt from 'bcryptjs'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole } from '../../auth'
-import { isUniqueViolation, prisma, Role } from '../../db'
+import { isUniqueViolation, prisma, Role, TaskRecurrence, VisitModule } from '../../db'
 import { fromDbDate, toDbDate } from '../../lib/dates'
 import { badRequest, conflict, notFound } from '../../lib/errors'
 import { parse, zDate, zId, zIdParam, zLat, zLng, zPage, zQueryBool } from '../../lib/validate'
 import { listPermissionTypes } from '../../services/permissions'
+import { frequencyColumns, serializeFrequency, zFrequency } from '../../services/route-frequency'
+import { distanceMatrix } from '../../services/routing'
+import { DEFAULT_MODULES, zModules } from '../../services/visit-structure'
 import { assertAdmin, promotorScope } from '../../services/scope'
 import { serializeClient, serializeUser } from '../../services/serializers'
 import { photoTypeLabels } from '../../services/settings'
@@ -51,7 +54,9 @@ const taskBody = z.object({
   clientId: zId.nullish(),
   promotorId: zId.nullish(),
   startDate: zDate,
-  endDate: zDate,
+  /** Sem data de fim: vale até ser desativada */
+  endDate: zDate.nullish(),
+  recurrence: z.enum(TaskRecurrence).default('TODA_VISITA'),
   requiresPhoto: z.boolean().default(true),
   required: z.boolean().default(false),
   active: z.boolean().optional(),
@@ -216,23 +221,74 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
       promotor,
       weekdays: Array.from({ length: 7 }, (_, weekday) => ({
         weekday,
-        clients: items.filter((i) => i.weekday === weekday).map((i) => serializeClient(i.client)),
+        clients: items
+          .filter((i) => i.weekday === weekday)
+          .map((i) => ({ ...serializeClient(i.client), frequency: serializeFrequency(i), modules: i.modules })),
       })),
     }
   })
 
+  type RouteDayInput = {
+    weekday: number
+    clientIds?: string[]
+    items?: { clientId: string; frequency?: z.infer<typeof zFrequency>; modules?: VisitModule[] }[]
+  }
+
+  /** Substitui o roteiro dos dias informados, numa transação só. Sem frequência (ou só clientIds), o cliente entra como semanal. */
+  const replaceRouteDays = async (promotorId: string, input: RouteDayInput[]) => {
+    const days = input.map((d) => ({
+      weekday: d.weekday,
+      items: d.items ?? (d.clientIds ?? []).map((clientId) => ({ clientId, frequency: undefined, modules: undefined })),
+    }))
+    if (days.some((d) => new Set(d.items.map((i) => i.clientId)).size !== d.items.length)) throw badRequest('Cliente repetido no roteiro do mesmo dia.')
+    const ids = new Set(days.flatMap((d) => d.items.map((i) => i.clientId)))
+    const clients = await prisma.client.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } })
+    if (clients.length !== ids.size) throw badRequest('Um ou mais clientes não existem.')
+    const rows = days.map(({ weekday, items }) => ({
+      weekday,
+      data: items.map(({ clientId, frequency, modules }, i) => ({
+        promotorId,
+        clientId,
+        weekday,
+        position: i + 1,
+        ...frequencyColumns(weekday, frequency, clients.find((c) => c.id === clientId)!.name),
+        modules: modules ?? DEFAULT_MODULES,
+      })),
+    }))
+    await prisma.$transaction(
+      rows.flatMap(({ weekday, data }) => [prisma.routeItem.deleteMany({ where: { promotorId, weekday } }), prisma.routeItem.createMany({ data })]),
+    )
+  }
+  const zRouteDay = {
+    clientIds: z.array(zId).max(100).optional(),
+    items: z.array(z.object({ clientId: zId, frequency: zFrequency.optional(), modules: zModules.optional() })).max(100).optional(),
+  }
+
+  app.put('/routes/:id', async (req) => {
+    const { id } = parse(zIdParam, req.params)
+    const body = parse(z.object({ days: z.array(z.object({ weekday: z.number().int().min(0).max(6), ...zRouteDay })).min(1).max(7) }), req.body)
+    if (new Set(body.days.map((d) => d.weekday)).size !== body.days.length) throw badRequest('Dia da semana repetido.')
+    const promotor = await prisma.user.findFirst({ where: { id, ...promotorScope(req.user) } })
+    if (!promotor) throw notFound('Promotor')
+    await replaceRouteDays(id, body.days)
+    return { ok: true, days: body.days.map((d) => ({ weekday: d.weekday, count: (d.items ?? d.clientIds ?? []).length })) }
+  })
+
   app.put('/routes/:id/:weekday', async (req) => {
     const params = parse(z.object({ id: zId, weekday: z.coerce.number().int().min(0).max(6) }), req.params)
-    const body = parse(z.object({ clientIds: z.array(zId).max(100) }), req.body)
+    const body = parse(z.object(zRouteDay), req.body)
     const promotor = await prisma.user.findFirst({ where: { id: params.id, ...promotorScope(req.user) } })
     if (!promotor) throw notFound('Promotor')
-    const found = await prisma.client.count({ where: { id: { in: body.clientIds } } })
-    if (found !== new Set(body.clientIds).size) throw badRequest('Um ou mais clientes não existem.')
-    await prisma.$transaction([
-      prisma.routeItem.deleteMany({ where: { promotorId: params.id, weekday: params.weekday } }),
-      prisma.routeItem.createMany({ data: body.clientIds.map((clientId, i) => ({ promotorId: params.id, clientId, weekday: params.weekday, position: i + 1 })) }),
-    ])
-    return { ok: true, count: body.clientIds.length }
+    await replaceRouteDays(params.id, [{ weekday: params.weekday, ...body }])
+    return { ok: true, count: (body.items ?? body.clientIds ?? []).length }
+  })
+
+  /** Distâncias entre os clientes de um dia (pelas ruas, se houver OSRM), para mostrar o deslocamento e sugerir a ordem. */
+  app.post('/route-distances', async (req) => {
+    const body = parse(z.object({ clientIds: z.array(zId).min(1).max(100) }), req.body)
+    const clients = await prisma.client.findMany({ where: { id: { in: [...new Set(body.clientIds)] } }, select: { id: true, latitude: true, longitude: true } })
+    const { meters, source } = await distanceMatrix(clients)
+    return { clientIds: clients.map((c) => c.id), meters: meters.map((row) => row.map(Math.round)), source }
   })
 
   // ---------------- Motivos de justificativa ----------------
@@ -267,7 +323,7 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     return tasks.map((t) => ({
       ...t,
       startDate: fromDbDate(t.startDate),
-      endDate: fromDbDate(t.endDate),
+      endDate: t.endDate ? fromDbDate(t.endDate) : null,
       photoCount: t._count.photos,
       completionCount: t._count.completions,
     }))
@@ -275,22 +331,30 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
 
   app.post('/tasks', async (req) => {
     const body = parse(taskBody, req.body)
-    if (body.endDate < body.startDate) throw badRequest('A data final precisa ser igual ou posterior à inicial.')
-    const task = await prisma.task.create({ data: { ...body, startDate: toDbDate(body.startDate), endDate: toDbDate(body.endDate), createdById: req.user.sub } })
-    return { ...task, startDate: body.startDate, endDate: body.endDate }
+    if (body.endDate && body.endDate < body.startDate) throw badRequest('A data final precisa ser igual ou posterior à inicial.')
+    const task = await prisma.task.create({
+      data: { ...body, startDate: toDbDate(body.startDate), endDate: body.endDate ? toDbDate(body.endDate) : null, createdById: req.user.sub },
+    })
+    return { ...task, startDate: body.startDate, endDate: body.endDate ?? null }
   })
 
   app.patch('/tasks/:id', async (req) => {
     const { id } = parse(zIdParam, req.params)
     const body = parse(taskBody.partial(), req.body)
+    const current = await prisma.task.findUnique({ where: { id } })
+    if (!current) throw notFound('Atividade extra')
+    const start = body.startDate ?? fromDbDate(current.startDate)
+    const end = body.endDate === undefined ? (current.endDate ? fromDbDate(current.endDate) : null) : body.endDate
+    if (end && end < start) throw badRequest('A data final precisa ser igual ou posterior à inicial.')
     const task = await prisma.task.update({
       where: { id },
       data: {
         ...body,
         startDate: body.startDate ? toDbDate(body.startDate) : undefined,
-        endDate: body.endDate ? toDbDate(body.endDate) : undefined,
+        // null tira a data de fim; ausente mantém a atual
+        endDate: body.endDate === undefined ? undefined : body.endDate ? toDbDate(body.endDate) : null,
       },
     })
-    return { ...task, startDate: fromDbDate(task.startDate), endDate: fromDbDate(task.endDate) }
+    return { ...task, startDate: fromDbDate(task.startDate), endDate: task.endDate ? fromDbDate(task.endDate) : null }
   })
 }

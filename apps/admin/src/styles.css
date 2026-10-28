@@ -957,6 +957,305 @@ textarea.input {
   color: var(--ink);
   text-align: center;
 }
+.route-list.sortable li {
+  grid-template-columns: 22px 30px 1fr auto;
+  background: var(--panel);
+  cursor: grab;
+}
+.route-list.sortable li:hover {
+  background: #f7f9fb;
+}
+.route-list.sortable li.dragging {
+  opacity: 0.45;
+  background: var(--surface);
+  outline: 1px dashed var(--rule-strong);
+}
+.drag-handle {
+  display: grid;
+  place-items: center;
+  min-height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--faint);
+  cursor: grab;
+}
+.route-list.sortable li:hover .drag-handle,
+.drag-handle:focus-visible {
+  color: var(--ink);
+}
+.drag-handle:focus-visible {
+  outline: 2px solid var(--progress);
+}
+
+.toolbar .field.grow {
+  flex: 1 1 320px;
+  max-width: 560px;
+}
+.add-client {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(360px, 1.5fr);
+  align-items: start;
+  gap: 14px 28px;
+  padding: 14px 16px 14px 20px;
+  margin-bottom: 18px;
+  box-shadow: inset 4px 0 0 var(--tag);
+}
+.add-client-who {
+  min-width: 0;
+}
+.client-chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+}
+.client-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px 3px 2px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 13px;
+}
+.client-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.client-chip button {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.client-chip button:hover,
+.client-chip button:focus-visible {
+  background: var(--notdone-bg);
+  color: var(--notdone);
+}
+.add-client-days {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+.add-client-days legend {
+  padding: 0;
+  margin-bottom: 6px;
+}
+.add-client-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+.day-freq {
+  padding: 2px 8px;
+  border-radius: var(--radius-s);
+}
+.day-freq.on {
+  padding-bottom: 10px;
+  background: var(--surface);
+}
+.day-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.day-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+.day-check .day-name {
+  min-width: 64px;
+  font-weight: 600;
+}
+.day-check input:disabled,
+.day-check input:disabled + .day-name {
+  color: var(--faint);
+  cursor: default;
+}
+
+/* Frequência do cliente no dia (semanal, quinzenal, mensal, personalizado) */
+.freq {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  margin: 2px 0 0 24px;
+}
+.segmented.small button {
+  padding: 4px 11px;
+  font-size: 13px;
+}
+.freq-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  font-size: 14px;
+}
+.freq-custom label,
+.freq-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+.freq-custom input[type='radio'] {
+  margin: 0;
+  accent-color: var(--ink);
+}
+.input.num {
+  width: 64px;
+  padding: 4px 6px;
+}
+.input.num:disabled {
+  background: var(--idle-bg);
+  border-color: var(--rule);
+}
+.freq-start select.input {
+  padding: 4px 6px;
+}
+.freq-error {
+  color: var(--notdone);
+}
+.freq-chip {
+  margin-top: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
+  background: var(--idle-bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.freq-chip.custom {
+  border-color: var(--tag-deep);
+  background: #fdf6d8;
+  color: #6b5200;
+}
+.freq-chip.bad {
+  border-color: #e7b9b5;
+  background: var(--notdone-bg);
+  color: var(--notdone);
+}
+.freq-chip:hover,
+.freq-chip[aria-expanded='true'] {
+  border-color: var(--ink);
+}
+.route-list.sortable li .freq-edit {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  cursor: default;
+}
+.route-list.sortable li .freq-edit .freq {
+  margin-left: 0;
+}
+.freq-edit-section {
+  display: grid;
+  gap: 6px;
+}
+.freq-edit-section h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Estrutura do atendimento: padrão, atividade extra e contagem de estoque, em qualquer combinação */
+.structure {
+  display: grid;
+  gap: 6px;
+}
+.structure-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
+  background: var(--panel);
+  cursor: pointer;
+}
+.structure-opt.on {
+  border-color: var(--ink);
+}
+.structure-opt input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--ink);
+}
+.structure-opt > span {
+  display: grid;
+  font-size: 14px;
+}
+.structure-note {
+  color: var(--justified);
+}
+.add-client-structure {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+}
+.client-tasks {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  font-size: 14px;
+}
+.client-tasks-list {
+  display: grid;
+  gap: 2px;
+}
+@media (max-width: 820px) {
+  .add-client {
+    grid-template-columns: 1fr;
+  }
+}
+
+.savebar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-radius: var(--radius-m);
+  background: var(--ink);
+  color: #fff;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(20, 33, 61, 0.25);
+}
+.savebar-error {
+  flex-basis: 100%;
+}
 
 .picker {
   position: relative;
@@ -988,6 +1287,32 @@ textarea.input {
 .picker-list button:hover,
 .picker-list button:focus {
   background: #f2f6fb;
+}
+.picker-list button.on {
+  background: var(--progress-bg);
+}
+.picker-list .picker-all {
+  border-bottom: 1px solid var(--rule);
+  color: var(--progress);
+  font-weight: 600;
+}
+.picker-check {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: -3px;
+}
+.picker-list button.on .picker-check {
+  border-color: var(--ink);
+  background: var(--ink);
 }
 
 @media (max-width: 1100px) {

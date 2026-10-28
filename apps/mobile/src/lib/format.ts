@@ -1,5 +1,5 @@
 import { colors } from './theme'
-import type { AuditStatus, PhotoType, RequestStatus, Visit, VisitOrigin, VisitStatus } from './types'
+import type { AuditStatus, PhotoType, RequestStatus, TaskRecurrence, Visit, VisitModule, VisitOrigin, VisitStatus } from './types'
 
 export const photoTypeLabels: Record<PhotoType, string> = {
   FACHADA: 'Fachada',
@@ -22,6 +22,22 @@ export const originLabels: Record<VisitOrigin, string | null> = {
   ROTEIRO: null,
   EXTRA: 'Extra',
   SUBSTITUICAO: 'Substituição',
+  PONTUAL: 'Pontual',
+}
+
+export const moduleLabels: Record<VisitModule, string> = { FOTOS: 'Padrão', ATIVIDADES: 'Atividade extra', ESTOQUE: 'Contagem de estoque' }
+export const MODULE_ORDER: VisitModule[] = ['FOTOS', 'ATIVIDADES', 'ESTOQUE']
+export const DEFAULT_MODULES: VisitModule[] = ['FOTOS', 'ATIVIDADES']
+/** "Padrão + atividade extra", "Contagem de estoque"... */
+export const structureLabel = (modules: VisitModule[]) => MODULE_ORDER.filter((m) => modules.includes(m)).map((m) => moduleLabels[m]).join(' + ')
+export const isDefaultStructure = (modules: VisitModule[] | undefined) => !modules || modules.join() === DEFAULT_MODULES.join()
+
+export const recurrenceLabels: Record<TaskRecurrence, string | null> = {
+  TODA_VISITA: null,
+  PONTUAL: 'Uma vez',
+  SEMANAL: 'Semanal',
+  QUINZENAL: 'Quinzenal',
+  MENSAL: 'Mensal',
 }
 
 export const requestStatusInfo: Record<RequestStatus, { label: string; color: string; bg: string }> = {
@@ -60,6 +76,21 @@ const WEEKDAYS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'q
 export function formatLongDate(date: string) {
   const d = new Date(`${date}T12:00:00`)
   return `${WEEKDAYS[d.getDay()]}, ${formatDate(date)}`
+}
+
+/** AAAA-MM-DD somado de alguns dias. */
+export function addDays(date: string, days: number) {
+  const d = new Date(`${date}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/** Dia curto relativo a hoje: "Hoje", "Amanhã" ou "qua 30/10". */
+export function formatShortDay(date: string, today: string) {
+  if (date === today) return 'Hoje'
+  if (date === addDays(today, 1)) return 'Amanhã'
+  const d = new Date(`${date}T12:00:00Z`)
+  return `${WEEKDAYS[d.getUTCDay()]!.slice(0, 3)} ${date.slice(8, 10)}/${date.slice(5, 7)}`
 }
 
 export function minutesSince(iso: string | null | undefined, until?: string | null) {

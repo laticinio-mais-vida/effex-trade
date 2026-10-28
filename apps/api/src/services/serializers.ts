@@ -1,4 +1,4 @@
-import type { Client, JustificationReason, PermissionRequest, Photo, Product, User, Visit, VisitSession } from '../db'
+import type { Client, JustificationReason, PermissionRequest, Photo, Product, ScheduledVisit, User, Visit, VisitSession } from '../db'
 import { fromDbDate } from '../lib/dates'
 import { publicUrl } from './storage'
 
@@ -62,6 +62,7 @@ type VisitWithRelations = Visit & {
   sessions?: VisitSession[]
   justificationReason?: JustificationReason | null
   requests?: PermissionRequest[]
+  scheduledVisit?: (ScheduledVisit & { createdBy: { name: string } }) | null
 }
 
 export function serializeVisit(visit: VisitWithRelations, defaultRadius?: number) {
@@ -71,14 +72,18 @@ export function serializeVisit(visit: VisitWithRelations, defaultRadius?: number
     position: visit.position,
     origin: visit.origin,
     status: visit.status,
+    /** Estrutura do atendimento (etapas) */
+    modules: visit.modules,
     client: serializeClient(visit.client, defaultRadius),
     checkinAt: visit.checkinAt,
     checkinDistance: visit.checkinDistance,
     checkoutAt: visit.checkoutAt,
     geofenceWaived: visit.geofenceWaived,
     photosWaived: visit.photosWaived,
+    routeOrderWaived: visit.routeOrderWaived,
     autoClosed: visit.autoClosed,
     ruptureConfirmedAt: visit.ruptureConfirmedAt,
+    stockConfirmedAt: visit.stockConfirmedAt,
     ruptures: visit.ruptures?.map((r) => productRef(r.product)),
     /** Aberturas do atendimento (mais de uma quando o cliente foi reaberto no dia) */
     sessions: visit.sessions?.map((x) => ({ checkinAt: x.checkinAt, checkoutAt: x.checkoutAt, autoClosed: x.autoClosed })),
@@ -89,5 +94,7 @@ export function serializeVisit(visit: VisitWithRelations, defaultRadius?: number
     replacesVisitId: visit.replacesVisitId,
     photos: visit.photos?.map(serializePhoto),
     requests: visit.requests?.map((r) => ({ id: r.id, type: r.type, status: r.status, createdAt: r.createdAt, decisionNote: r.decisionNote })),
+    /** Incluída pelo supervisor como visita pontual (com o recado dele ao promotor) */
+    scheduled: visit.scheduledVisit ? { id: visit.scheduledVisit.id, note: visit.scheduledVisit.note, createdBy: visit.scheduledVisit.createdBy.name } : undefined,
   }
 }

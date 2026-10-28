@@ -16,6 +16,7 @@ export type {
   PhotoAudit,
   Product,
   RouteItem,
+  ScheduledVisit,
   Task,
   User,
   Visit,

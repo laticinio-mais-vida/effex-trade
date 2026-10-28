@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native'
 import { Badge, Card, Row, styles } from '@/components/ui'
-import { formatMinutes, formatSessions, originLabels, visitMinutes, visitStatusInfo } from '@/lib/format'
+import { formatMinutes, formatSessions, isDefaultStructure, originLabels, structureLabel, visitMinutes, visitStatusInfo } from '@/lib/format'
 import { colors, space } from '@/lib/theme'
 import type { Visit } from '@/lib/types'
 
@@ -41,8 +41,10 @@ export function VisitCard({ visit, isNext, onPress }: { visit: Visit; isNext?: b
             <Badge label={status.label} color={status.color} bg={status.bg} />
             {isNext ? <Badge label="Próximo" color="#fff" bg={colors.primary} /> : null}
             {origin ? <Badge label={origin} color={colors.info} bg={colors.infoSoft} /> : null}
+            {!isDefaultStructure(visit.modules) ? <Badge label={structureLabel(visit.modules!)} color={colors.primary} bg={colors.primarySoft} /> : null}
             {visit.geofenceWaived ? <Badge label="Cerca liberada" color={colors.warning} bg={colors.warningSoft} /> : null}
             {visit.photosWaived ? <Badge label="Fotos dispensadas" color={colors.warning} bg={colors.warningSoft} /> : null}
+            {visit.routeOrderWaived && visit.status === 'PENDENTE' ? <Badge label="Fora da ordem" color={colors.warning} bg={colors.warningSoft} /> : null}
             {reopened ? <Badge label="Reaberto" color={colors.info} bg={colors.infoSoft} /> : null}
             {visit.autoClosed ? <Badge label="Encerrado automaticamente" color={colors.warning} bg={colors.warningSoft} /> : null}
             {visit.status === 'CONCLUIDA' && visit.ruptures?.length ? (
@@ -60,6 +62,11 @@ export function VisitCard({ visit, isNext, onPress }: { visit: Visit; isNext?: b
           {visit.justification ? (
             <Text style={styles.muted} numberOfLines={2}>
               {visit.justification.reason}: {visit.justification.text}
+            </Text>
+          ) : null}
+          {visit.scheduled?.note ? (
+            <Text style={styles.muted} numberOfLines={2}>
+              Recado de {visit.scheduled.createdBy}: {visit.scheduled.note}
             </Text>
           ) : null}
         </View>

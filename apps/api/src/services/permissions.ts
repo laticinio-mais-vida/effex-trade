@@ -4,6 +4,7 @@ import type { AuthUser } from '../auth'
 import { fromDbDate, toDbDate, todayIn } from '../lib/dates'
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors'
 import { parse } from '../lib/validate'
+import { getSettings, routeOrderEnforced } from './settings'
 
 /**
  * Tipos de liberação que o supervisor concede ao promotor.
@@ -33,6 +34,15 @@ async function pendingVisitsOfDay(tx: Tx, promotorId: string, date: string) {
     include: { client: true },
     orderBy: { position: 'asc' },
   })
+}
+
+/** Liberar da ordem só faz sentido com o roteiro aberto e a ordem obrigatória no dia. */
+async function assertRouteOrderApplies(tx: Tx, promotorId: string, date: string) {
+  const workDay = await tx.workDay.findUnique({ where: { promotorId_date: { promotorId, date: toDbDate(date) } } })
+  if (!workDay) throw conflict('O roteiro deste dia ainda não foi carregado.')
+  if (workDay.closedAt ?? workDay.endedAt) throw conflict('O roteiro de hoje já foi encerrado.', 'ROTEIRO_ENCERRADO')
+  if (workDay.routeOrderWaived) throw conflict('A ordem do roteiro já está liberada no dia inteiro.')
+  if (!routeOrderEnforced(await getSettings(promotorId), date)) throw conflict('A ordem do roteiro não é obrigatória hoje.')
 }
 
 export const permissionTypes: PermissionType[] = [
@@ -94,6 +104,35 @@ export const permissionTypes: PermissionType[] = [
     },
   },
   {
+    type: 'LIVRE_ORDEM_CLIENTE',
+    label: 'Atender cliente fora da ordem',
+    description: 'Tira este cliente da ordem do roteiro: pode ser atendido a qualquer momento, sem travar os demais.',
+    needsVisit: true,
+    async validate({ tx, promotorId, visit, date }) {
+      if (visit!.status !== 'PENDENTE') throw conflict('A visita não está mais pendente.')
+      if (visit!.origin === 'EXTRA' || visit!.origin === 'PONTUAL') throw conflict('Clientes extras e visitas pontuais já ficam fora da ordem do roteiro.')
+      if (visit!.routeOrderWaived) throw conflict('Este cliente já está liberado da ordem do roteiro.')
+      await assertRouteOrderApplies(tx, promotorId, date)
+      return undefined
+    },
+    async apply({ tx, visit }) {
+      await tx.visit.update({ where: { id: visit!.id }, data: { routeOrderWaived: true } })
+    },
+  },
+  {
+    type: 'LIVRE_ORDEM_DIA',
+    label: 'Dia sem ordem do roteiro',
+    description: 'Libera a ordem do roteiro no dia inteiro: os clientes podem ser atendidos em qualquer sequência.',
+    needsVisit: false,
+    async validate({ tx, promotorId, date }) {
+      await assertRouteOrderApplies(tx, promotorId, date)
+      return undefined
+    },
+    async apply({ tx, promotorId, date }) {
+      await tx.workDay.update({ where: { promotorId_date: { promotorId, date: toDbDate(date) } }, data: { routeOrderWaived: true } })
+    },
+  },
+  {
     type: 'SUBSTITUIR_CLIENTE',
     label: 'Substituir cliente do roteiro',
     description: 'Troca o cliente desta visita por outro cliente.',
@@ -116,6 +155,8 @@ export const permissionTypes: PermissionType[] = [
           date: visit!.date,
           position: visit!.position,
           origin: 'SUBSTITUICAO',
+          // O substituto segue a mesma estrutura de atendimento
+          modules: visit!.modules,
           replacesVisitId: visit!.id,
         },
       })

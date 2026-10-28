@@ -11,13 +11,27 @@ import { RuptureSheet } from '@/features/promotor/RuptureSheet'
 import { PhotoViewer } from '@/features/PhotoViewer'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
-import { formatDistance, formatMinutes, formatSessions, formatTime, minutesSince, originLabels, photoTypeLabels, visitMinutes, visitStatusInfo } from '@/lib/format'
+import {
+  DEFAULT_MODULES,
+  formatDistance,
+  formatMinutes,
+  formatSessions,
+  formatTime,
+  isDefaultStructure,
+  minutesSince,
+  originLabels,
+  photoTypeLabels,
+  recurrenceLabels,
+  structureLabel,
+  visitMinutes,
+  visitStatusInfo,
+} from '@/lib/format'
 import { distanceMeters, getPreciseLocation, getQuickLocation, LocationError, type CurrentLocation } from '@/lib/location'
 import { colors, space } from '@/lib/theme'
 import type { CheckinResult, Photo, PhotoType, Visit, VisitStep, VisitTask } from '@/lib/types'
 import { useQuery } from '@/lib/useQuery'
 
-type Action = 'checkin' | 'reopen' | 'checkout' | 'justify' | 'remove'
+type Action = 'checkin' | 'reopen' | 'checkout' | 'justify' | 'remove' | 'stock'
 type OpenMode = 'checkin' | 'reopen'
 type Asset = ImagePicker.ImagePickerAsset
 type UploadExtra = PhotoExtra & { productIds?: string[]; takenAt?: string }
@@ -27,8 +41,10 @@ const stepNames: Record<VisitStep, string> = {
   DEPOIS: 'fotos de depois',
   PRODUTOS: 'produtos nas fotos de depois',
   RUPTURA: 'confirmação de ruptura',
+  ESTOQUE: 'confirmação da contagem de estoque',
   CHECKOUT: 'check-out',
 }
+const PHOTO_STEPS: VisitStep[] = ['ANTES', 'DEPOIS', 'PRODUTOS', 'RUPTURA']
 
 async function takePicture(): Promise<Asset | null> {
   const perm = await ImagePicker.requestCameraPermissionsAsync()
@@ -118,7 +134,14 @@ export default function VisitaScreen() {
   const dayEnded = dayClosed(day)
   const lunch = onLunch(day)
   const isNext = day.nextVisitId === visit.id
-  const blockedByOrder = rules.enforceRouteOrder && visit.status === 'PENDENTE' && visit.origin !== 'EXTRA' && !!day.nextVisitId && !isNext
+  const blockedByOrder =
+    rules.enforceRouteOrder &&
+    visit.status === 'PENDENTE' &&
+    visit.origin !== 'EXTRA' &&
+    visit.origin !== 'PONTUAL' &&
+    !visit.routeOrderWaived &&
+    !!day.nextVisitId &&
+    !isNext
   const nextVisit = day.visits.find((v) => v.id === day.nextVisitId)
   const radius = visit.client.geofenceRadius ?? rules.geofenceRadiusMeters
   const needsFacade = rules.requireFacadePhotoOnCheckin && !visit.photosWaived
@@ -129,6 +152,11 @@ export default function VisitaScreen() {
   // Cliente já atendido hoje pode ser reaberto para continuar de onde parou
   const canReopen = visit.status === 'CONCLUIDA' && day.isToday && !dayEnded
 
+  // Estrutura do atendimento: quais etapas esta visita tem
+  const modules = visit.modules ?? DEFAULT_MODULES
+  const hasPhotoStep = modules.includes('FOTOS')
+  const hasActivities = modules.includes('ATIVIDADES')
+  const hasStock = modules.includes('ESTOQUE')
   const progress = visit.progress
   const enforced = progress?.enforced ?? false
   const next: VisitStep = progress?.next ?? 'CHECKOUT'
@@ -145,6 +173,8 @@ export default function VisitaScreen() {
   // Atividade de foto não trava quando o supervisor dispensou as fotos (pode ser concluída sem foto)
   const needsPhoto = (t: VisitTask) => t.requiresPhoto && !visit.photosWaived
   const pendingRequired = tasks.filter((t) => t.required && !t.done && !(t.requiresPhoto && visit.photosWaived))
+  // Tudo pronto para o check-out: etapas da estrutura completas e atividades obrigatórias feitas
+  const ready = (progress?.missing.length ?? 0) === 0 && pendingRequired.length === 0
 
   async function refreshAll() {
     await Promise.all([query.reload(), reloadDay()])
@@ -157,10 +187,11 @@ export default function VisitaScreen() {
   function askOrderChange() {
     Alert.alert(
       'Fora da ordem do roteiro',
-      `Pela ordem do roteiro, o próximo cliente é ${nextVisit?.client.name ?? 'outro'}. Para atender este antes, peça para antecipar.`,
+      `Pela ordem do roteiro, o próximo cliente é ${nextVisit?.client.name ?? 'outro'}. Para atender este antes, peça para antecipá-lo ou para não seguir a ordem (só neste cliente ou no dia inteiro).`,
       [
         { text: 'Fechar', style: 'cancel' },
-        { text: 'Pedir para antecipar', onPress: () => router.push({ pathname: '/promotor/ordem', params: { first: visit!.id } }) },
+        { text: 'Antecipar', onPress: () => router.push({ pathname: '/promotor/ordem', params: { first: visit!.id } }) },
+        { text: 'Não seguir a ordem', onPress: () => goRequest('LIVRE_ORDEM_CLIENTE') },
       ],
     )
   }
@@ -189,7 +220,9 @@ export default function VisitaScreen() {
       case 'FOTOS_OBRIGATORIAS': {
         const missing: VisitStep[] = e.details?.missing ?? []
         const text = missing.length ? `Falta: ${missing.map((m) => stepNames[m]).join(', ')}.` : e.message
-        return Alert.alert('Atendimento incompleto', text, [close, { text: 'Pedir dispensa das fotos', onPress: () => goRequest('DISPENSA_FOTOS') }])
+        // A dispensa do supervisor vale para as fotos; a confirmação da contagem de estoque continua obrigatória
+        const photosMissing = missing.length === 0 || missing.some((m) => PHOTO_STEPS.includes(m))
+        return Alert.alert('Atendimento incompleto', text, photosMissing ? [close, { text: 'Pedir dispensa das fotos', onPress: () => goRequest('DISPENSA_FOTOS') }] : [close])
       }
       case 'SEQUENCIA':
       case 'PRODUTOS_NAO_IDENTIFICADOS':
@@ -421,6 +454,27 @@ export default function VisitaScreen() {
     }
   }
 
+  /** A contagem de estoque é feita fora do app; aqui o promotor só confirma que fez. */
+  function confirmStock() {
+    Alert.alert('Contagem de estoque', 'Confirma que fez a contagem de estoque deste cliente?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Confirmar',
+        onPress: async () => {
+          setBusy('stock')
+          try {
+            query.setData(await api<Visit>(`/promotor/visits/${visit!.id}/stock-count/confirm`, { body: {} }))
+            void reloadDay()
+          } catch (e) {
+            handleError(e, 'Contagem não confirmada')
+          } finally {
+            setBusy(null)
+          }
+        },
+      },
+    ])
+  }
+
   async function deletePhoto(photo: Photo) {
     try {
       await api(`/promotor/photos/${photo.id}`, { method: 'DELETE' })
@@ -438,6 +492,9 @@ export default function VisitaScreen() {
   }
 
   const inProgress = visit.status === 'EM_ATENDIMENTO'
+  // Numeração dos passos conforme as etapas da estrutura (1 = fachada)
+  const stockStepNo = hasPhotoStep ? 5 : 2
+  const checkoutStepNo = stockStepNo + (hasStock ? 1 : 0)
 
   const tasksBlock =
     tasks.length > 0 ? (
@@ -458,6 +515,7 @@ export default function VisitaScreen() {
               <Row>
                 {t.required ? <Badge label="Obrigatória" color={colors.danger} bg={colors.dangerSoft} /> : null}
                 <Badge label={t.requiresPhoto ? 'Exige foto' : 'Sem foto'} color={colors.info} bg={colors.infoSoft} />
+                {t.recurrence && recurrenceLabels[t.recurrence] ? <Badge label={recurrenceLabels[t.recurrence]!} color={colors.muted} bg={colors.neutralSoft} /> : null}
               </Row>
               {t.description ? <Muted>{t.description}</Muted> : null}
               {t.done ? (
@@ -509,6 +567,7 @@ export default function VisitaScreen() {
           {originLabels[visit.origin] ? <Badge label={originLabels[visit.origin]!} color={colors.info} bg={colors.infoSoft} /> : null}
           {reopened ? <Badge label="Reaberto" color={colors.info} bg={colors.infoSoft} /> : null}
           {visit.autoClosed ? <Badge label="Encerrado automaticamente" color={colors.warning} bg={colors.warningSoft} /> : null}
+          {!isDefaultStructure(modules) ? <Badge label={structureLabel(modules)} color={colors.primary} bg={colors.primarySoft} /> : null}
           <Muted>#{visit.position} do roteiro</Muted>
         </Row>
         <Text style={styles.title}>{visit.client.name}</Text>
@@ -525,11 +584,27 @@ export default function VisitaScreen() {
         <Muted>Cerca eletrônica: {radius} m</Muted>
       </Card>
 
+      {visit.scheduled && (visit.origin === 'PONTUAL' || visit.scheduled.note) ? (
+        <Banner
+          tone="info"
+          text={
+            visit.origin === 'PONTUAL'
+              ? `Visita pontual incluída por ${visit.scheduled.createdBy}. Pode ser atendida a qualquer momento do dia.${visit.scheduled.note ? `\nRecado: ${visit.scheduled.note}` : ''}`
+              : `Recado de ${visit.scheduled.createdBy}: ${visit.scheduled.note}`
+          }
+        />
+      ) : null}
+
       {pendingRequests.map((r) => (
         <Banner key={r.id} tone="warning" text={`Aguardando supervisor: ${permissionLabels[r.type] ?? r.type}`} />
       ))}
       {visit.geofenceWaived && visit.status !== 'CONCLUIDA' ? <Banner tone="success" text="Supervisor liberou este cliente fora da cerca eletrônica." /> : null}
-      {visit.photosWaived ? <Banner tone="success" text="Supervisor dispensou as fotos deste cliente (fachada, antes, depois e ruptura)." /> : null}
+      {visit.photosWaived ? (
+        <Banner tone="success" text={`Supervisor dispensou as fotos deste cliente (fachada${hasPhotoStep ? ', antes, depois e ruptura' : ''}).`} />
+      ) : null}
+      {visit.routeOrderWaived && visit.status === 'PENDENTE' ? (
+        <Banner tone="success" text="Supervisor liberou este cliente da ordem do roteiro: você pode atendê-lo a qualquer momento." />
+      ) : null}
 
       {visit.status === 'PENDENTE' ? (
         dayEnded ? (
@@ -545,12 +620,18 @@ export default function VisitaScreen() {
               />
             ) : null}
             {blockedByOrder && nextVisit ? (
-              <Banner tone="info" text={`Pela ordem do roteiro, o próximo cliente é ${nextVisit.client.name}. Para atender este antes, peça para antecipar.`} />
+              <Banner
+                tone="info"
+                text={`Pela ordem do roteiro, o próximo cliente é ${nextVisit.client.name}. Para atender este antes, peça para antecipá-lo ou para não seguir a ordem.`}
+              />
             ) : null}
             {needsFacade ? <Muted>Para abrir o atendimento você precisa estar na loja e tirar a foto da fachada.</Muted> : null}
             <Button title={needsFacade ? 'Abrir atendimento (foto da fachada)' : 'Abrir atendimento'} onPress={() => void checkin('checkin')} loading={busy === 'checkin'} />
             {blockedByOrder ? (
-              <Button title="Pedir para antecipar este cliente" variant="secondary" onPress={() => router.push({ pathname: '/promotor/ordem', params: { first: visit.id } })} />
+              <>
+                <Button title="Pedir para antecipar este cliente" variant="secondary" onPress={() => router.push({ pathname: '/promotor/ordem', params: { first: visit.id } })} />
+                <Button title="Pedir para não seguir a ordem" variant="secondary" onPress={() => goRequest('LIVRE_ORDEM_CLIENTE')} />
+              </>
             ) : null}
           </>
         )
@@ -572,78 +653,100 @@ export default function VisitaScreen() {
             {thumbs(facadePhotos)}
           </Step>
 
-          <Step
-            n={2}
-            title="Foto de antes"
-            state={stateOf('ANTES', beforePhotos.length > 0)}
-            detail={beforePhotos.length > 0 ? `${beforePhotos.length} foto(s)` : 'Como a gôndola estava ao chegar'}
-          >
-            {thumbs(beforePhotos)}
-            <Button
-              title={uploading === 'ANTES' ? 'Enviando...' : beforePhotos.length > 0 ? '+ Outra foto de antes' : 'Tirar foto de antes'}
-              small
-              variant={enforced && next === 'ANTES' ? 'primary' : 'secondary'}
-              disabled={!!uploading || !canBefore}
-              onPress={() => void capture('ANTES')}
-            />
-            {!canBefore ? <Muted>Já existem fotos de depois: a foto de antes vem antes delas.</Muted> : null}
-          </Step>
+          {hasPhotoStep ? (
+            <>
+              <Step
+                n={2}
+                title="Foto de antes"
+                state={stateOf('ANTES', beforePhotos.length > 0)}
+                detail={beforePhotos.length > 0 ? `${beforePhotos.length} foto(s)` : 'Como a gôndola estava ao chegar'}
+              >
+                {thumbs(beforePhotos)}
+                <Button
+                  title={uploading === 'ANTES' ? 'Enviando...' : beforePhotos.length > 0 ? '+ Outra foto de antes' : 'Tirar foto de antes'}
+                  small
+                  variant={enforced && next === 'ANTES' ? 'primary' : 'secondary'}
+                  disabled={!!uploading || !canBefore}
+                  onPress={() => void capture('ANTES')}
+                />
+                {!canBefore ? <Muted>Já existem fotos de depois: a foto de antes vem antes delas.</Muted> : null}
+              </Step>
+
+              <Step
+                n={3}
+                title="Fotos de depois, marcando os produtos"
+                state={stateOf('DEPOIS', afterPhotos.length > 0 && afterWithoutProducts === 0)}
+                detail={afterPhotos.length > 0 ? `${afterPhotos.length} foto(s), ${markedProducts} produto(s) marcados` : 'Como a gôndola ficou, com os produtos identificados'}
+              >
+                {thumbs(afterPhotos)}
+                {afterWithoutProducts > 0 ? <Banner tone="warning" text={`${afterWithoutProducts} foto(s) de depois sem produtos marcados. Toque na foto e use "Editar produtos".`} /> : null}
+                <Button
+                  title={uploading === 'DEPOIS' ? 'Enviando...' : afterPhotos.length > 0 ? '+ Outra foto de depois' : 'Tirar foto de depois'}
+                  small
+                  variant={enforced && next === 'DEPOIS' ? 'primary' : 'secondary'}
+                  disabled={!!uploading || !canAfter}
+                  onPress={() => void captureAfter()}
+                />
+                {!canAfter ? <Muted>Tire a foto de antes primeiro.</Muted> : null}
+              </Step>
+
+              <Step
+                n={4}
+                title="Confirmar ruptura"
+                state={stateOf('RUPTURA', !!progress?.ruptureConfirmed)}
+                detail={
+                  progress?.ruptureConfirmed
+                    ? visit.ruptures?.length
+                      ? `Confirmada: ${visit.ruptures.map((p) => p.name).join(', ')}`
+                      : 'Confirmada: nenhuma ruptura'
+                    : 'Produtos que o cliente compra e não aparecem nas fotos de depois'
+                }
+              >
+                <Button
+                  title={progress?.ruptureConfirmed ? 'Rever ruptura' : 'Conferir e confirmar ruptura'}
+                  small
+                  variant={enforced && next === 'RUPTURA' ? 'primary' : 'secondary'}
+                  disabled={!!uploading || !canRupture}
+                  onPress={() => setRuptureOpen(true)}
+                />
+                {!canRupture ? <Muted>Antes, tire as fotos de depois e marque os produtos em todas elas.</Muted> : null}
+              </Step>
+            </>
+          ) : null}
+
+          {hasStock ? (
+            <Step
+              n={stockStepNo}
+              title="Contagem de estoque"
+              state={progress?.stockConfirmed ? 'done' : next === 'ESTOQUE' ? 'current' : 'todo'}
+              detail={progress?.stockConfirmed && visit.stockConfirmedAt ? `Confirmada às ${formatTime(visit.stockConfirmedAt)}` : 'Faça a contagem do estoque da loja e confirme aqui'}
+            >
+              {!progress?.stockConfirmed ? (
+                <Button title="Confirmar que fiz a contagem" small variant={next === 'ESTOQUE' ? 'primary' : 'secondary'} loading={busy === 'stock'} onPress={confirmStock} />
+              ) : null}
+            </Step>
+          ) : null}
+
+          {hasActivities ? tasksBlock : null}
 
           <Step
-            n={3}
-            title="Fotos de depois, marcando os produtos"
-            state={stateOf('DEPOIS', afterPhotos.length > 0 && afterWithoutProducts === 0)}
-            detail={afterPhotos.length > 0 ? `${afterPhotos.length} foto(s), ${markedProducts} produto(s) marcados` : 'Como a gôndola ficou, com os produtos identificados'}
+            n={checkoutStepNo}
+            title="Encerrar atendimento"
+            state={ready ? 'current' : 'todo'}
+            detail={rules.requireGeofenceOnCheckout ? 'O check-out também precisa ser feito na loja.' : undefined}
           >
-            {thumbs(afterPhotos)}
-            {afterWithoutProducts > 0 ? <Banner tone="warning" text={`${afterWithoutProducts} foto(s) de depois sem produtos marcados. Toque na foto e use "Editar produtos".`} /> : null}
-            <Button
-              title={uploading === 'DEPOIS' ? 'Enviando...' : afterPhotos.length > 0 ? '+ Outra foto de depois' : 'Tirar foto de depois'}
-              small
-              variant={enforced && next === 'DEPOIS' ? 'primary' : 'secondary'}
-              disabled={!!uploading || !canAfter}
-              onPress={() => void captureAfter()}
-            />
-            {!canAfter ? <Muted>Tire a foto de antes primeiro.</Muted> : null}
-          </Step>
-
-          <Step
-            n={4}
-            title="Confirmar ruptura"
-            state={stateOf('RUPTURA', !!progress?.ruptureConfirmed)}
-            detail={
-              progress?.ruptureConfirmed
-                ? visit.ruptures?.length
-                  ? `Confirmada: ${visit.ruptures.map((p) => p.name).join(', ')}`
-                  : 'Confirmada: nenhuma ruptura'
-                : 'Produtos que o cliente compra e não aparecem nas fotos de depois'
-            }
-          >
-            <Button
-              title={progress?.ruptureConfirmed ? 'Rever ruptura' : 'Conferir e confirmar ruptura'}
-              small
-              variant={enforced && next === 'RUPTURA' ? 'primary' : 'secondary'}
-              disabled={!!uploading || !canRupture}
-              onPress={() => setRuptureOpen(true)}
-            />
-            {!canRupture ? <Muted>Antes, tire as fotos de depois e marque os produtos em todas elas.</Muted> : null}
-          </Step>
-
-          {tasksBlock}
-
-          <Step n={5} title="Encerrar atendimento" state={enforced && next === 'CHECKOUT' ? 'current' : 'todo'} detail={rules.requireGeofenceOnCheckout ? 'O check-out também precisa ser feito na loja.' : undefined}>
             {pendingRequired.length > 0 ? (
               <Banner tone="warning" text={`Conclua antes: ${pendingRequired.map((t) => t.title).join('; ')}.`} />
             ) : null}
             <Field label="Observações do atendimento" value={notes} onChangeText={setNotes} multiline placeholder="Opcional" />
             <Button
               title="Fazer check-out"
-              variant={!enforced || next === 'CHECKOUT' ? 'success' : 'secondary'}
+              variant={ready ? 'success' : 'secondary'}
               onPress={checkout}
               loading={busy === 'checkout'}
               disabled={!!uploading}
             />
-            {enforced && progress && progress.missing.length > 0 ? (
+            {enforced && progress && progress.missing.some((m) => PHOTO_STEPS.includes(m)) ? (
               <Button title="Não consigo fazer as fotos: pedir dispensa" variant="ghost" small onPress={() => goRequest('DISPENSA_FOTOS')} />
             ) : null}
           </Step>
@@ -653,14 +756,16 @@ export default function VisitaScreen() {
           {thumbs(otherPhotos)}
           <Row>
             <Button title={uploading === 'VENCIMENTO' ? 'Enviando...' : '+ Vencimento'} small variant="secondary" disabled={!!uploading} onPress={() => setInfoFor('VENCIMENTO')} style={{ flex: 1 }} />
-            <Button
-              title={uploading === 'ATIVIDADE_EXTRA' ? 'Enviando...' : '+ Atividade extra'}
-              small
-              variant="secondary"
-              disabled={!!uploading}
-              onPress={() => setInfoFor('ATIVIDADE_EXTRA')}
-              style={{ flex: 1 }}
-            />
+            {hasActivities ? (
+              <Button
+                title={uploading === 'ATIVIDADE_EXTRA' ? 'Enviando...' : '+ Atividade extra'}
+                small
+                variant="secondary"
+                disabled={!!uploading}
+                onPress={() => setInfoFor('ATIVIDADE_EXTRA')}
+                style={{ flex: 1 }}
+              />
+            ) : null}
           </Row>
           {uploading ? (
             <Row>
@@ -678,7 +783,7 @@ export default function VisitaScreen() {
         </>
       ) : null}
 
-      {!inProgress ? tasksBlock : null}
+      {!inProgress && hasActivities ? tasksBlock : null}
 
       {visit.status === 'CONCLUIDA' ? (
         <Card>
@@ -689,6 +794,7 @@ export default function VisitaScreen() {
           {visit.autoClosed ? (
             <Banner tone="warning" text="Faltou o check-out. O atendimento foi encerrado automaticamente quando você abriu o próximo cliente, no horário da última foto tirada aqui." />
           ) : null}
+          {hasStock ? <Muted>{visit.stockConfirmedAt ? `Contagem de estoque confirmada às ${formatTime(visit.stockConfirmedAt)}.` : 'Contagem de estoque não confirmada.'}</Muted> : null}
           {visit.ruptureConfirmedAt ? (
             visit.ruptures?.length ? (
               <Text style={styles.text}>Rupturas confirmadas: {visit.ruptures.map((p) => p.name).join(', ')}</Text>

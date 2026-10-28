@@ -28,6 +28,32 @@ enum VisitOrigin {
   ROTEIRO
   EXTRA
   SUBSTITUICAO
+  PONTUAL // incluída pelo supervisor só naquele dia (visita pontual)
+}
+
+/// Etapas do atendimento. A estrutura de cada visita é uma combinação delas (padrão: FOTOS + ATIVIDADES)
+enum VisitModule {
+  FOTOS // padrão: antes -> depois com produtos -> confirmação de ruptura
+  ATIVIDADES // atividades extras
+  ESTOQUE // contagem de estoque (feita fora do app; o promotor só confirma)
+}
+
+/// Quantas vezes a atividade extra é feita em cada cliente
+enum TaskRecurrence {
+  TODA_VISITA
+  PONTUAL // uma vez só
+  SEMANAL // uma vez por semana (segunda a domingo)
+  QUINZENAL // uma vez a cada duas semanas, contadas da semana de início
+  MENSAL // uma vez por mês
+}
+
+/// Frequência do cliente no roteiro fixo
+enum RouteFrequency {
+  SEMANAL
+  QUINZENAL
+  MENSAL // mesma semana do mês da primeira visita (ex.: toda 1ª segunda)
+  DIAS // de X em X dias a partir da primeira visita (pode cair em outro dia da semana)
+  SEMANAS // pulando X semanas entre as visitas
 }
 
 enum PhotoType {
@@ -87,6 +113,8 @@ model User {
   settings          PromotorSetting[]
   alerts            Alert[]             @relation("AlertPromotor")
   alertsAcknowledged Alert[]            @relation("AlertAck")
+  scheduledVisits   ScheduledVisit[]    @relation("ScheduledPromotor")
+  scheduledCreated  ScheduledVisit[]    @relation("ScheduledCreator")
 }
 
 model Client {
@@ -107,10 +135,11 @@ model Client {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  routeItems RouteItem[]
-  visits     Visit[]
-  tasks      Task[]
-  mix        ClientProduct[]
+  routeItems      RouteItem[]
+  visits          Visit[]
+  tasks           Task[]
+  mix             ClientProduct[]
+  scheduledVisits ScheduledVisit[]
 }
 
 /// Roteiro fixo: quais clientes o promotor atende em cada dia da semana, e em que ordem
@@ -122,8 +151,39 @@ model RouteItem {
   client     Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
   weekday    Int // 0 = domingo ... 6 = sábado
   position   Int
+  frequency  RouteFrequency @default(SEMANAL)
+  /// DIAS: intervalo em dias; SEMANAS: quantas semanas pular entre as visitas
+  interval   Int?
+  /// Primeira visita: referência de quinzenal, mensal e personalizado (cai no dia da semana do item)
+  startDate  DateTime?      @db.Date
+  /// Estrutura do atendimento. Só ATIVIDADES: o cliente entra no dia apenas se houver atividade para fazer
+  modules    VisitModule[]  @default([FOTOS, ATIVIDADES])
 
   @@index([promotorId, weekday])
+}
+
+/// Visita pontual: cliente incluído pelo supervisor num único dia do promotor, fora do roteiro fixo.
+/// Para hoje a visita é criada na hora; para um dia futuro, entra quando o dia é gerado.
+model ScheduledVisit {
+  id          String   @id @default(cuid())
+  promotorId  String
+  promotor    User     @relation("ScheduledPromotor", fields: [promotorId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  note        String?
+  modules     VisitModule[] @default([FOTOS, ATIVIDADES])
+  createdById String
+  createdBy   User     @relation("ScheduledCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  /// Visita gerada no dia
+  visitId     String?  @unique
+  visit       Visit?   @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  /// Atividade escrita pelo supervisor para esta visita
+  tasks       Task[]
+
+  @@unique([promotorId, clientId, date])
+  @@index([date])
 }
 
 /// Jornada do promotor em uma data. As visitas são geradas a partir do roteiro fixo no início do dia.
@@ -148,6 +208,9 @@ model WorkDay {
   lunchEndedAt   DateTime?
   lunchLat       Float?
   lunchLng       Float?
+
+  /// Liberado pelo supervisor: neste dia o promotor não precisa seguir a ordem do roteiro
+  routeOrderWaived Boolean @default(false)
   createdAt  DateTime  @default(now())
 
   visits Visit[]
@@ -188,6 +251,7 @@ model Visit {
   position   Int
   origin     VisitOrigin @default(ROTEIRO)
   status     VisitStatus @default(PENDENTE)
+  modules    VisitModule[] @default([FOTOS, ATIVIDADES])
 
   checkinAt       DateTime?
   checkinLat      Float?
@@ -202,11 +266,15 @@ model Visit {
 
   geofenceWaived Boolean @default(false) // liberado pelo supervisor para check-in fora da cerca
   photosWaived   Boolean @default(false) // liberado pelo supervisor sem fotos obrigatórias
+  /// Liberado pelo supervisor da ordem do roteiro: pode ser atendido a qualquer momento e não trava os demais
+  routeOrderWaived Boolean @default(false)
 
   /// Encerrado pelo sistema ao abrir o próximo atendimento (saída = última foto tirada)
   autoClosed         Boolean   @default(false)
   /// Promotor confirmou que os produtos do mix ausentes nas fotos de depois são ruptura
   ruptureConfirmedAt DateTime?
+  /// Promotor confirmou que fez a contagem de estoque (etapa ESTOQUE)
+  stockConfirmedAt   DateTime?
 
   justificationReasonId String?
   justificationReason   JustificationReason? @relation(fields: [justificationReasonId], references: [id])
@@ -229,6 +297,7 @@ model Visit {
   ruptures        VisitRupture[]
   taskCompletions TaskCompletion[]
   sessions        VisitSession[]
+  scheduledVisit  ScheduledVisit?
 
   @@index([date, promotorId])
   @@index([clientId, date])
@@ -403,7 +472,9 @@ model Task {
   promotorId    String?
   promotor      User?    @relation("TaskPromotor", fields: [promotorId], references: [id])
   startDate     DateTime @db.Date
-  endDate       DateTime @db.Date
+  /// Sem fim: vale até ser desativada
+  endDate       DateTime? @db.Date
+  recurrence    TaskRecurrence @default(TODA_VISITA)
   requiresPhoto Boolean  @default(true)
   /// Obrigatória: o promotor não encerra o atendimento sem concluí-la
   required      Boolean  @default(false)
@@ -411,6 +482,9 @@ model Task {
   createdById   String
   createdBy     User     @relation("TaskCreator", fields: [createdById], references: [id])
   createdAt     DateTime @default(now())
+  /// Escrita pelo supervisor ao incluir uma visita pontual (sai junto se a visita for desfeita)
+  scheduledVisitId String?
+  scheduledVisit   ScheduledVisit? @relation(fields: [scheduledVisitId], references: [id], onDelete: Cascade)
 
   photos      Photo[]
   completions TaskCompletion[]

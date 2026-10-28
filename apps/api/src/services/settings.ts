@@ -125,7 +125,7 @@ export const settingsMeta: Record<SettingKey, Meta> = {
     scope: 'promotor',
     group: 'Roteiro',
     label: 'Obrigar ordem do roteiro',
-    help: 'Nos dias marcados, o promotor só faz check-in no próximo cliente da sequência; alterar a ordem exige liberação do supervisor. Clientes extras ficam fora da ordem.',
+    help: 'Nos dias marcados, o promotor só faz check-in no próximo cliente da sequência. Alterar a ordem, atender um cliente fora dela ou ficar o dia inteiro sem ordem exige liberação do supervisor. Clientes extras ficam fora da ordem.',
     options: weekdayOptions,
   },
   allowExtraVisits: {

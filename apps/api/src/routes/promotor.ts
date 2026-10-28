@@ -22,6 +22,7 @@ import {
   checkout,
   completeTask,
   confirmRupture,
+  confirmStockCount,
   deletePhoto,
   endDay,
   getDayForPromotor,
@@ -150,6 +151,9 @@ export async function promotorRoutes(app: FastifyInstance) {
   })
 
   app.get('/visits/:id/rupture', async (req) => getRupture(req.user.sub, parse(zIdParam, req.params).id))
+
+  /** Etapa de contagem de estoque: o promotor confirma que fez a contagem (feita fora do app). */
+  app.post('/visits/:id/stock-count/confirm', async (req) => confirmStockCount(req.user.sub, parse(zIdParam, req.params).id))
 
   app.post('/visits/:id/rupture/confirm', async (req) => {
     const body = parse(z.object({ productIds: z.array(zId).max(500) }), req.body)

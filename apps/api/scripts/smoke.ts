@@ -5,7 +5,9 @@
  */
 import { shelfPng } from '../prisma/seed-image'
 import { checkLunchAlerts } from '../src/services/alerts'
+import { ensureWorkDay } from '../src/services/workdays'
 import { prisma } from '../src/db'
+import { addDays } from '../src/lib/dates'
 
 const API = process.env.API_URL ?? 'http://localhost:3333'
 let failures = 0
@@ -269,6 +271,36 @@ check('promotor voltou à regra geral', rules2.rules.geofenceRadiusMeters === 15
 const settingsData = (await call(admin, 'GET', '/admin/settings')).data
 check('painel recebe os vendedores atendidos por promotor', Object.keys(settingsData.promotorSellers).length >= 3, settingsData.promotorSellers)
 
+console.log('Liberação da ordem do roteiro: um cliente e o dia inteiro')
+// Ordem atual (invertida acima): pending2[1], pending2[0], pending2[2]...
+const outOfOrder = pending2.at(-1)
+r = await call(promotor2, 'POST', `/promotor/visits/${outOfOrder.id}/checkin`, checkinForm(near(outOfOrder.client)))
+check('cliente fora da ordem bloqueado', r.status === 409 && r.data.code === 'FORA_DA_ORDEM', r.data)
+r = await call(promotor2, 'POST', '/promotor/requests', { type: 'LIVRE_ORDEM_CLIENTE', visitId: outOfOrder.id, reason: 'Cliente só recebe de manhã' })
+check('pedido para atender o cliente fora da ordem', r.status === 200 && r.data.status === 'PENDENTE', r.data)
+r = await call(supervisor, 'POST', `/supervisor/requests/${r.data.id}/decide`, { approve: true })
+check('liberação do cliente aprovada', r.status === 200 && r.data.status === 'APROVADA', r.data)
+let free2 = (await call(promotor2, 'GET', '/promotor/day')).data
+check(
+  'cliente liberado sai da ordem e os demais seguem nela',
+  free2.nextVisitId === pending2[1].id && free2.rules.enforceRouteOrder === true && free2.visits.find((v: any) => v.id === outOfOrder.id)?.routeOrderWaived === true,
+  { next: free2.nextVisitId, rules: free2.rules.enforceRouteOrder },
+)
+r = await call(promotor2, 'POST', `/promotor/visits/${outOfOrder.id}/checkin`, checkinForm(near(outOfOrder.client)))
+check('check-in no cliente liberado da ordem', r.status === 200 && r.data.status === 'EM_ATENDIMENTO', r.data)
+r = await call(promotor2, 'POST', `/promotor/visits/${pending2[0].id}/checkin`, checkinForm(near(pending2[0].client)))
+check('os demais continuam na ordem', r.status === 409 && r.data.code === 'FORA_DA_ORDEM', r.data)
+r = await call(promotor2, 'POST', '/promotor/requests', { type: 'LIVRE_ORDEM_DIA', reason: 'Trânsito interditado na avenida principal' })
+check('pedido do dia inteiro sem ordem', r.status === 200 && r.data.status === 'PENDENTE' && r.data.visit === null, r.data)
+r = await call(supervisor, 'POST', `/supervisor/requests/${r.data.id}/decide`, { approve: true, note: 'Pode seguir como preferir hoje' })
+check('dia sem ordem aprovado', r.status === 200 && r.data.status === 'APROVADA', r.data)
+free2 = (await call(promotor2, 'GET', '/promotor/day')).data
+check('dia liberado da ordem', free2.workDay.routeOrderWaived === true && free2.rules.enforceRouteOrder === false && free2.nextVisitId === null, free2.workDay)
+r = await call(promotor2, 'POST', `/promotor/visits/${pending2[0].id}/checkin`, checkinForm(near(pending2[0].client)))
+check('check-in em qualquer cliente no dia liberado', r.status === 200 && r.data.status === 'EM_ATENDIMENTO', r.data)
+r = await call(promotor2, 'POST', '/promotor/requests', { type: 'LIVRE_ORDEM_CLIENTE', visitId: pending2[1].id, reason: 'teste' })
+check('liberar cliente da ordem com o dia já liberado recusado', r.status === 409, r.data)
+
 console.log('Justificativa como volta do almoço (na cerca)')
 const supervisorId = (await call(supervisor, 'GET', '/auth/me')).data.id
 let testUser = await call(admin, 'POST', '/admin/users', { name: 'Promotor Teste', login: 'promotor.teste', password: '123456', role: 'PROMOTOR', supervisorId })
@@ -310,6 +342,169 @@ alerts = (await call(supervisor, 'GET', '/supervisor/alerts?state=todos')).data 
 check('alerta resolvido quando o promotor voltou', !!alerts.find((a) => a.id === lunchAlert.id)?.resolvedAt, alerts.find((a) => a.id === lunchAlert.id))
 const testReport = (await call(admin, 'GET', `/admin/reports/visits?promotorId=${testId}&from=${today}&to=${today}`)).data
 check('jornada marca almoço acima do limite', testReport.days[0]?.lunchOverdue === true, testReport.days[0])
+
+console.log('Roteiro com frequência (quinzenal, mensal e personalizado)')
+// Datas fixas no futuro (a quinta 07/01/2027 como primeira visita), para o teste não depender do dia em que roda
+const d1 = '2027-01-07'
+const w1 = 4
+const weekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay()
+const allClients = (await call(admin, 'GET', '/admin/clients?pageSize=200')).data.items as any[]
+const [fa, fb, fc, fd] = allClients
+// Só a quinta no roteiro do promotor de teste (o dia de hoje dele já foi gerado e não muda)
+await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, clientIds: [] })) })
+r = await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [{ weekday: w1, items: [{ clientId: fa.id, frequency: { type: 'QUINZENAL' } }] }] })
+check('quinzenal sem primeira visita recusado', r.status === 400 && r.data.code === 'FREQUENCIA_INVALIDA', r.data)
+r = await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [{ weekday: w1, items: [{ clientId: fa.id, frequency: { type: 'MENSAL', startDate: addDays(d1, 1) } }] }] })
+check('primeira visita fora do dia da semana recusada', r.status === 400 && r.data.code === 'FREQUENCIA_INVALIDA', r.data)
+r = await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [{ weekday: w1, items: [{ clientId: fa.id, frequency: { type: 'DIAS', interval: 1, startDate: d1 } }] }] })
+check('de 1 em 1 dia recusado', r.status === 400 && r.data.code === 'FREQUENCIA_INVALIDA', r.data)
+r = await call(admin, 'PUT', `/admin/routes/${testId}`, {
+  days: [
+    {
+      weekday: w1,
+      items: [
+        { clientId: fa.id },
+        { clientId: fb.id, frequency: { type: 'QUINZENAL', startDate: addDays(d1, 7) } },
+        { clientId: fc.id, frequency: { type: 'DIAS', interval: 3, startDate: d1 } },
+        { clientId: fd.id, frequency: { type: 'SEMANAS', interval: 2, startDate: d1 } },
+      ],
+    },
+  ],
+})
+check('roteiro com frequências salvo', r.status === 200, r.data)
+const freqRoute = (await call(admin, 'GET', `/admin/routes/${testId}`)).data.weekdays[w1].clients as any[]
+check(
+  'frequências devolvidas ao painel',
+  freqRoute.map((c) => c.frequency.type).join() === 'SEMANAL,QUINZENAL,DIAS,SEMANAS' && freqRoute[1].frequency.startDate === addDays(d1, 7) && freqRoute[2].frequency.interval === 3,
+  freqRoute.map((c) => c.frequency),
+)
+/** Gera um dia futuro pelo serviço e apaga em seguida (para não congelar o roteiro real daquele dia). */
+async function generatedDay(date: string) {
+  const wd = await ensureWorkDay(testId, date)
+  const list = await prisma.visit.findMany({ where: { workDayId: wd.id }, orderBy: { position: 'asc' }, select: { clientId: true, origin: true } })
+  await prisma.workDay.delete({ where: { id: wd.id } })
+  return list
+}
+const clientIds = (list: { clientId: string }[]) => list.map((v) => v.clientId).join()
+check('1ª semana: semanal, de 3 em 3 dias e pulando 2 semanas', clientIds(await generatedDay(d1)) === [fa.id, fc.id, fd.id].join())
+check('de 3 em 3 dias cai em outro dia da semana', clientIds(await generatedDay('2027-01-13')) === fc.id)
+check('de 3 em 3 dias no domingo não gera visita', clientIds(await generatedDay('2027-01-10')) === '')
+check('de 3 em 3 dias no domingo passa para a segunda', clientIds(await generatedDay('2027-01-11')) === fc.id)
+check('a série continua contando do domingo (sábado 16, não quinta 14)', clientIds(await generatedDay('2027-01-16')) === fc.id)
+check('2ª semana: semanal e quinzenal', clientIds(await generatedDay(addDays(d1, 7))) === [fa.id, fb.id].join())
+check('4ª semana: todos coincidem', clientIds(await generatedDay(addDays(d1, 21))) === [fa.id, fb.id, fc.id, fd.id].join())
+
+console.log('Visita pontual incluída pelo supervisor')
+const [pontualClient, pontualClient2] = allClients.filter((c) => !tDay.visits.some((v: any) => v.client.id === c.id) && ![fa.id, fb.id, fc.id, fd.id].includes(c.id))
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient.id, date: today, note: 'Conferir a ponta de gôndola nova' })
+check('visita pontual incluída hoje', r.status === 200 && r.data.visit?.status === 'PENDENTE', r.data)
+const todayPontual = r.data
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient.id, date: today })
+check('cliente já incluído hoje recusado', r.status === 409 && r.data.code === 'CLIENTE_NO_ROTEIRO', r.data)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: t3.client.id, date: today })
+check('cliente que já está no roteiro de hoje recusado', r.status === 409 && r.data.code === 'CLIENTE_NO_ROTEIRO', r.data)
+let nextThursday = addDays(today, 1)
+while (weekdayOf(nextThursday) !== w1) nextThursday = addDays(nextThursday, 1)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: fa.id, date: nextThursday })
+check('cliente que cai no roteiro fixo do dia futuro recusado', r.status === 409 && r.data.code === 'CLIENTE_NO_ROTEIRO', r.data)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient.id, date: addDays(today, -1) })
+check('dia passado recusado', r.status === 400, r.data)
+const tDayPontual = (await call(tester, 'GET', '/promotor/day')).data
+const pv = tDayPontual.visits.find((v: any) => v.id === todayPontual.visit.id)
+check(
+  'promotor vê a pontual no fim da lista, fora da ordem, com o recado',
+  pv?.origin === 'PONTUAL' && pv.position === Math.max(...tDayPontual.visits.map((v: any) => v.position)) && pv.scheduled?.note === 'Conferir a ponta de gôndola nova' && tDayPontual.nextVisitId !== pv.id,
+  pv,
+)
+r = await call(tester, 'DELETE', `/promotor/visits/${pv.id}`)
+check('promotor não remove a visita pontual', r.status === 403, r.data)
+r = await call(tester, 'POST', `/promotor/visits/${pv.id}/checkin`, checkinForm(near(pv.client)))
+check('visita pontual atendida fora da ordem do roteiro', r.status === 200 && r.data.status === 'EM_ATENDIMENTO', r.data)
+r = await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${todayPontual.id}`)
+check('visita pontual já iniciada não é removida', r.status === 409, r.data)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient2.id, date: today })
+r = await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${r.data.id}`)
+check('visita pontual pendente removida pelo supervisor', r.status === 200 && !(await call(tester, 'GET', '/promotor/day')).data.visits.some((v: any) => v.client.id === pontualClient2.id), r.data)
+const d2 = addDays(today, 2)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient.id, date: d2, note: 'Reunião com o gerente' })
+check('visita pontual agendada para depois de amanhã', r.status === 200 && r.data.visit === null, r.data)
+const futurePontual = r.data
+const supDay = (await call(supervisor, 'GET', `/supervisor/promotores/${testId}/day`)).data
+check('supervisor vê as pontuais de hoje e as agendadas', [todayPontual.id, futurePontual.id].every((id) => supDay.scheduled.some((s: any) => s.id === id)), supDay.scheduled)
+check('no dia agendado a pontual entra no roteiro', (await generatedDay(d2)).some((v) => v.clientId === pontualClient.id && v.origin === 'PONTUAL'))
+r = await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${futurePontual.id}`)
+check('agendamento futuro removido', r.status === 200, r.data)
+
+console.log('Estrutura do atendimento (padrão, atividade extra, contagem de estoque)')
+const [fe, ff, sc1, sc2] = allClients.filter((c) => ![fa.id, fb.id, fc.id, fd.id, pontualClient.id, pontualClient2.id].includes(c.id) && !tDay.visits.some((v: any) => v.client.id === c.id))
+r = await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [{ weekday: w1, items: [{ clientId: fe.id, modules: [] }] }] })
+check('estrutura sem nenhuma etapa recusada', r.status === 400, r.data)
+r = await call(admin, 'PUT', `/admin/routes/${testId}`, {
+  days: [
+    { weekday: 4, items: [{ clientId: fe.id, modules: ['ATIVIDADES'] }] },
+    { weekday: 5, items: [{ clientId: fe.id, modules: ['ATIVIDADES'] }] },
+    { weekday: 6, items: [{ clientId: ff.id, modules: ['ESTOQUE', 'ESTOQUE'] }] },
+  ],
+})
+check('roteiro com estruturas salvo', r.status === 200, r.data)
+const structRoute = (await call(admin, 'GET', `/admin/routes/${testId}`)).data.weekdays
+check('estrutura devolvida ao painel', structRoute[4].clients[0].modules.join() === 'ATIVIDADES' && structRoute[6].clients[0].modules.join() === 'ESTOQUE', structRoute[6].clients[0])
+check('só atividade extra, sem atividade: cliente não entra no dia', !(await generatedDay('2027-01-07')).some((v) => v.clientId === fe.id))
+r = await call(admin, 'POST', '/admin/tasks', { title: 'Conferir placas de preço', clientId: fe.id, promotorId: testId, startDate: today, endDate: null, recurrence: 'SEMANAL', requiresPhoto: false })
+check('atividade semanal sem data de fim criada', r.status === 200 && r.data.endDate === null && r.data.recurrence === 'SEMANAL', r.data)
+const weeklyTask = r.data
+check('com atividade por fazer, o cliente entra no dia', (await generatedDay('2027-01-07')).some((v) => v.clientId === fe.id && v.origin === 'ROTEIRO'))
+// Atividade feita na quinta: não volta na sexta da mesma semana, volta na quinta seguinte
+const thursday = await ensureWorkDay(testId, '2027-01-07')
+const feVisit = await prisma.visit.findFirstOrThrow({ where: { workDayId: thursday.id, clientId: fe.id } })
+await prisma.taskCompletion.create({ data: { taskId: weeklyTask.id, visitId: feVisit.id } })
+check('semanal feita na quinta não volta na sexta', !(await generatedDay('2027-01-08')).some((v) => v.clientId === fe.id))
+check('semanal volta na semana seguinte', (await generatedDay('2027-01-14')).some((v) => v.clientId === fe.id))
+await prisma.workDay.delete({ where: { id: thursday.id } })
+check('contagem de estoque gera a visita com a etapa', (await generatedDay('2027-01-09')).some((v) => v.clientId === ff.id))
+await call(admin, 'PATCH', `/admin/tasks/${weeklyTask.id}`, { active: false })
+
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: sc1.id, date: today, modules: ['ATIVIDADES'] })
+check('pontual só com atividade, sem escrever a atividade, recusada', r.status === 400 && r.data.code === 'ATIVIDADE_OBRIGATORIA', r.data)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: sc1.id, date: today, modules: ['ESTOQUE'], activity: { title: 'Placa', requiresPhoto: false } })
+check('atividade numa estrutura sem atividade extra recusada', r.status === 400, r.data)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, {
+  clientId: sc1.id,
+  date: today,
+  modules: ['ATIVIDADES'],
+  activity: { title: 'Colocar placas de preço da campanha', requiresPhoto: false },
+})
+check('pontual com atividade escrita pelo supervisor', r.status === 200 && r.data.activity?.title === 'Colocar placas de preço da campanha' && r.data.modules.join() === 'ATIVIDADES', r.data)
+const activityPontual = r.data
+const actVisit = (await call(tester, 'GET', '/promotor/day')).data.visits.find((v: any) => v.id === activityPontual.visit.id)
+check(
+  'promotor vê a atividade na visita pontual',
+  actVisit?.modules.join() === 'ATIVIDADES' && actVisit.tasks.some((t: any) => t.title === 'Colocar placas de preço da campanha' && t.required && t.recurrence === 'PONTUAL'),
+  actVisit,
+)
+r = await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${activityPontual.id}`)
+check('desfazer a pontual apaga a atividade dela', r.status === 200 && !(await call(admin, 'GET', '/admin/tasks')).data.some((t: any) => t.scheduledVisitId === activityPontual.id), r.data)
+
+// Visita só de contagem de estoque: fachada, confirmação e check-out
+await call(supervisor, 'POST', '/supervisor/permissions', { promotorId: testId, type: 'DISPENSA_FOTOS', visitId: pv.id, note: 'teste' })
+r = await call(tester, 'POST', `/promotor/visits/${pv.id}/checkout`, near(pv.client))
+check('teste: pontual anterior encerrada', r.status === 200, r.data)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: sc2.id, date: today, modules: ['ESTOQUE'] })
+const stockVisitId = r.data.visit.id
+const stockClient = (await call(tester, 'GET', '/promotor/day')).data.visits.find((v: any) => v.id === stockVisitId).client
+r = await call(tester, 'POST', `/promotor/visits/${stockVisitId}/checkin`, checkinForm(near(stockClient)))
+check('contagem: atendimento aberto com a fachada', r.status === 200 && r.data.progress.missing.join() === 'ESTOQUE' && r.data.tasks.length === 0, r.data.progress)
+r = await call(tester, 'POST', `/promotor/visits/${stockVisitId}/photos`, photoForm({ type: 'ANTES', latitude: String(stockClient.latitude), longitude: String(stockClient.longitude) }))
+check('contagem: sem etapa de fotos de antes', r.status === 422 && r.data.code === 'ETAPA_INEXISTENTE', r.data)
+r = await call(tester, 'POST', `/promotor/visits/${stockVisitId}/checkout`, near(stockClient))
+check('contagem: check-out exige a confirmação', r.status === 422 && r.data.code === 'SEQUENCIA_INCOMPLETA' && r.data.details.missing.join() === 'ESTOQUE', r.data)
+r = await call(tester, 'POST', `/promotor/visits/${stockVisitId}/stock-count/confirm`, {})
+check('contagem confirmada', r.status === 200 && r.data.progress.stockConfirmed === true && !!r.data.stockConfirmedAt, r.data.progress)
+r = await call(tester, 'POST', `/promotor/visits/${stockVisitId}/checkout`, near(stockClient))
+check('contagem: check-out depois de confirmar', r.status === 200 && r.data.status === 'CONCLUIDA', r.data)
+const stockRow = (await call(admin, 'GET', `/admin/reports/visits?promotorId=${testId}&from=${today}&to=${today}`)).data.rows.find((x: any) => x.id === stockVisitId)
+check('relatório mostra a estrutura e a confirmação', stockRow?.modules.join() === 'ESTOQUE' && !!stockRow.stockConfirmedAt, stockRow)
+await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, clientIds: [] })) })
 
 console.log('Rastreamento e mapa')
 r = await call(promotor, 'POST', '/tracking/pings', { pings: [{ ...loc1, recordedAt: new Date().toISOString(), battery: 0.8 }] })

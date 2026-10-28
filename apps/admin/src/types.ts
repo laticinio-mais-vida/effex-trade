@@ -1,6 +1,9 @@
 export type Role = 'ADMIN' | 'SUPERVISOR' | 'VENDEDOR' | 'PROMOTOR'
 export type VisitStatus = 'PENDENTE' | 'EM_ATENDIMENTO' | 'CONCLUIDA' | 'JUSTIFICADA' | 'CANCELADA'
-export type VisitOrigin = 'ROTEIRO' | 'EXTRA' | 'SUBSTITUICAO'
+export type VisitOrigin = 'ROTEIRO' | 'EXTRA' | 'SUBSTITUICAO' | 'PONTUAL'
+/** Etapas do atendimento: padrão (fotos antes, depois e ruptura), atividades extras e contagem de estoque */
+export type VisitModule = 'FOTOS' | 'ATIVIDADES' | 'ESTOQUE'
+export type TaskRecurrence = 'TODA_VISITA' | 'PONTUAL' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL'
 export type PhotoType = 'FACHADA' | 'ANTES' | 'DEPOIS' | 'RUPTURA' | 'VENCIMENTO' | 'ATIVIDADE_EXTRA'
 export type RequestStatus = 'PENDENTE' | 'APROVADA' | 'NEGADA' | 'CANCELADA'
 
@@ -111,6 +114,8 @@ export type ReportRow = {
   position: number
   origin: VisitOrigin
   status: VisitStatus
+  modules: VisitModule[]
+  stockConfirmedAt: string | null
   client: { id: string; code: string | null; name: string; city: string | null }
   checkinAt: string | null
   checkoutAt: string | null
@@ -144,6 +149,7 @@ export type ReportSummary = {
   avgClientMin: number | null
   totalTravelMin: number
   avgTravelMin: number | null
+  totalTravelKm: number | null
   geofenceWaivers: number
   photoWaivers: number
   autoClosed: number
@@ -161,6 +167,7 @@ export type ReportDay = {
   lunchEnd: string | null
   lunchMin: number | null
   lunchOverdue: boolean
+  routeOrderWaived: boolean
   workedMin: number | null
   total: number
   done: number
@@ -168,9 +175,13 @@ export type ReportDay = {
   notDone: number
   clientMin: number
   travelMin: number
+  travelKm: number | null
 }
 
-export type Report = { from: string; to: string; summary: ReportSummary[]; days: ReportDay[]; rows: ReportRow[] }
+/** De onde vêm as distâncias: servidor de rotas (ruas), linha reta (sem servidor ou trecho sem rota) ou os dois. */
+export type DistanceMode = 'ruas' | 'linha_reta' | 'misto'
+
+export type Report = { from: string; to: string; travelKmSource: DistanceMode | null; summary: ReportSummary[]; days: ReportDay[]; rows: ReportRow[] }
 
 export type PhotoItem = {
   id: string
@@ -247,10 +258,14 @@ export type Task = {
   clientId: string | null
   promotorId: string | null
   startDate: string
-  endDate: string
+  /** Sem data de fim: vale até ser desativada */
+  endDate: string | null
+  recurrence: TaskRecurrence
   requiresPhoto: boolean
   required: boolean
   active: boolean
+  /** Escrita pelo supervisor numa visita pontual */
+  scheduledVisitId: string | null
   client: { id: string; name: string; code: string | null } | null
   promotor: Ref | null
   createdBy: Ref
@@ -278,4 +293,8 @@ export type SettingsResponse = {
 
 export type VisitSessionInfo = { checkinAt: string; checkoutAt: string | null; autoClosed: boolean }
 
-export type RouteDay = { weekday: number; clients: Client[] }
+export type FrequencyType = 'SEMANAL' | 'QUINZENAL' | 'MENSAL' | 'DIAS' | 'SEMANAS'
+/** Frequência do cliente no roteiro. interval: DIAS = de X em X dias; SEMANAS = semanas puladas. startDate = primeira visita. */
+export type Frequency = { type: FrequencyType; interval: number | null; startDate: string | null }
+export type RouteClient = Client & { frequency: Frequency; modules: VisitModule[] }
+export type RouteDay = { weekday: number; clients: RouteClient[] }

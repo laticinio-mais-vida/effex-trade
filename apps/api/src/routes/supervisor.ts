@@ -13,9 +13,11 @@ import {
   serializeRequest,
 } from '../services/permissions'
 import { alertInclude, checkLunchAlerts, serializeAlert } from '../services/alerts'
+import { cancelScheduled, listScheduled, scheduleVisit, SCHEDULE_DAYS_AHEAD } from '../services/scheduled-visits'
 import { promotorScope } from '../services/scope'
+import { zModules } from '../services/visit-structure'
 import { serializeClient, serializePhoto, serializeVisit } from '../services/serializers'
-import { getSettings } from '../services/settings'
+import { getSettings, routeOrderEnforced } from '../services/settings'
 import { ensureWorkDay } from '../services/workdays'
 
 /** Vendedores visíveis para o supervisor (admin vê todos). */
@@ -135,16 +137,48 @@ export async function supervisorRoutes(app: FastifyInstance) {
     const visits = workDay
       ? await prisma.visit.findMany({
           where: { workDayId: workDay.id, status: { not: 'CANCELADA' } },
-          include: { client: true, justificationReason: true, photos: true, requests: { orderBy: { createdAt: 'desc' } } },
+          include: {
+            client: true,
+            justificationReason: true,
+            photos: true,
+            requests: { orderBy: { createdAt: 'desc' } },
+            scheduledVisit: { include: { createdBy: { select: { name: true } } } },
+          },
           orderBy: { position: 'asc' },
         })
       : []
     return {
       promotor,
       date,
-      workDay: workDay ? { startedAt: workDay.startedAt, endedAt: workDay.endedAt } : null,
+      workDay: workDay ? { startedAt: workDay.startedAt, endedAt: workDay.endedAt, closedAt: workDay.closedAt, routeOrderWaived: workDay.routeOrderWaived } : null,
+      routeOrderEnforced: routeOrderEnforced(settings, date),
       visits: visits.map((v) => serializeVisit(v, settings.geofenceRadiusMeters)),
+      /** Visitas pontuais de hoje em diante (as de hoje também aparecem em visits) */
+      scheduled: await listScheduled(req.user, id),
+      scheduleDaysAhead: SCHEDULE_DAYS_AHEAD,
     }
+  })
+
+  /** Visita pontual: inclui um cliente num único dia do promotor (hoje ou futuro), fora do roteiro fixo. */
+  app.post('/promotores/:id/scheduled-visits', async (req) => {
+    const { id } = parse(zIdParam, req.params)
+    const body = parse(
+      z.object({
+        clientId: zId,
+        date: zDate,
+        note: z.string().trim().max(500).optional(),
+        modules: zModules.optional(),
+        activity: z.object({ title: z.string().trim().min(3, 'descreva a atividade (mínimo 3 caracteres)').max(200), requiresPhoto: z.boolean().default(true) }).optional(),
+      }),
+      req.body,
+    )
+    return scheduleVisit(req.user, { promotorId: id, ...body })
+  })
+
+  app.delete('/scheduled-visits/:id', async (req) => {
+    const { id } = parse(zIdParam, req.params)
+    await cancelScheduled(req.user, id)
+    return { ok: true }
   })
 
   app.get('/clients', async (req) => {
