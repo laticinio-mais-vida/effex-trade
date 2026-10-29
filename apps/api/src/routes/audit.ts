@@ -4,7 +4,7 @@ import { requireRole, type AuthUser } from '../auth'
 import { AuditStatus, PhotoType, prisma, Prisma } from '../db'
 import { addDays, fromDbDate, toDbDate, todayIn } from '../lib/dates'
 import { conflict, notFound } from '../lib/errors'
-import { parse, zDate, zId, zIdParam, zPage } from '../lib/validate'
+import { parse, zDate, zId, zIdParam, zList, zPage } from '../lib/validate'
 import { photoScope } from '../services/scope'
 import { serializePhoto } from '../services/serializers'
 
@@ -43,9 +43,9 @@ const listQuery = z.object({
   status: z.enum(['pendentes', 'auditadas', 'todas']).default('pendentes'),
   from: zDate.optional(),
   to: zDate.optional(),
-  clientId: zId.optional(),
-  promotorId: zId.optional(),
-  type: z.enum(PhotoType).optional(),
+  clientId: zList(zId).optional(),
+  promotorId: zList(zId).optional(),
+  type: zList(z.enum(PhotoType)).optional(),
   ...zPage,
 })
 
@@ -56,9 +56,9 @@ async function auditWhere(user: AuthUser, q: z.infer<typeof listQuery>): Promise
     AND: [
       await photoScope(user),
       { visit: { date: { gte: toDbDate(from), lte: toDbDate(to) } } },
-      q.clientId ? { visit: { clientId: q.clientId } } : {},
-      q.promotorId ? { visit: { promotorId: q.promotorId } } : {},
-      q.type ? { type: q.type } : {},
+      q.clientId?.length ? { visit: { clientId: { in: q.clientId } } } : {},
+      q.promotorId?.length ? { visit: { promotorId: { in: q.promotorId } } } : {},
+      q.type?.length ? { type: { in: q.type } } : {},
       q.status === 'pendentes' ? { audits: { none: { auditorId: user.sub } } } : {},
       q.status === 'auditadas' ? { audits: { some: { auditorId: user.sub } } } : {},
     ],
@@ -90,11 +90,16 @@ export async function auditRoutes(app: FastifyInstance) {
     return { pending }
   })
 
-  /** Opções para os filtros do app (clientes e promotores com fotos no escopo do usuário). */
+  /**
+   * Opções para os filtros do app (clientes e promotores com fotos no escopo do usuário): últimos 60 dias,
+   * ampliados até `from` quando o período escolhido começa antes disso.
+   */
   app.get('/filters', async (req) => {
+    const q = parse(z.object({ from: zDate.optional() }), req.query)
     const scope = await photoScope(req.user)
+    const since = addDays(todayIn(), -60)
     const visits = await prisma.visit.findMany({
-      where: { photos: { some: scope }, date: { gte: toDbDate(addDays(todayIn(), -60)) } },
+      where: { photos: { some: scope }, date: { gte: toDbDate(q.from && q.from < since ? q.from : since) } },
       select: { client: { select: { id: true, name: true, city: true } }, promotor: { select: { id: true, name: true } } },
       distinct: ['clientId', 'promotorId'],
     })

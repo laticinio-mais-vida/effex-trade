@@ -33,5 +33,13 @@ export const zPage = {
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 }
 
+/** Lista via querystring: "a,b" ou a chave repetida (?x=a&x=b); um valor só continua valendo. */
+export function zList<T extends z.ZodType<unknown, string>>(item: T) {
+  return z
+    .union([z.string(), z.array(z.string())])
+    .transform((v) => (Array.isArray(v) ? v : [v]).flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean))
+    .pipe(z.array(item).max(500))
+}
+
 /** Querystring booleana ("true"/"false"). */
 export const zQueryBool = z.enum(['true', 'false']).transform((v) => v === 'true')

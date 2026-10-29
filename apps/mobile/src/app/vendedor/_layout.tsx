@@ -40,8 +40,8 @@ export default function VendedorLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Auditoria de fotos',
-          tabBarLabel: 'Auditoria',
+          title: 'Avaliação de fotos',
+          tabBarLabel: 'Avaliação',
           tabBarBadge: pending > 0 ? pending : undefined,
           tabBarIcon: tabIcon('images-outline'),
         }}

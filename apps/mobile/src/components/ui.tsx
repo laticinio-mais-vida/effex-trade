@@ -271,6 +271,69 @@ export function PickerSheet<T extends string>({
   )
 }
 
+/** Opção com caixa de marcar, para listas de múltipla escolha. */
+export function CheckOption({ label, detail, checked, onPress }: { label: string; detail?: string; checked: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.option, { flexDirection: 'row', alignItems: 'center', gap: space.md }, checked && styles.optionActive]}>
+      <View
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: 6,
+          borderWidth: 2,
+          borderColor: checked ? colors.primary : colors.faint,
+          backgroundColor: checked ? colors.primary : 'transparent',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {checked ? <Text style={{ color: '#fff', fontWeight: '800' }}>✓</Text> : null}
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[styles.optionText, checked && { color: colors.primary }]}>{label}</Text>
+        {detail ? <Text style={styles.muted}>{detail}</Text> : null}
+      </View>
+    </Pressable>
+  )
+}
+
+/** Lista de múltipla escolha em folha inferior: cada toque marca ou desmarca na hora; a primeira opção desmarca todas. */
+export function MultiPickerSheet<T extends string>({
+  visible,
+  title,
+  allLabel,
+  options,
+  values,
+  onChange,
+  onClose,
+}: {
+  visible: boolean
+  title: string
+  allLabel: string
+  options: { value: T; label: string; detail?: string }[]
+  values: T[]
+  onChange: (values: T[]) => void
+  onClose: () => void
+}) {
+  return (
+    <Sheet visible={visible} title={title} onClose={onClose}>
+      <CheckOption label={allLabel} checked={values.length === 0} onPress={() => onChange([])} />
+      {options.map((o) => {
+        const checked = values.includes(o.value)
+        return (
+          <CheckOption
+            key={o.value}
+            label={o.label}
+            detail={o.detail}
+            checked={checked}
+            onPress={() => onChange(checked ? values.filter((v) => v !== o.value) : [...values, o.value])}
+          />
+        )
+      })}
+    </Sheet>
+  )
+}
+
 /** Folha com campo de texto (justificativas, observações). */
 export function PromptSheet({
   visible,
