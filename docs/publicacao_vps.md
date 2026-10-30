@@ -79,15 +79,17 @@ RAG. **Não mude fuso, firewall nem portas.**
 | Painel montado | `/opt/effex-trade/web` |
 | Fotos | `/opt/effex-trade/uploads` |
 | Atualizações do app (enviadas por `deploy\atualizar-app.ps1`, veja [app_android.md](app_android.md)) | `/opt/effex-trade/updates` |
-| Segredos da API: `DATABASE_URL`, `JWT_SECRET`, `SYNC_KEY`, `CORS_ORIGIN`, `TRUST_PROXY`, `TZ_APP` | `/opt/effex-trade/api.env` |
+| Segredos da API: `DATABASE_URL`, `JWT_SECRET`, `SYNC_KEY`, `CORS_ORIGIN`, `TRUST_PROXY`, `TZ_APP` (e `OSRM_URL`, o servidor de rotas) | `/opt/effex-trade/api.env` |
+| Servidor de rotas: mapa (`dados/atual`) e `preparar-mapa.sh` (veja [Servidor de rotas](#servidor-de-rotas-osrm)) | `/opt/effex-trade/osrm` |
 | Senha do banco | `/opt/effex-trade/banco.env` |
 | `docker-compose.yml`, scripts | `/opt/effex-trade/deploy` |
-| Containers | `effex_api` (Node 24, até 512 MB), `effex_web` (Caddy com o painel, 64 MB), `effex_banco` (PostgreSQL 18, 256 MB, volume `effex-trade_effex_banco_dados`) |
+| Containers | `effex_api` (Node 24, até 512 MB), `effex_web` (Caddy com o painel, 64 MB), `effex_banco` (PostgreSQL 18, 256 MB, volume `effex-trade_effex_banco_dados`), `effex_osrm` (servidor de rotas, até 6 GB) |
 | HTTPS | bloco no fim de `/opt/app-promotoria/Caddyfile` (container `estoque_caddy`) |
 | Cópias de segurança | `/opt/backups/effex-trade` |
 
 Nenhum container do EFFEX abre porta para a internet. O Caddy do app de promotoria recebe `effextrade.maisvida.cloud`,
-manda `/api/*` (sem o `/api`) para `effex_api:3333` e o resto para `effex_web:80`. O banco só é visto pela API.
+manda `/api/*` (sem o `/api`) para `effex_api:3333` e o resto para `effex_web:80`. O banco e o servidor de rotas só são
+vistos pela API.
 
 ### Comandos do dia a dia
 
@@ -95,6 +97,7 @@ manda `/api/*` (sem o `/api`) para `effex_api:3333` e o resto para `effex_web:80
 cd /opt/effex-trade/deploy
 docker compose ps                     # está rodando?
 docker compose logs api --tail 50     # últimas mensagens (sincronizações, erros)
+docker compose logs osrm --tail 20    # servidor de rotas
 docker compose restart api            # reiniciar (ex.: depois de mudar o api.env)
 docker stats --no-stream              # memória
 ```
@@ -141,7 +144,7 @@ antes da publicação (abaixo).
    CORS_ORIGIN=https://effextrade.maisvida.cloud
    TRUST_PROXY=true
    TZ_APP=America/Bahia
-   OSRM_URL=
+   OSRM_URL=http://osrm:5000
    EOF
    chmod 600 api.env banco.env
    ```
@@ -184,6 +187,44 @@ O Caddyfile é do app de promotoria e cuida do HTTPS de todos os sistemas do ser
 
 - Os blocos do EFFEX, do BI, da Evolution API e do RAG não estão no git do app de promotoria: se alguém refizer o
   Caddyfile a partir de lá, eles somem.
+
+### Servidor de rotas (OSRM)
+
+Dá os km pelas ruas do relatório, a sugestão de ordenação dos roteiros e o encaixe nas ruas do km percorrido (GPS)
+([infra/osrm/README.md](../infra/osrm/README.md)). Roda no próprio VPS como o container `effex_osrm` (serviço `osrm` do
+`docker-compose.yml`), só na rede `interno`: nenhuma porta aberta, só a API o alcança, em `http://osrm:5000`. O mapa
+(OpenStreetMap, recorte de BA + ES) fica em `/opt/effex-trade/osrm/dados`; o que está em uso é `dados/atual`.
+
+Instalação (já feita em 30/10/2026):
+
+1. Do computador, copie o script: `scp infra\osrm\preparar-mapa.sh bi-vps:/opt/effex-trade/osrm/`.
+2. No servidor, instale o `osmium-tool` (`apt install osmium-tool`) e prepare o mapa. Levou 18 minutos (o download é
+   de 1,3 GB) e usa no máximo 2 processadores e 12 GB de memória (o pico foi de 10 GB):
+   `cd /opt/effex-trade/osrm && bash preparar-mapa.sh`.
+3. Coloque `OSRM_URL=http://osrm:5000` no `api.env` e rode `docker compose up -d api` (o `up` relê o `api.env`).
+4. Publique (`deploy\publicar.ps1`): o container sobe junto com os outros. Sem mapa, ele fica esperando a pasta
+   `dados/atual` aparecer, e a API usa linha reta enquanto isso.
+
+Para conferir de dentro da API (deve responder `"code":"Ok"` com a distância em metros):
+
+```bash
+docker exec effex_api node -e "fetch('http://osrm:5000/route/v1/driving/-38.5014,-12.9714;-38.4567,-12.9990?overview=false').then(r=>r.text()).then(console.log)"
+```
+
+No ar, o `effex_osrm` usa uns 2,3 GB (limite de 6 GB no `docker-compose.yml`).
+
+O mapa é atualizado todo dia 1º, à 1h do servidor (UTC; 22h do último dia do mês em Salvador), pelo cron do servidor
+(`crontab -l`), antes das cópias de segurança. Para sobrar memória para o preparo, o OSRM fica parado nesses cerca de 20
+minutos (o relatório usa linha reta e o km percorrido espera) e volta com o mapa novo; se o preparo falhar, volta com o
+anterior, que continua em `dados/atual`. O mapa trocado fica em `dados/anterior` até a atualização seguinte:
+
+```
+0 1 1 * * cd /opt/effex-trade/osrm && docker stop effex_osrm > /dev/null; bash preparar-mapa.sh >> /var/log/effex-osrm.log 2>&1; docker start effex_osrm > /dev/null
+```
+
+Se o relatório disser "em linha reta" ou o km percorrido ficar "a calcular" por muito tempo: `docker compose ps` (o
+`effex_osrm` está no ar?), `docker compose logs osrm --tail 20` e o comando de conferir acima. Na migração para outro
+VPS, copie também `/opt/effex-trade/osrm` (ou prepare o mapa de novo lá).
 
 ### Cópia de segurança
 

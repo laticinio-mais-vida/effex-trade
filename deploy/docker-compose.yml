@@ -3,9 +3,10 @@
 #   web/      painel já montado (apps/admin/dist)                 banco.env  senha do banco (só no servidor)
 #   uploads/  fotos                                               deploy/    esta pasta
 #   updates/  atualizações do app (enviadas por deploy/atualizar-app.ps1)
+#   osrm/     servidor de rotas: mapa (dados/) e preparar-mapa.sh
 # Nenhuma porta é publicada: o Caddy do app-promotoria (rede app-promotoria_estoque_network) faz o HTTPS de
-# effextrade.maisvida.cloud e encaminha /api/* para effex_api:3333 e o resto para effex_web:80. O banco só é visto
-# pela API, na rede interno.
+# effextrade.maisvida.cloud e encaminha /api/* para effex_api:3333 e o resto para effex_web:80. O banco e o servidor de
+# rotas só são vistos pela API, na rede interno.
 name: effex-trade
 services:
   api:
@@ -61,6 +62,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks: [interno]
+    logging: *log
+
+  # Servidor de rotas (OSRM): km pela rota, sugestão de ordenação e o encaixe nas ruas do km percorrido (GPS). Só a API o
+  # vê (OSRM_URL=http://osrm:5000 no api.env). O mapa fica em /opt/effex-trade/osrm/dados, preparado por
+  # osrm/preparar-mapa.sh (veja docs/publicacao_vps.md, Servidor de rotas). Sem mapa, o container espera; a API usa linha
+  # reta enquanto isso. A pasta-mãe é montada para a troca mensal do mapa (atual/anterior) valer no restart.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v26.10.0-debian
+    container_name: effex_osrm
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - until ls /dados/atual/mapa.osrm.* > /dev/null 2>&1; do sleep 60; done; exec osrm-routed --algorithm mld --max-table-size 200 /dados/atual/mapa.osrm
+    volumes:
+      - ../osrm/dados:/dados:ro
+    mem_limit: 6g
     networks: [interno]
     logging: *log
 

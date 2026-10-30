@@ -4,6 +4,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants'
 import * as Location from 'expo-location'
 import * as TaskManager from 'expo-task-manager'
 import { api, getToken } from './api'
+import { distanceMeters } from './location'
 
 /**
  * Rastreamento do promotor durante a jornada.
@@ -11,23 +12,43 @@ import { api, getToken } from './api'
  *   primeiro plano no Android (notificação fixa).
  * - Expo Go ou sem permissão "o tempo todo": envio periódico só enquanto o app está aberto.
  * Pings ficam numa fila local e são reenviados em lote quando a internet volta.
+ * Dentro da loja, um ponto a cada intervalo (regra "Intervalo de envio da localização"). Fora da loja, para o km
+ * percorrido (GPS) do relatório, o GPS de alta precisão guarda um ponto a cada X segundos andando ou a cada Y metros
+ * (regras "no deslocamento"); parado, só a cada intervalo.
  */
 
 export const LOCATION_TASK = 'effex-location-tracking'
 const QUEUE_KEY = 'effex.pingQueue'
 const LAST_PING_KEY = 'effex.lastPingAt'
+const LAST_POINT_KEY = 'effex.lastPingPoint'
 const INTERVAL_KEY = 'effex.trackingIntervalMin'
+const MOVING_KEY = 'effex.trackingMoving'
 const MAX_QUEUE = 3000
+/** Andou menos que isto desde o último ponto: está parado (o GPS oscila uns metros mesmo sem sair do lugar). */
+const STILL_M = 50
+/** Fora da loja os pontos vão em lote: envia quando o mais antigo da fila tem este tempo (não acorda a rede a cada ponto). */
+const MOVING_SEND_MS = 2 * 60_000
 
 export type TrackingMode = 'background' | 'foreground' | 'off'
+/** Fora da loja: guarda um ponto a cada `seconds` andando ou a cada `meters`. */
+export type MovingRules = { seconds: number; meters: number }
 
 type Ping = { latitude: number; longitude: number; accuracy?: number; mocked?: boolean; battery?: number; recordedAt: string }
+type Point = { latitude: number; longitude: number }
 
 export const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient
 
 async function intervalMs() {
   const stored = Number(await AsyncStorage.getItem(INTERVAL_KEY))
   return (stored > 0 ? stored : 3) * 60_000
+}
+
+async function readJson<T>(key: string): Promise<T | null> {
+  try {
+    return JSON.parse((await AsyncStorage.getItem(key)) ?? 'null')
+  } catch {
+    return null
+  }
 }
 
 async function batteryLevel() {
@@ -39,16 +60,26 @@ async function batteryLevel() {
   }
 }
 
-/** Grava pings respeitando o intervalo mínimo entre eles. */
+/**
+ * Grava pings respeitando o intervalo mínimo entre eles. Fora da loja, também guarda o ponto quando o promotor andou
+ * `meters`, ou quando passaram `seconds` e ele saiu do lugar.
+ */
 export async function recordLocations(locations: Location.LocationObject[], force = false) {
   if (locations.length === 0) return
   const every = (await intervalMs()) * 0.9
+  const moving = await readJson<MovingRules>(MOVING_KEY)
   let last = Number(await AsyncStorage.getItem(LAST_PING_KEY)) || 0
+  let lastPoint = await readJson<Point>(LAST_POINT_KEY)
   const battery = await batteryLevel()
   const accepted: Ping[] = []
   for (const loc of [...locations].sort((a, b) => a.timestamp - b.timestamp)) {
-    if (!force && loc.timestamp - last < every) continue
+    const elapsed = loc.timestamp - last
+    const moved = lastPoint ? distanceMeters(lastPoint.latitude, lastPoint.longitude, loc.coords.latitude, loc.coords.longitude) : Infinity
+    const keep =
+      force || elapsed >= every || (!!moving && elapsed > 0 && (moved >= moving.meters || (elapsed >= moving.seconds * 1000 * 0.9 && moved >= STILL_M)))
+    if (!keep) continue
     last = loc.timestamp
+    lastPoint = { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
     accepted.push({
       latitude: loc.coords.latitude,
       longitude: loc.coords.longitude,
@@ -59,10 +90,13 @@ export async function recordLocations(locations: Location.LocationObject[], forc
     })
   }
   if (accepted.length === 0) return
-  await AsyncStorage.setItem(LAST_PING_KEY, String(last))
-  const queue = await readQueue()
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify([...queue, ...accepted].slice(-MAX_QUEUE)))
-  await flushQueue()
+  await AsyncStorage.multiSet([
+    [LAST_PING_KEY, String(last)],
+    [LAST_POINT_KEY, JSON.stringify(lastPoint)],
+  ])
+  const queue = [...(await readQueue()), ...accepted].slice(-MAX_QUEUE)
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue))
+  if (!moving || force || Date.now() - Date.parse(queue[0]!.recordedAt) >= MOVING_SEND_MS) await flushQueue()
 }
 
 async function readQueue(): Promise<Ping[]> {
@@ -103,7 +137,7 @@ export async function pendingPings() {
 }
 
 export async function clearTrackingData() {
-  await AsyncStorage.multiRemove([QUEUE_KEY, LAST_PING_KEY])
+  await AsyncStorage.multiRemove([QUEUE_KEY, LAST_PING_KEY, LAST_POINT_KEY])
 }
 
 // A tarefa precisa ser definida no escopo do módulo (importado pelo layout raiz).
@@ -112,9 +146,15 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(LOCATION_TASK, 
   await recordLocations(data.locations)
 })
 
-/** Liga o rastreamento. Retorna o modo efetivo e, se for o caso, o motivo de não estar em segundo plano. */
-export async function startTracking(intervalMinutes: number): Promise<{ mode: TrackingMode; reason?: string }> {
-  await AsyncStorage.setItem(INTERVAL_KEY, String(intervalMinutes))
+/**
+ * Liga o rastreamento (ou troca as opções dele). `moving` = fora da loja. Retorna o modo efetivo e, se for o caso, o
+ * motivo de não estar em segundo plano. O Android só aceita com o app aberto.
+ */
+export async function startTracking(intervalMinutes: number, moving: MovingRules | null = null): Promise<{ mode: TrackingMode; reason?: string }> {
+  await AsyncStorage.multiSet([
+    [INTERVAL_KEY, String(intervalMinutes)],
+    [MOVING_KEY, JSON.stringify(moving)],
+  ])
   let fg = await Location.getForegroundPermissionsAsync()
   if (!fg.granted) fg = await Location.requestForegroundPermissionsAsync()
   if (!fg.granted) return { mode: 'off', reason: 'Permissão de localização negada.' }
@@ -128,12 +168,16 @@ export async function startTracking(intervalMinutes: number): Promise<{ mode: Tr
 
   try {
     const ms = intervalMinutes * 60_000
-    if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) await Location.stopLocationUpdatesAsync(LOCATION_TASK)
+    // Fora da loja: GPS de alta precisão lido a cada poucos segundos (o bastante para pegar os `meters` a ~70 km/h),
+    // entregue em lotes de 1 min; recordLocations escolhe o que guardar. Na loja: um ponto por intervalo, como antes.
+    const movingReadMs = moving ? Math.round(Math.min(30, Math.max(5, Math.min(moving.seconds, moving.meters / 20)))) * 1000 : 0
+    // Ligar de novo por cima só troca as opções. Parar antes desligaria o serviço em primeiro plano (a notificação fixa),
+    // e o Android não deixa religá-lo se o app já estiver em segundo plano.
     await Location.startLocationUpdatesAsync(LOCATION_TASK, {
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: ms,
+      ...(moving
+        ? { accuracy: Location.Accuracy.High, timeInterval: movingReadMs, deferredUpdatesInterval: 60_000 }
+        : { accuracy: Location.Accuracy.Balanced, timeInterval: ms, deferredUpdatesInterval: ms }),
       distanceInterval: 0,
-      deferredUpdatesInterval: ms,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
       activityType: Location.ActivityType.AutomotiveNavigation,
@@ -162,7 +206,8 @@ export async function pingNow(force = false) {
   try {
     const perm = await Location.getForegroundPermissionsAsync()
     if (!perm.granted) return
-    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+    const moving = await readJson<MovingRules>(MOVING_KEY)
+    const loc = await Location.getCurrentPositionAsync({ accuracy: moving ? Location.Accuracy.High : Location.Accuracy.Balanced })
     await recordLocations([loc], force)
   } catch {
     // GPS indisponível no momento

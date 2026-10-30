@@ -151,6 +151,13 @@ export type ReportRow = {
   travelMin: number | null
   travelKm: number | null
   afterLunch: boolean
+  /** Km percorrido (GPS) até esta visita; vazio enquanto o dia não foi calculado */
+  gpsKm: number | null
+  /** Parte do km percorrido que é rota estimada (faltou GPS) */
+  gpsEstimatedKm: number | null
+  gpsCoverage: GpsCoverage | null
+  /** Tem deslocamento, mas o km percorrido do dia ainda não foi calculado */
+  gpsPending: boolean
   checkinDistance: number | null
   geofenceWaived: boolean
   photosWaived: boolean
@@ -178,6 +185,10 @@ export type ReportSummary = {
   totalTravelMin: number
   avgTravelMin: number | null
   totalTravelKm: number | null
+  totalGpsKm: number | null
+  totalGpsEstimatedKm: number | null
+  /** Dias com deslocamento ainda sem o km percorrido calculado */
+  gpsPendingDays: number
   geofenceWaivers: number
   photoWaivers: number
   autoClosed: number
@@ -204,12 +215,28 @@ export type ReportDay = {
   clientMin: number
   travelMin: number
   travelKm: number | null
+  gpsKm: number | null
+  gpsEstimatedKm: number | null
+  gpsCoverage: GpsCoverage | null
+  gpsPending: boolean
 }
 
 /** De onde vêm as distâncias: servidor de rotas (ruas), linha reta (sem servidor ou trecho sem rota) ou os dois. */
 export type DistanceMode = 'ruas' | 'linha_reta' | 'misto'
 
-export type Report = { from: string; to: string; travelKmSource: DistanceMode | null; summary: ReportSummary[]; days: ReportDay[]; rows: ReportRow[] }
+/** Quanto do km percorrido veio do rastro de GPS: tudo, parte (o resto é rota estimada) ou nada. */
+export type GpsCoverage = 'completo' | 'parcial' | 'estimado'
+
+export type Report = {
+  from: string
+  to: string
+  travelKmSource: DistanceMode | null
+  /** Como os pontos de GPS foram ligados (ruas = encaixados pelo servidor de rotas) */
+  gpsKmSource: DistanceMode | null
+  summary: ReportSummary[]
+  days: ReportDay[]
+  rows: ReportRow[]
+}
 
 export type PhotoItem = {
   id: string

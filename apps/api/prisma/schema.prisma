@@ -233,6 +233,11 @@ model WorkDay {
   routeOrderWaived Boolean @default(false)
   createdAt  DateTime  @default(now())
 
+  /// Quando o km percorrido (GPS) do dia foi calculado e gravado nas aberturas (vazio = ainda não calculado)
+  gpsKmAt   DateTime?
+  /// Como os pontos de GPS foram ligados: ruas (encaixe no servidor de rotas), linha_reta (sem servidor) ou misto
+  gpsKmMode String?
+
   visits Visit[]
   alerts Alert[]
 
@@ -339,6 +344,11 @@ model VisitSession {
   checkoutLng      Float?
   checkoutDistance Float?
   autoClosed       Boolean   @default(false)
+  /// Km percorrido (GPS), em metros, da saída da abertura anterior até esta. Calculado depois que o dia é encerrado
+  /// (services/gps-km.ts); vazio na primeira abertura do dia e enquanto o dia não foi calculado
+  gpsMeters          Float?
+  /// Parte desse trecho sem pontos de GPS, completada pela rota estimada (0 = tudo pelo rastro)
+  gpsEstimatedMeters Float?
 
   @@index([visitId])
 }

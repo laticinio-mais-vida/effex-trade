@@ -243,6 +243,8 @@ export async function getDayForPromotor(promotorId: string, date: string) {
       minVisitMinutes: settings.minVisitMinutes,
       justificationMinLength: settings.justificationMinLength,
       trackingIntervalMinutes: settings.trackingIntervalMinutes,
+      trackingMovingSeconds: settings.trackingMovingSeconds,
+      trackingMovingMeters: settings.trackingMovingMeters,
     },
     nextVisitId: orderEnforced ? (next?.id ?? null) : null,
     inProgressVisitId: visits.find((v) => v.status === 'EM_ATENDIMENTO')?.id ?? null,

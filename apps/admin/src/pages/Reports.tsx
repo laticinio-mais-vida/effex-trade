@@ -16,7 +16,7 @@ import {
   today,
   visitStatusLabel,
 } from '../format'
-import type { DistanceMode, Report, ReportRow, VisitStatus } from '../types'
+import type { DistanceMode, GpsCoverage, Report, ReportRow, VisitStatus } from '../types'
 import { DateRange, Empty, ErrorBox, Loading, PageHead, PromotorSelect, Segmented, StatusPill, Tabs } from '../ui'
 
 type Tab = 'resumo' | 'jornadas' | 'visitas' | 'rupturas' | 'justificativas'
@@ -49,7 +49,7 @@ export function ReportsPage() {
     if (!data) return
     downloadCsv(
       `execucao-${range.from}-a-${range.to}.csv`,
-      ['Data', 'Promotor', 'Ordem', 'Origem', 'Estrutura', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', data.travelKmSource ? `Deslocamento (km ${distanceModeLabel[data.travelKmSource]})` : 'Deslocamento (km)', 'Distância no check-in (m)', 'Fotos', 'Rupturas', 'Contagem de estoque', 'Motivo', 'Justificativa', 'Liberações'],
+      ['Data', 'Promotor', 'Ordem', 'Origem', 'Estrutura', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', data.travelKmSource ? `Km pela rota (${distanceModeLabel[data.travelKmSource]})` : 'Km pela rota', 'Km percorrido (GPS)', 'Km GPS estimado', 'Distância no check-in (m)', 'Fotos', 'Rupturas', 'Contagem de estoque', 'Motivo', 'Justificativa', 'Liberações'],
       data.rows.map((r) => [
         fmtDate(r.date),
         r.promotor.name,
@@ -66,6 +66,8 @@ export function ReportsPage() {
         r.durationMin,
         r.travelMin,
         r.travelKm,
+        r.gpsPending ? 'a calcular' : r.gpsKm,
+        r.gpsPending ? '' : r.gpsEstimatedKm,
         r.checkinDistance,
         r.photoCount,
         r.ruptures.map((p) => p.name).join(', '),
@@ -108,7 +110,7 @@ export function ReportsPage() {
       {data && data.rows.length === 0 && <Empty>Nenhuma visita no período. Ajuste as datas ou o promotor.</Empty>}
       {data && data.rows.length > 0 && (
         <>
-          {['resumo', 'jornadas', 'visitas'].includes(tab) && <KmNote source={data.travelKmSource} />}
+          {['resumo', 'jornadas', 'visitas'].includes(tab) && <KmNote source={data.travelKmSource} gpsSource={data.gpsKmSource} />}
           {tab === 'resumo' && <Summary data={data} />}
           {tab === 'jornadas' && <Days data={data} />}
           {tab === 'visitas' && (
@@ -137,7 +139,13 @@ export function ReportsPage() {
   )
 }
 
-function KmNote({ source }: { source: DistanceMode | null }) {
+const gpsModeLabel: Record<DistanceMode, string> = {
+  ruas: 'com os pontos encaixados nas ruas',
+  linha_reta: 'com os pontos ligados em linha reta (sem servidor de rotas)',
+  misto: 'com os pontos encaixados nas ruas (em linha reta onde o encaixe não foi possível)',
+}
+
+function KmNote({ source, gpsSource }: { source: DistanceMode | null; gpsSource: DistanceMode | null }) {
   if (!source) return null
   const why: Record<DistanceMode, string> = {
     ruas: 'Caminho mais curto de carro entre um cliente e o seguinte; é uma aproximação do trajeto feito.',
@@ -146,8 +154,41 @@ function KmNote({ source }: { source: DistanceMode | null }) {
   }
   return (
     <p className="small muted" style={{ margin: '0 0 10px' }}>
-      Km de deslocamento {distanceModeLabel[source]}. {why[source]}
+      Km pela rota {distanceModeLabel[source]}. {why[source]}
+      <br />
+      Km percorrido (GPS): o caminho que o celular registrou da saída de um cliente até a chegada no seguinte (inclui a ida e a volta do almoço)
+      {gpsSource ? `, ${gpsModeLabel[gpsSource]}` : ''}. É calculado alguns minutos depois que o promotor encerra o dia; onde faltou GPS, aquele pedaço segue a
+      rota estimada e fica marcado.
     </p>
+  )
+}
+
+const routeKm = (km: number | null) => (km != null ? `${fmtNumber(km, 1)} km` : '—')
+
+const gpsCoverageChip: Record<Exclude<GpsCoverage, 'completo'>, { label: string; title: string }> = {
+  parcial: { label: 'parte estimada', title: 'Faltou GPS em parte do trajeto (sem sinal, celular desligado ou sem permissão): essa parte segue a rota estimada' },
+  estimado: { label: 'estimado', title: 'Sem GPS no trajeto (sem sinal, celular desligado ou sem permissão): o km é o da rota estimada' },
+}
+
+/** Km percorrido (GPS) de uma visita ou de um dia, marcado quando faltou GPS. */
+function GpsKm({ km, coverage, pending }: { km: number | null; coverage: GpsCoverage | null; pending: boolean }) {
+  if (pending)
+    return (
+      <span className="muted" title="Calculado alguns minutos depois que o promotor encerra o dia">
+        a calcular
+      </span>
+    )
+  return (
+    <>
+      {routeKm(km)}
+      {coverage && coverage !== 'completo' && (
+        <div>
+          <span className="chip warn" title={gpsCoverageChip[coverage].title}>
+            {gpsCoverageChip[coverage].label}
+          </span>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -169,6 +210,12 @@ function Summary({ data }: { data: Report }) {
             <th className="r">Total em clientes</th>
             <th className="r">Média de deslocamento</th>
             <th className="r">Total de deslocamento</th>
+            <th className="r" title="Caminho mais curto de carro entre um cliente e o seguinte">
+              Km pela rota
+            </th>
+            <th className="r" title="Caminho que o celular registrou da saída de um cliente até a chegada no seguinte">
+              Km percorrido (GPS)
+            </th>
             <th className="r">Rupturas</th>
             <th className="r">Encerr. automático</th>
             <th className="r">Liberações</th>
@@ -194,9 +241,20 @@ function Summary({ data }: { data: Report }) {
               <td className="r">{fmtMinutes(s.avgClientMin)}</td>
               <td className="r">{fmtMinutes(s.totalClientMin)}</td>
               <td className="r">{fmtMinutes(s.avgTravelMin)}</td>
+              <td className="r">{fmtMinutes(s.totalTravelMin)}</td>
+              <td className="r">{routeKm(s.totalTravelKm)}</td>
               <td className="r">
-                {fmtMinutes(s.totalTravelMin)}
-                {s.totalTravelKm != null && <div className="small muted">{fmtNumber(s.totalTravelKm, 1)} km</div>}
+                {routeKm(s.totalGpsKm)}
+                {!!s.totalGpsEstimatedKm && (
+                  <div className="small muted" title="Parte do km percorrido sem GPS, completada pela rota estimada">
+                    {fmtNumber(s.totalGpsEstimatedKm, 1)} km estimados
+                  </div>
+                )}
+                {s.gpsPendingDays > 0 && (
+                  <div className="small muted" title="Calculado alguns minutos depois que o promotor encerra o dia">
+                    {s.gpsPendingDays} {s.gpsPendingDays === 1 ? 'dia' : 'dias'} a calcular
+                  </div>
+                )}
               </td>
               <td className="r">{s.ruptures}</td>
               <td className="r" style={{ color: s.autoClosed ? 'var(--justified)' : undefined }}>
@@ -232,6 +290,12 @@ function Days({ data }: { data: Report }) {
             <th className="r">Não feitas</th>
             <th className="r">Em clientes</th>
             <th className="r">Deslocamento</th>
+            <th className="r" title="Caminho mais curto de carro entre um cliente e o seguinte">
+              Km pela rota
+            </th>
+            <th className="r" title="Caminho que o celular registrou da saída de um cliente até a chegada no seguinte">
+              Km percorrido (GPS)
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -278,9 +342,10 @@ function Days({ data }: { data: Report }) {
                 {d.notDone}
               </td>
               <td className="r">{fmtMinutes(d.clientMin)}</td>
+              <td className="r">{fmtMinutes(d.travelMin)}</td>
+              <td className="r">{routeKm(d.travelKm)}</td>
               <td className="r">
-                {fmtMinutes(d.travelMin)}
-                {d.travelKm != null && <div className="small muted">{fmtNumber(d.travelKm, 1)} km</div>}
+                <GpsKm km={d.gpsKm} coverage={d.gpsCoverage} pending={d.gpsPending} />
               </td>
             </tr>
           ))}
@@ -306,6 +371,12 @@ function Visits({ rows }: { rows: ReportRow[] }) {
             <th>Check-out</th>
             <th className="r">No cliente</th>
             <th className="r">Deslocamento</th>
+            <th className="r" title="Caminho mais curto de carro entre o cliente anterior e este">
+              Km pela rota
+            </th>
+            <th className="r" title="Caminho que o celular registrou da saída do cliente anterior até a chegada neste">
+              Km percorrido (GPS)
+            </th>
             <th className="r">Dist. check-in</th>
             <th className="r">Fotos</th>
             <th>Rupturas</th>
@@ -362,7 +433,6 @@ function Visits({ rows }: { rows: ReportRow[] }) {
               <td className="r">{fmtMinutes(r.durationMin)}</td>
               <td className="r">
                 {fmtMinutes(r.travelMin)}
-                {r.travelKm != null && <div className="small muted">{fmtNumber(r.travelKm, 1)} km</div>}
                 {r.afterLunch && (
                   <div>
                     <span className="chip" title="Deslocamento contado até a abertura do almoço; a volta do almoço é a abertura deste cliente">
@@ -370,6 +440,10 @@ function Visits({ rows }: { rows: ReportRow[] }) {
                     </span>
                   </div>
                 )}
+              </td>
+              <td className="r">{routeKm(r.travelKm)}</td>
+              <td className="r">
+                <GpsKm km={r.gpsKm} coverage={r.gpsCoverage} pending={r.gpsPending} />
               </td>
               <td className="r">{r.checkinDistance != null ? `${r.checkinDistance} m` : '—'}</td>
               <td className="r">{r.photoCount}</td>

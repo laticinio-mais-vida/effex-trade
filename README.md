@@ -51,9 +51,9 @@ Para testar o check-in com o celular de verdade, cadastre no painel um cliente n
 
 ## O que já funciona
 
-**App do promotor:** roteiro do dia gerado a partir do roteiro fixo, que começa sozinho no primeiro check-in; inclusão de clientes extras (inclusive repetidos); abertura do atendimento com foto da fachada e cerca eletrônica validada na API, bloqueio de GPS falso e de fora da ordem; atendimento guiado (antes, depois identificando os produtos, confirmação de ruptura contra o mix do cliente); fotos só pela câmera (também vencimento e atividade extra); check-out na cerca; encerramento automático do atendimento esquecido; encerramento do roteiro só completo ou com as lojas pendentes justificadas; pedidos de liberação ao supervisor; envio da localização a cada 3 minutos.
+**App do promotor:** roteiro do dia gerado a partir do roteiro fixo, que começa sozinho no primeiro check-in; inclusão de clientes extras (inclusive repetidos); abertura do atendimento com foto da fachada e cerca eletrônica validada na API, bloqueio de GPS falso e de fora da ordem; atendimento guiado (antes, depois identificando os produtos, confirmação de ruptura contra o mix do cliente); fotos só pela câmera (também vencimento e atividade extra); check-out na cerca; encerramento automático do atendimento esquecido; encerramento do roteiro só completo ou com as lojas pendentes justificadas; pedidos de liberação ao supervisor; envio da localização (na loja, a cada 3 minutos; fora dela, com GPS de alta precisão, a cada 30 s em movimento ou a cada 200 m).
 
-**Painel:** visão do dia; mapa com atualização automática (3 min), clientes do dia por status (feito, justificado, não feito, em atendimento), posição e rastro do promotor, filtro por promotor; relatório de execução (tempo em cada cliente, deslocamento, jornadas, rupturas, justificativas, encerramentos automáticos, exportação para planilha); catálogo de produtos e mix dos clientes (com importação por planilha); avaliação de fotos com nota e observação; liberações; correções de auditoria com PDF para o vendedor; cadastros (usuários de todos os perfis com as cidades atendidas, clientes com mapa e planilha para baixar e importar a localização, roteiros com seleção de vários clientes e frequência por dia, atividades extras, motivos) e regras.
+**Painel:** visão do dia; mapa com atualização automática (3 min), clientes do dia por status (feito, justificado, não feito, em atendimento), posição e rastro do promotor, filtro por promotor; relatório de execução (tempo em cada cliente, deslocamento com km pela rota e km percorrido pelo GPS, jornadas, rupturas, justificativas, encerramentos automáticos, exportação para planilha); catálogo de produtos e mix dos clientes (com importação por planilha); avaliação de fotos com nota e observação; liberações; correções de auditoria com PDF para o vendedor; cadastros (usuários de todos os perfis com as cidades atendidas, clientes com mapa e planilha para baixar e importar a localização, roteiros com seleção de vários clientes e frequência por dia, atividades extras, motivos) e regras.
 
 **Supervisor (app):** caixa de pedidos de liberação, liberação direta (inverter ordem, substituir cliente, liberar sem fotos, check-in fora da cerca), visita pontual (incluir um cliente para o promotor hoje ou num dia futuro, com recado), auditoria das fotos dos promotores e conferência das auditorias dos vendedores.
 
@@ -99,11 +99,20 @@ Ficam em `apps/api/src/services/settings.ts` e são ligadas e desligadas no pain
 | Ponto | Início do trabalho = abertura do primeiro atendimento. Fim do trabalho = horário da última atividade (check-out, foto ou justificativa em campo), e não o horário em que o roteiro foi encerrado (que fica registrado à parte). |
 | Almoço | Botão "Iniciar almoço" abaixo de "Incluir cliente extra". Durante o almoço nenhuma atividade é feita; a volta é a abertura do próximo cliente (ou a justificativa dele, se estiver fechado, feita na cerca dele ou do cliente seguinte). Um almoço por dia, só depois do primeiro atendimento. Não há tempo mínimo nem horário fixo, mas se o almoço passar de 2h (configurável) o supervisor recebe um alerta no app e no painel, até marcar "ciente". O almoço sai do deslocamento e das horas trabalhadas. |
 
-Também: raio da cerca, bloqueio de GPS falso, precisão mínima do GPS, ordem obrigatória do roteiro, clientes extras e limite por dia, tempo mínimo no cliente, tamanho mínimo da justificativa, intervalo de rastreamento, atualização do mapa e escala da nota das fotos.
+Também: raio da cerca, bloqueio de GPS falso, precisão mínima do GPS, ordem obrigatória do roteiro, clientes extras e limite por dia, tempo mínimo no cliente, tamanho mínimo da justificativa, rastreamento (intervalo na loja e, fora dela, intervalo e distância de envio), atualização do mapa e escala da nota das fotos.
 
 O **mix do cliente** (o que ele compra no período) é a base do contraste de ruptura. Enquanto a fonte definitiva não está ligada, ele é carregado no painel em **Produtos e mix** (planilha `nome_fantasia;cidade;uf;produto_codigo`, ou `cliente_id;produto_codigo` com o id da planilha de clientes) ou editado no cadastro de cada cliente.
 
 Para criar uma regra nova: acrescente o campo em `settingsSchema`, `defaultSettings` e `settingsMeta` (o painel monta o formulário sozinho) e aplique a regra no serviço correspondente (normalmente `src/services/visits.ts`).
+
+## Km de deslocamento (relatório de execução)
+
+Cada trecho vai da saída de um cliente (check-out) até a abertura do seguinte (check-in); a ida de casa ao primeiro cliente e a volta do último ficam de fora, porque o rastreamento só liga no primeiro check-in e desliga no encerramento do roteiro. O relatório mostra dois números:
+
+- **Km pela rota:** caminho mais curto de carro entre a localização cadastrada de um cliente e a do seguinte, calculado na hora pelo servidor de rotas (OSRM, [infra/osrm](infra/osrm/README.md)); sem ele, em linha reta. A sugestão de ordenação dos roteiros usa as mesmas distâncias.
+- **Km percorrido (GPS):** o caminho que o celular registrou no trecho, com os pontos encaixados nas ruas pelo mesmo servidor (`src/services/gps-km.ts`). Antes do encaixe saem os pontos de GPS falso, os com margem de erro acima de 100 m, os saltos que vão e voltam acima de 180 km/h e os "pulos" com o promotor parado (menos de 50 m ou da margem de erro do ponto). Onde faltam pontos por mais de dois intervalos de envio (sem sinal, celular desligado ou sem permissão), aquele pedaço é a rota estimada e o trecho fica marcado ("parte estimada" ou "estimado"). É calculado uma vez, 5 minutos depois que o dia é encerrado (o dia esquecido aberto, depois da meia-noite), e gravado em `VisitSession.gpsMeters`: o relatório só lê e o número não muda. Em produção, sem o servidor de rotas o dia espera o servidor voltar; no computador, sem `OSRM_URL`, os pontos são ligados em linha reta.
+
+A diferença entre os dois mostra desvios e trajetos fora do esperado (inclusive a ida e a volta do almoço, que entram no km percorrido).
 
 ## Tipos de liberação do supervisor
 
@@ -123,7 +132,8 @@ npm run db:seed      # restaura os dados depois do teste
 
 Publicado em **https://effextrade.maisvida.cloud** (painel) e **https://effextrade.maisvida.cloud/api** (API), em Docker no VPS do BI: `apps/api/Dockerfile`, `deploy/` e o guia [docs/publicacao_vps.md](docs/publicacao_vps.md) (publicar versão nova com `deploy\publicar.ps1`, cópias de segurança, migrar de servidor ou de domínio). O banco começa vazio: o primeiro administrador é criado com `npm run criar-admin`.
 
-- `JWT_SECRET`, `SYNC_KEY`, `CORS_ORIGIN` (domínio do painel) e `TRUST_PROXY=true` ficam no `api.env` do servidor. As migrações rodam sozinhas quando a API sobe (`prisma migrate deploy`).
+- `JWT_SECRET`, `SYNC_KEY`, `CORS_ORIGIN` (domínio do painel), `TRUST_PROXY=true` e `OSRM_URL=http://osrm:5000` ficam no `api.env` do servidor. As migrações rodam sozinhas quando a API sobe (`prisma migrate deploy`).
+- O servidor de rotas (OSRM) roda no mesmo VPS, como o serviço `osrm` do `deploy/docker-compose.yml`, só visível para a API; o mapa é preparado no próprio VPS e atualizado todo mês ([docs/publicacao_vps.md](docs/publicacao_vps.md#servidor-de-rotas-osrm)).
 - O painel usa a API pelo caminho relativo `/api` (`apps/admin/.env.production`), no mesmo domínio.
 - O app Android é um APK enviado aos usuários (sem Play Store), gerado no computador com `deploy\gerar-apk.ps1` na pasta `apk\`. O código novo chega por atualização automática servida pela própria API (`/api/updates`, publicações em `/opt/effex-trade/updates`), publicada com `deploy\atualizar-app.ps1`: [docs/app_android.md](docs/app_android.md).
 - A imagem da API instala a fonte DejaVu: a faixa de data e hora das fotos precisa de uma fonte no sistema.
@@ -133,7 +143,7 @@ Ainda pendente:
 - Fotos: ficam em disco (`UPLOAD_DIR`) e são servidas sem login em `/uploads` (nomes impossíveis de adivinhar). O próximo passo é um storage (S3, R2 ou GCS) com links assinados; a troca fica isolada em `src/services/storage.ts`.
 - App: notificação push dos alertas ao supervisor (hoje ele vê o alerta quando abre o app ou o painel). O APK e as atualizações automáticas já existem ([docs/app_android.md](docs/app_android.md)).
 - App: registrar o pacote `com.effex.trade` no Android Developer Console antes de 2027, quando o Google passa a exigir desenvolvedor verificado também para APK instalado fora de loja (passo a passo em [docs/app_android.md](docs/app_android.md#verificação-de-desenvolvedor-do-google-prazo-2027)).
-- Distâncias pelas ruas: subir o servidor de rotas OSRM ao lado da API e preencher `OSRM_URL` (passo a passo em [infra/osrm/README.md](infra/osrm/README.md)). Sem ele, o relatório e os roteiros usam linha reta. O VPS atual não tem memória para o OSRM (pede de 2 a 4 GB livres).
+- Pontos de GPS (`LocationPing`) não são apagados: com o km percorrido gravado, dá para definir um prazo de guarda (ex.: alguns meses).
 
 ## Integração futura com a gestão de trade
 

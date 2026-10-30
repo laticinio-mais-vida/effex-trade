@@ -6,6 +6,8 @@
 import { gzipSync } from 'node:zlib'
 import { shelfPng } from '../prisma/seed-image'
 import { checkLunchAlerts } from '../src/services/alerts'
+import { computeDayGpsKm, computePendingGpsKm } from '../src/services/gps-km'
+import { travelLegs } from '../src/services/reports'
 import { ensureWorkDay } from '../src/services/workdays'
 import { prisma } from '../src/db'
 import { env } from '../src/env'
@@ -550,6 +552,46 @@ check('primeiro cliente do dia sem deslocamento', firstOfDay.travelMin === null,
 const myDay = r.data.days.find((d: any) => d.promotor.id === promotorId && d.date === today)
 check('jornada com ponto de início, almoço e horas trabalhadas', !!myDay?.workStart && !!myDay?.workEnd && myDay?.lunchMin != null && myDay?.workedMin != null, myDay)
 check('deslocamento depois do almoço marcado', r.data.rows.some((x: any) => x.promotor.id === promotorId && x.date === today && x.afterLunch), null)
+
+console.log('Km percorrido (GPS)')
+// O seed encerra os dias anteriores direto no banco e o promotor 1 encerrou o de hoje acima. A rodada, com o relógio
+// 10 min à frente por causa da folga depois do encerramento, calcula todos (sem OSRM_URL, com os pontos em linha reta).
+await computePendingGpsKm(new Date(Date.now() + 10 * 60_000))
+r = await call(admin, 'GET', `/admin/reports/visits?from=${addDays(today, -3)}&to=${today}`)
+const gpsToday = r.data.days.find((d: any) => d.promotor.id === promotorId && d.date === today)
+check('jornada encerrada ganha o km percorrido (GPS)', !!gpsToday && !gpsToday.gpsPending && gpsToday.gpsKm != null && r.data.gpsKmSource != null, gpsToday)
+const gpsRow = r.data.rows.find((x: any) => x.date < today && x.gpsCoverage === 'completo' && x.travelKm > 0.5)
+check('trecho com rastro completo, perto do km pela rota', !!gpsRow && gpsRow.gpsKm > 0 && gpsRow.gpsKm < gpsRow.travelKm * 2 + 0.5, gpsRow)
+if (gpsRow) {
+  const gpsDay = await prisma.workDay.findFirstOrThrow({ where: { visits: { some: { id: gpsRow.id } } }, include: { visits: { include: { sessions: true } } } })
+  const gpsLeg = travelLegs(gpsDay.visits.flatMap((v) => v.sessions)).find((l) => l.to.visitId === gpsRow.id)!
+  const recalc = async () => {
+    await prisma.visitSession.updateMany({ where: { visit: { workDayId: gpsDay.id } }, data: { gpsMeters: null, gpsEstimatedMeters: null } })
+    await prisma.workDay.update({ where: { id: gpsDay.id }, data: { gpsKmAt: null, gpsKmMode: null } })
+    await computeDayGpsKm(gpsDay.id)
+    return (await call(admin, 'GET', `/admin/reports/visits?from=${gpsRow.date}&to=${gpsRow.date}`)).data.rows.find((x: any) => x.id === gpsRow.id)
+  }
+  // Pontos ruins no meio do trecho, a ~20 km dali: GPS falso, posição imprecisa e um salto que vai e volta
+  const far = { latitude: gpsLeg.to.checkinLat! + 0.18, longitude: gpsLeg.to.checkinLng! }
+  const before = (seconds: number) => new Date(gpsLeg.to.checkinAt.getTime() - seconds * 1000)
+  await prisma.locationPing.createMany({
+    data: [
+      { promotorId: gpsDay.promotorId, ...far, accuracy: 8, mocked: true, recordedAt: before(150) },
+      { promotorId: gpsDay.promotorId, ...far, accuracy: 900, recordedAt: before(120) },
+      { promotorId: gpsDay.promotorId, ...far, accuracy: 8, recordedAt: before(90) },
+    ],
+  })
+  const dirty = await recalc()
+  check('GPS falso, posição imprecisa e salto não mudam o km percorrido', Math.abs(dirty?.gpsKm - gpsRow.gpsKm) < 0.05, { antes: gpsRow.gpsKm, depois: dirty?.gpsKm })
+  // Nenhum ponto no trecho (celular desligado ou sem sinal): o trecho é a rota estimada e fica marcado
+  await prisma.locationPing.deleteMany({ where: { promotorId: gpsDay.promotorId, recordedAt: { gt: gpsLeg.start, lt: gpsLeg.to.checkinAt } } })
+  const empty = await recalc()
+  check('trecho sem pontos de GPS fica "estimado", com o km da rota', empty?.gpsCoverage === 'estimado' && Math.abs(empty.gpsKm - empty.travelKm) < 0.5, empty)
+}
+r = await call(admin, 'GET', '/admin/settings')
+check('regras de envio no deslocamento no painel', r.data.values.trackingMovingSeconds === 30 && r.data.values.trackingMovingMeters === 200 && !!r.data.meta.trackingMovingMeters, r.data.values)
+r = await call(promotor, 'GET', '/promotor/day')
+check('app recebe as regras de envio no deslocamento', r.data.rules.trackingMovingSeconds === 30 && r.data.rules.trackingMovingMeters === 200, r.data.rules)
 r = await call(admin, 'GET', '/admin/photos?reviewed=false')
 check('fotos para avaliar', r.status === 200 && r.data.items.length > 0)
 r = await call(admin, 'PATCH', `/admin/photos/${r.data.items[0].id}/review`, { score: 8, notes: 'Boa foto' })

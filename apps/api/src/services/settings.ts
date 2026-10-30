@@ -29,6 +29,8 @@ export const settingsSchema = z.object({
   maxExtraVisitsPerDay: z.number().int().min(0).max(100),
   justificationMinLength: z.number().int().min(0).max(500),
   trackingIntervalMinutes: z.number().int().min(1).max(60),
+  trackingMovingSeconds: z.number().int().min(10).max(300),
+  trackingMovingMeters: z.number().int().min(50).max(2000),
   mapRefreshSeconds: z.number().int().min(30).max(3600),
   photoScoreMax: z.number().int().min(1).max(100),
 })
@@ -54,6 +56,8 @@ export const defaultSettings: Settings = {
   maxExtraVisitsPerDay: 10,
   justificationMinLength: 10,
   trackingIntervalMinutes: 3,
+  trackingMovingSeconds: 30,
+  trackingMovingMeters: 200,
   mapRefreshSeconds: 180,
   photoScoreMax: 10,
 }
@@ -175,7 +179,27 @@ export const settingsMeta: Record<SettingKey, Meta> = {
     unit: 'caracteres',
     help: 'Quantidade mínima de caracteres no texto da justificativa de não atendimento.',
   },
-  trackingIntervalMinutes: { scope: 'promotor', group: 'Rastreamento', label: 'Intervalo de envio da localização', unit: 'min', help: 'De quanto em quanto tempo o app envia a posição do promotor.' },
+  trackingIntervalMinutes: {
+    scope: 'promotor',
+    group: 'Rastreamento',
+    label: 'Intervalo de envio da localização',
+    unit: 'min',
+    help: 'De quanto em quanto tempo o app envia a posição do promotor dentro da loja e quando ele está parado.',
+  },
+  trackingMovingSeconds: {
+    scope: 'promotor',
+    group: 'Rastreamento',
+    label: 'Intervalo de envio no deslocamento',
+    unit: 's',
+    help: 'Fora da loja (da saída de um cliente até a chegada no próximo), o app usa o GPS de alta precisão e guarda a posição com esta frequência enquanto o promotor anda. Quanto menor, mais fiel o km percorrido (GPS) do relatório e mais bateria gasta.',
+  },
+  trackingMovingMeters: {
+    scope: 'promotor',
+    group: 'Rastreamento',
+    label: 'Distância de envio no deslocamento',
+    unit: 'm',
+    help: 'Fora da loja, o app também guarda a posição a cada vez que o promotor anda esta distância, mesmo antes do intervalo.',
+  },
   mapRefreshSeconds: { scope: 'geral', group: 'Rastreamento', label: 'Atualização do mapa no painel', unit: 's', help: 'Intervalo de atualização automática do mapa de promotores.' },
   photoScoreMax: { scope: 'geral', group: 'Avaliação', label: 'Nota máxima das fotos', help: 'Escala da nota atribuída às fotos no painel (de 0 até este valor).' },
 }

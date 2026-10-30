@@ -31,30 +31,50 @@ export function DayProvider({ children }: { children: ReactNode }) {
   // Rastreamento ligado entre o início e o encerramento do roteiro de hoje
   const active = !!day?.isToday && !!day.workDay?.startedAt && !dayClosed(day)
   const interval = day?.rules.trackingIntervalMinutes ?? 3
+  // Fora da loja (nenhum atendimento aberto; o almoço conta, porque a volta dele é o caminho até o próximo cliente)
+  // o envio é mais frequente, para o km percorrido (GPS) do relatório
+  const moving = active && !day?.inProgressVisitId
+  const movingSeconds = day?.rules.trackingMovingSeconds ?? 30
+  const movingMeters = day?.rules.trackingMovingMeters ?? 200
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active')
+  const applied = useRef<string | null>(null)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => setAppActive(state === 'active'))
+    return () => sub.remove()
+  }, [])
   useEffect(() => {
     let cancelled = false
     if (!active) {
+      applied.current = null
       void stopTracking()
       setTracking({ mode: 'off' })
       return
     }
-    startTracking(interval).then((result) => {
-      if (!cancelled) setTracking(result)
+    // O Android só liga (ou troca) o rastreamento com o app aberto: a troca que ficou para depois acontece na volta ao app
+    const config = JSON.stringify([interval, moving, movingSeconds, movingMeters])
+    if (!appActive || applied.current === config) return
+    startTracking(interval, moving ? { seconds: movingSeconds, meters: movingMeters } : null).then((result) => {
+      if (cancelled) return
+      applied.current = config
+      setTracking(result)
     })
     return () => {
       cancelled = true
     }
-  }, [active, interval])
+  }, [active, interval, moving, movingSeconds, movingMeters, appActive])
 
   // Modo primeiro plano (Expo Go / sem permissão "o tempo todo"): envia enquanto o app está aberto
   useEffect(() => {
     if (!active || tracking.mode !== 'foreground') return
     void pingNow(true)
-    const timer = setInterval(() => {
-      if (AppState.currentState === 'active') void pingNow()
-    }, interval * 60_000)
+    const timer = setInterval(
+      () => {
+        if (AppState.currentState === 'active') void pingNow()
+      },
+      moving ? movingSeconds * 1000 : interval * 60_000,
+    )
     return () => clearInterval(timer)
-  }, [active, tracking.mode, interval])
+  }, [active, tracking.mode, interval, moving, movingSeconds])
 
   // Ao voltar para o app: reenvia pings pendentes e atualiza o dia
   const reload = query.reload

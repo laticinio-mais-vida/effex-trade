@@ -172,7 +172,12 @@ export interface DayRules {
   maxExtraVisitsPerDay: number
   minVisitMinutes: number
   justificationMinLength: number
+  /** Intervalo de envio da posição (min) dentro da loja e com o promotor parado. */
   trackingIntervalMinutes: number
+  /** Fora da loja: guarda a posição a cada tantos segundos andando (API antiga não manda: 30). */
+  trackingMovingSeconds?: number
+  /** Fora da loja: guarda a posição a cada tantos metros andados (API antiga não manda: 200). */
+  trackingMovingMeters?: number
 }
 
 export interface Day {

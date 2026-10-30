@@ -6,7 +6,7 @@ import { dayClosed, useDay } from '@/features/promotor/DayContext'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { getQuickLocation } from '@/lib/location'
 import { colors, space } from '@/lib/theme'
-import { stopTracking } from '@/lib/tracking'
+import { flushQueue, stopTracking } from '@/lib/tracking'
 
 type Entry = { reasonId: string | null; text: string }
 
@@ -58,6 +58,9 @@ export default function EncerrarRoteiro() {
     setErrors({})
     try {
       const loc = await getQuickLocation()
+      // Antes de encerrar, manda as posições ainda guardadas no celular (o km percorrido do dia é calculado logo depois).
+      // Sem internet boa, não segura o encerramento por mais de 10 s: elas vão depois.
+      await Promise.race([flushQueue(), new Promise((resolve) => setTimeout(resolve, 10_000))])
       await api('/promotor/day/end', {
         body: {
           latitude: loc?.latitude,
