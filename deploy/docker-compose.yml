@@ -1,0 +1,75 @@
+# EFFEX Trade no VPS. Tudo fica em /opt/effex-trade (veja docs/publicacao_vps.md):
+#   api/      código da API (enviado por deploy/publicar.ps1)     api.env    segredos da API (só no servidor)
+#   web/      painel já montado (apps/admin/dist)                 banco.env  senha do banco (só no servidor)
+#   uploads/  fotos                                               deploy/    esta pasta
+#   updates/  atualizações do app (enviadas por deploy/atualizar-app.ps1)
+# Nenhuma porta é publicada: o Caddy do app-promotoria (rede app-promotoria_estoque_network) faz o HTTPS de
+# effextrade.maisvida.cloud e encaminha /api/* para effex_api:3333 e o resto para effex_web:80. O banco só é visto
+# pela API, na rede interno.
+name: effex-trade
+services:
+  api:
+    build: ../api
+    image: effex-trade-api
+    container_name: effex_api
+    restart: unless-stopped
+    env_file: ../api.env  # DATABASE_URL, JWT_SECRET, SYNC_KEY, CORS_ORIGIN, TRUST_PROXY, TZ_APP
+    environment:
+      TZ: America/Bahia  # só o horário dos logs; o "hoje" do sistema vem de TZ_APP
+      UPLOAD_DIR: /data/uploads
+      UPDATES_DIR: /data/updates
+    volumes:
+      - ../uploads:/data/uploads
+      - ../updates:/data/updates:ro  # a API só lê; quem grava é o atualizar-app.ps1, pelo ssh
+    mem_limit: 512m
+    depends_on:
+      banco:
+        condition: service_healthy
+    networks: [edge, interno]
+    logging: &log
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  # Painel (arquivos estáticos). A pasta web/ é montada: ao publicar, troca-se o conteúdo dela, não a pasta.
+  web:
+    image: caddy:2-alpine
+    container_name: effex_web
+    restart: unless-stopped
+    volumes:
+      - ../web:/srv:ro
+      - ./Caddyfile.web:/etc/caddy/Caddyfile:ro
+    mem_limit: 64m
+    networks: [edge]
+    logging: *log
+
+  banco:
+    image: postgres:18-alpine
+    container_name: effex_banco
+    restart: unless-stopped
+    env_file: ../banco.env  # POSTGRES_PASSWORD
+    environment:
+      POSTGRES_DB: effex
+      POSTGRES_USER: effex
+      # Sem TZ: as datas ficam em colunas sem fuso, sempre em UTC (a API converte com TZ_APP)
+    command: postgres -c shared_buffers=64MB -c max_connections=20
+    volumes:
+      # Na imagem 18 o volume é /var/lib/postgresql (os dados ficam em 18/docker dentro dele)
+      - effex_banco_dados:/var/lib/postgresql
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U effex -d effex"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [interno]
+    logging: *log
+
+volumes:
+  effex_banco_dados:
+
+networks:
+  edge:
+    external: true
+    name: app-promotoria_estoque_network
+  interno:
+    internal: true

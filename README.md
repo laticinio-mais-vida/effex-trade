@@ -61,11 +61,15 @@ Para testar o check-in com o celular de verdade, cadastre no painel um cliente n
 
 ## Clientes e cidades dos usuários
 
-O cadastro do cliente tem só **nome fantasia** (o nome mostrado em todo o sistema), **razão social**, **cidade**, **UF** e **localização** (latitude e longitude). Do banco de dados da empresa virão só os nomes; a localização entra pelo painel:
+O cadastro do cliente tem só **nome fantasia** (o nome mostrado em todo o sistema), **razão social**, **cidade**, **UF** e **localização** (latitude e longitude).
 
-1. Em **Clientes**, use **Baixar planilha** (ou "Baixar planilha deles", só os sem localização). A planilha tem `id;razao_social;nome_fantasia;cidade;uf;latitude;longitude`.
+**Clientes do ERP:** `sync\sincronizar-clientes.bat` lê a tabela CLIENTES da cópia do banco do ERP (Firebird, a mesma do BI Mais Vida) e manda a lista para `POST /sync/clientes`, assinada com a `SYNC_KEY` (HMAC-SHA256, como o envio do BI). A API cria os novos, atualiza nome, razão social, cidade, UF e situação dos que mudaram e inativa os que saíram do ERP, sem tocar em mix, roteiros e visitas (`src/services/erp-sync.ts`). A localização também vem do ERP (`CLIENTES.LATITUDADE`/`LONGITUDE`) e fica marcada com a origem (`Client.locationSource`): a do ERP a sincronização atualiza; corrigida no painel ou pela planilha, ela passa a `PAINEL` e a sincronização não a muda mais (mandar o mesmo ponto não conta como correção). Cada cliente guarda o código do ERP (`Client.erpId`); nos que têm código, esses campos ficam só leitura no painel, e, depois da primeira sincronização, o cadastro manual fecha (`POST /admin/clients` responde `CLIENTE_PELO_ERP`). Detalhes e problemas comuns em [docs/publicacao_vps.md](docs/publicacao_vps.md). Para testar no computador: `SYNC_KEY` no `apps/api/.env`, a mesma em `chave` no `sync/config.ini` e `destino = http://localhost:3333`.
+
+Para preencher ou corrigir a localização de vários clientes de uma vez (um por um, é no mapa do cadastro):
+
+1. Em **Clientes**, use **Baixar planilha** (ou "Baixar planilha deles", só os sem localização). A planilha tem `id;codigo_erp;razao_social;nome_fantasia;cidade;uf;latitude;longitude;origem_localizacao` (`codigo_erp` e `origem_localizacao` são só para conferência).
 2. Preencha latitude e longitude (com vírgula ou ponto; no lugar das duas, também vale uma coluna `coordenadas` com o texto copiado do Google Maps, ex.: `-12.9714, -38.5014`).
-3. **Importar planilha** (só administrador). A linha com `id` altera aquele cliente; sem `id`, o cliente é procurado pelo nome fantasia (ou razão social) na mesma cidade e UF, sem diferença de acento e maiúsculas, e é cadastrado se não existir. Com dois clientes de mesmo nome fantasia na cidade, a razão social desempata; se nem ela resolver, a linha volta pedindo o `id`. Latitude e longitude vazias mantêm a localização atual.
+3. **Importar planilha** (só administrador). A linha com `id` altera aquele cliente; sem `id`, o cliente é procurado pelo nome fantasia (ou razão social) na mesma cidade e UF, sem diferença de acento e maiúsculas, e é cadastrado se não existir. Com dois clientes de mesmo nome fantasia na cidade, a razão social desempata; se nem ela resolver, a linha volta pedindo o `id`. Latitude e longitude vazias mantêm a localização atual; iguais à atual não mudam nada; diferentes passam a valer e ficam marcadas como do painel (a sincronização com o ERP não as muda mais). Com os clientes vindo do ERP, linha sem cliente correspondente não cria cadastro, e dos clientes do ERP só a localização é importada.
 
 Cliente **sem localização** fica cadastrado, mas não entra em roteiro, visita pontual, cliente extra nem substituição (não há como validar a cerca). Depois de ter localização, ela não pode ser apagada, só corrigida. O raio da cerca é o das regras, igual para todos os clientes.
 
@@ -115,14 +119,21 @@ npm run smoke        # verificações de ponta a ponta (login, cerca, ordem, fac
 npm run db:seed      # restaura os dados depois do teste
 ```
 
-## Antes de colocar em produção
+## Produção
 
-- Trocar `JWT_SECRET` e usar um PostgreSQL gerenciado (`DATABASE_URL`); rodar `npx prisma migrate deploy` no deploy.
-- Fotos: hoje ficam em disco (`UPLOAD_DIR`) e são servidas sem login em `/uploads` (nomes impossíveis de adivinhar). Para produção, mover para um storage (S3, R2 ou GCS) com links assinados; a troca fica isolada em `src/services/storage.ts`.
-- Servir a API e o painel com HTTPS e restringir o CORS ao domínio do painel (`src/app.ts`).
-- A faixa de data e hora das fotos usa as fontes do sistema. Em servidor Linux enxuto, instale uma fonte (ex.: `apt-get install fonts-dejavu-core`), senão o texto sai sem letras.
-- App: gerar o APK/AAB com EAS (o rastreamento em segundo plano não funciona no Expo Go). Com o app instalado, o próximo passo é a notificação push dos alertas ao supervisor (hoje ele vê o alerta quando abre o app ou o painel).
-- Distâncias pelas ruas: subir o servidor de rotas OSRM ao lado da API e preencher `OSRM_URL` (passo a passo em [infra/osrm/README.md](infra/osrm/README.md)). Sem ele, o relatório e os roteiros usam linha reta.
+Publicado em **https://effextrade.maisvida.cloud** (painel) e **https://effextrade.maisvida.cloud/api** (API), em Docker no VPS do BI: `apps/api/Dockerfile`, `deploy/` e o guia [docs/publicacao_vps.md](docs/publicacao_vps.md) (publicar versão nova com `deploy\publicar.ps1`, cópias de segurança, migrar de servidor ou de domínio). O banco começa vazio: o primeiro administrador é criado com `npm run criar-admin`.
+
+- `JWT_SECRET`, `SYNC_KEY`, `CORS_ORIGIN` (domínio do painel) e `TRUST_PROXY=true` ficam no `api.env` do servidor. As migrações rodam sozinhas quando a API sobe (`prisma migrate deploy`).
+- O painel usa a API pelo caminho relativo `/api` (`apps/admin/.env.production`), no mesmo domínio.
+- O app Android é um APK enviado aos usuários (sem Play Store), gerado no computador com `deploy\gerar-apk.ps1` na pasta `apk\`. O código novo chega por atualização automática servida pela própria API (`/api/updates`, publicações em `/opt/effex-trade/updates`), publicada com `deploy\atualizar-app.ps1`: [docs/app_android.md](docs/app_android.md).
+- A imagem da API instala a fonte DejaVu: a faixa de data e hora das fotos precisa de uma fonte no sistema.
+
+Ainda pendente:
+
+- Fotos: ficam em disco (`UPLOAD_DIR`) e são servidas sem login em `/uploads` (nomes impossíveis de adivinhar). O próximo passo é um storage (S3, R2 ou GCS) com links assinados; a troca fica isolada em `src/services/storage.ts`.
+- App: notificação push dos alertas ao supervisor (hoje ele vê o alerta quando abre o app ou o painel). O APK e as atualizações automáticas já existem ([docs/app_android.md](docs/app_android.md)).
+- App: registrar o pacote `com.effex.trade` no Android Developer Console antes de 2027, quando o Google passa a exigir desenvolvedor verificado também para APK instalado fora de loja (passo a passo em [docs/app_android.md](docs/app_android.md#verificação-de-desenvolvedor-do-google-prazo-2027)).
+- Distâncias pelas ruas: subir o servidor de rotas OSRM ao lado da API e preencher `OSRM_URL` (passo a passo em [infra/osrm/README.md](infra/osrm/README.md)). Sem ele, o relatório e os roteiros usam linha reta. O VPS atual não tem memória para o OSRM (pede de 2 a 4 GB livres).
 
 ## Integração futura com a gestão de trade
 

@@ -3,11 +3,14 @@
  * Uso: npm run smoke   (API_URL=http://localhost:3333 por padrão)
  * Atenção: altera dados (faz check-in, fotos, liberações). Rode `npm run db:seed` depois para restaurar.
  */
+import { gzipSync } from 'node:zlib'
 import { shelfPng } from '../prisma/seed-image'
 import { checkLunchAlerts } from '../src/services/alerts'
 import { ensureWorkDay } from '../src/services/workdays'
 import { prisma } from '../src/db'
+import { env } from '../src/env'
 import { addDays } from '../src/lib/dates'
+import { signSync } from '../src/routes/sync'
 
 const API = process.env.API_URL ?? 'http://localhost:3333'
 let failures = 0
@@ -632,6 +635,94 @@ r = await call(admin, 'POST', '/admin/clients/import', {
   clients: [{ line: 2, name: 'Padaria Nova Importada', legalName: 'Outra Padaria Ltda', city: 'Vitoria', state: 'ES', latitude: -20.3, longitude: -40.3 }],
 })
 check('razão social desempata o nome repetido', r.data.updated === 1 && r.data.problems.length === 0, r.data)
+
+// Por último: depois da primeira sincronização os clientes passam a vir do ERP (cadastro manual fechado)
+console.log('Sincronização de clientes com o ERP')
+if (!env.syncKey) console.log('  (pulada: defina SYNC_KEY no .env da API)')
+else {
+  let sentAt = Math.floor(Date.now() / 1000)
+  const sync = async (payload: unknown, opts: { key?: string; at?: number } = {}) => {
+    const at = String(opts.at ?? ++sentAt)
+    const body = gzipSync(JSON.stringify(payload))
+    const res = await fetch(`${API}/sync/clientes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/gzip', 'X-Effex-Data': at, 'X-Effex-Assinatura': signSync(opts.key ?? env.syncKey!, at, body) },
+      body,
+    })
+    return { status: res.status, data: (await res.json()) as any }
+  }
+  const byErp = async (code: number) => (await call(admin, 'GET', `/admin/clients?search=${code}`)).data.items[0]
+  type ErpRow = { erpId: number; name: string; legalName?: string | null; active?: boolean; latitude?: number | null; longitude?: number | null }
+  const erp = (r: ErpRow) => ({ legalName: null, city: 'SALVADOR', state: 'BA', active: true, latitude: null, longitude: null, ...r })
+  // 900001 casa com o "Mercado Ribeira" do seed (que já tem localização, cadastrada no painel)
+  const ribeira = erp({ erpId: 900001, name: 'Mercado  Ribeira', legalName: 'Ribeira Mercearia Ltda', latitude: -12.95, longitude: -38.45 })
+  const novo = erp({ erpId: 900002, name: 'Mercado Novo do ERP', latitude: -12.96, longitude: -38.46 })
+  const inativo = erp({ erpId: 900003, name: 'Mercado Inativo do ERP', active: false })
+  const outro = erp({ erpId: 900004, name: 'Mercado Outro do ERP', latitude: -12.97, longitude: -38.47 })
+  const base = [ribeira, novo, inativo, outro]
+
+  r = await sync({ clients: base }, { key: 'chave-errada' })
+  check('sincronização com chave errada recusada', r.status === 401 && r.data.code === 'ASSINATURA_INVALIDA', r.data)
+  r = await sync({ clients: base }, { at: sentAt - 20 * 60 })
+  check('sincronização com relógio fora da janela recusada', r.status === 401 && r.data.code === 'RELOGIO', r.data)
+  r = await sync({ sourceModifiedAt: new Date().toISOString(), clients: base })
+  check('primeira sincronização vincula o cliente já cadastrado e cria os novos', r.status === 200 && r.data.linked === 1 && r.data.created === 3 && r.data.located === 2, r.data)
+  let c = await byErp(900001)
+  check('cliente vinculado mantém a localização que já tinha (do painel)', c?.name === 'Mercado Ribeira' && c.latitude === -12.917 && c.locationSource === 'PAINEL', c)
+  c = await byErp(900002)
+  check('cliente novo recebe a localização do ERP', c?.latitude === -12.96 && c.locationSource === 'ERP', c)
+  r = await sync({ clients: base })
+  check('reenvio igual não muda nada', r.status === 200 && r.data.created === 0 && r.data.updated === 0 && r.data.located === 0 && r.data.unchanged === 4, r.data)
+  r = await sync({ clients: base }, { at: sentAt })
+  check('pacote repetido recusado', r.status === 409 && r.data.code === 'ENVIO_REPETIDO', r.data)
+  r = await sync({ clients: [ribeira, { ...novo, latitude: -12.961 }, inativo, outro] })
+  c = await byErp(900002)
+  // keptManual 1: o Ribeira, cuja localização é do painel e o ERP manda outra
+  check('localização do ERP atualizada pela sincronização', r.data.located === 1 && r.data.keptManual === 1 && c.latitude === -12.961, { r: r.data, c })
+
+  r = await call(admin, 'PATCH', `/admin/clients/${c.id}`, { name: 'Outro Nome' })
+  check('nome de cliente do ERP não muda pelo painel', r.status === 409 && r.data.code === 'CAMPO_DO_ERP', r.data)
+  r = await call(admin, 'PATCH', `/admin/clients/${c.id}`, { name: c.name, latitude: c.latitude, longitude: c.longitude })
+  check('salvar o mesmo ponto não tira a localização do ERP', r.status === 200 && r.data.locationSource === 'ERP', r.data)
+  r = await call(admin, 'PATCH', `/admin/clients/${c.id}`, { name: c.name, latitude: -12.9615, longitude: -38.4615 })
+  check('localização editada no painel passa a ser do painel', r.status === 200 && r.data.latitude === -12.9615 && r.data.locationSource === 'PAINEL', r.data)
+  r = await sync({ clients: [ribeira, { ...novo, latitude: -12.99 }, inativo, outro] })
+  c = await byErp(900002)
+  check('sincronização não reescreve a localização editada no painel', r.data.located === 0 && r.data.keptManual === 2 && c.latitude === -12.9615, { r: r.data, c })
+  r = await sync({ clients: [ribeira, { ...novo, latitude: null, longitude: null }, inativo, { ...outro, latitude: null, longitude: null }] })
+  check('coordenada vazia no ERP não apaga a localização', r.status === 200 && (await byErp(900004)).latitude === -12.97, r.data)
+
+  r = await call(admin, 'POST', '/admin/clients', { name: 'Mercado Manual', city: 'Salvador', state: 'BA' })
+  check('cadastro manual fechado depois da sincronização', r.status === 409 && r.data.code === 'CLIENTE_PELO_ERP', r.data)
+  const outroId = (await byErp(900004)).id
+  const ribeiraId = (await byErp(900001)).id
+  r = await call(admin, 'POST', '/admin/clients/import', {
+    clients: [
+      { line: 2, id: outroId, latitude: -12.97, longitude: -38.47 },
+      { line: 3, id: ribeiraId, name: 'Nome da Planilha', latitude: -12.918, longitude: -38.505 },
+      { line: 4, name: 'Mercado Fora do ERP', city: 'Salvador', state: 'BA', latitude: -12.9, longitude: -38.4 },
+    ],
+  })
+  const [outroDepois, ribeiraDepois] = [await byErp(900004), await byErp(900001)]
+  check(
+    'importação: mesmo ponto não muda nada, ponto novo vale e passa a ser do painel, e quem não está no ERP não é criado',
+    r.data.updated === 1 && r.data.created === 0 && r.data.problems.length === 1 && outroDepois.locationSource === 'ERP' &&
+      ribeiraDepois.name === 'Mercado Ribeira' && ribeiraDepois.latitude === -12.918 && ribeiraDepois.locationSource === 'PAINEL',
+    { r: r.data, outroDepois, ribeiraDepois },
+  )
+  r = await sync({ clients: [ribeira, inativo, outro] })
+  check('cliente que sumiu do ERP fica inativo', r.status === 200 && r.data.inactivated === 1, r.data)
+  r = await call(admin, 'GET', '/admin/clients/sync-status')
+  check('situação da última sincronização', r.data.erpActive === true && r.data.last?.inactivated === 1, r.data)
+
+  const many = Array.from({ length: 60 }, (_, i) => erp({ erpId: 910000 + i, name: `Loja ERP ${i}` }))
+  r = await sync({ clients: [...base, ...many] })
+  check('sincronização com 60 clientes novos', r.status === 200 && r.data.created === 60, r.data)
+  r = await sync({ clients: base })
+  check('inativação em massa pede confirmação', r.status === 409 && r.data.code === 'MUITOS_INATIVADOS', r.data)
+  r = await sync({ clients: base, force: true })
+  check('inativação em massa confirmada', r.status === 200 && r.data.inactivated === 60, r.data)
+}
 
 await prisma.$disconnect()
 console.log(failures === 0 ? '\nTudo certo.' : `\n${failures} verificação(ões) falharam.`)

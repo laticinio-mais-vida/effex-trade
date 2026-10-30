@@ -9,6 +9,12 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Origem da localização do cliente
+enum LocationSource {
+  ERP // veio da sincronização: a próxima pode atualizar
+  PAINEL // editada no painel ou pela planilha: a sincronização não muda mais
+}
+
 enum Role {
   ADMIN
   SUPERVISOR
@@ -139,7 +145,11 @@ model Client {
   /// Sem localização o cliente não entra em roteiro nem visita (não há como validar a cerca)
   latitude  Float?
   longitude Float?
+  /// De onde veio a localização. A do ERP a sincronização atualiza; a editada no painel (ou pela planilha) ela não muda mais
+  locationSource LocationSource?
   active    Boolean  @default(true)
+  /// Código no ERP (CLIENTES.ID_CLIENTE). Com código, nome, razão social, cidade, UF e situação vêm do ERP (só leitura no painel)
+  erpId     Int?     @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -533,6 +543,30 @@ model Setting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+/// Cada sincronização recebida do computador da empresa (pasta sync/ -> POST /sync/clientes)
+model ErpSync {
+  id               String    @id @default(cuid())
+  kind             String    @default("CLIENTES")
+  receivedAt       DateTime  @default(now())
+  /// Hora do envio (cabeçalho assinado): pacote com hora igual ou anterior à do último aceito é recusado
+  sentAt           DateTime
+  /// Data do arquivo da cópia do banco do ERP no computador que enviou
+  sourceModifiedAt DateTime?
+  total            Int
+  created          Int
+  updated          Int
+  inactivated      Int
+  reactivated      Int
+  linked           Int
+  /// Clientes que receberam a localização do ERP neste envio (novos ou atualizados)
+  located          Int       @default(0)
+  /// Clientes do ERP ativos e sem localização depois da sincronização
+  unlocated        Int
+  ip               String?
+
+  @@index([kind, receivedAt])
 }
 
 /// Exceção de regra para um promotor (sobrescreve a regra geral)

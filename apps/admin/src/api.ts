@@ -58,7 +58,8 @@ export class ApiError extends Error {
 type Query = Record<string, string | number | boolean | undefined | null>
 
 function buildUrl(path: string, query?: Query) {
-  const url = new URL(apiUrl(path))
+  // A base cobre o endereço relativo de produção (VITE_API_URL=/api, mesmo domínio do painel)
+  const url = new URL(apiUrl(path), window.location.origin)
   for (const [k, v] of Object.entries(query ?? {})) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v))
   }

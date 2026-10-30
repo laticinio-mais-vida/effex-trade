@@ -14,6 +14,7 @@
     "db:reset": "prisma migrate reset --force",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
+    "criar-admin": "tsx scripts/criar-admin.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

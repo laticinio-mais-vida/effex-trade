@@ -12,6 +12,7 @@ import { cityKey } from '../src/lib/cities'
 import { addDays, localDayRange, toDbDate, todayIn } from '../src/lib/dates'
 import { stampPhoto } from '../src/services/photo-stamp'
 import { ensureWorkDay } from '../src/services/workdays'
+import { DEFAULT_REASONS } from './reasons'
 import { mulberry32, shelfPng } from './seed-image'
 
 const rand = mulberry32(42)
@@ -19,6 +20,7 @@ const pick = <T>(list: T[]) => list[Math.floor(rand() * list.length)]!
 const between = (a: number, b: number) => a + Math.floor(rand() * (b - a + 1))
 
 async function clear() {
+  await prisma.erpSync.deleteMany()
   await prisma.auditReview.deleteMany()
   await prisma.photoAudit.deleteMany()
   await prisma.photo.deleteMany()
@@ -70,14 +72,6 @@ const LAURO_CLIENTS: [string, string, number | null, number | null][] = [
 const SALVADOR = { state: 'BA', city: 'Salvador' }
 const LAURO = { state: 'BA', city: 'Lauro de Freitas' }
 
-const REASONS = [
-  'Loja fechada',
-  'Cliente não autorizou a entrada',
-  'Problema com veículo/transporte',
-  'Excesso de tempo no cliente anterior',
-  'Problema de saúde',
-  'Outro',
-]
 
 const PRODUCTS: [string, string, string][] = [
   ['P001', 'Iogurte Morango 170g', 'Iogurtes'],
@@ -386,6 +380,7 @@ async function simulateDay(
 }
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') throw new Error('O seed apaga todos os dados: não rode em produção (para o primeiro acesso use npm run criar-admin).')
   console.log('[seed] limpando dados')
   await clear()
 
@@ -427,7 +422,7 @@ async function main() {
   }
 
   const reasons = []
-  for (const [i, label] of REASONS.entries()) reasons.push(await prisma.justificationReason.create({ data: { label, position: i } }))
+  for (const [i, label] of DEFAULT_REASONS.entries()) reasons.push(await prisma.justificationReason.create({ data: { label, position: i } }))
 
   // Roteiro fixo: cada promotor com 6 clientes de segunda a sexta e 3 no sábado
   for (const [p, promotor] of promotores.entries()) {

@@ -40,9 +40,32 @@ export type Client = {
   /** Sem localização o cliente não entra em roteiro */
   latitude: number | null
   longitude: number | null
+  /** ERP: veio da sincronização, que pode atualizar; PAINEL: editada no painel ou pela planilha, a sincronização não muda */
+  locationSource: 'ERP' | 'PAINEL' | null
   active: boolean
+  /** Código no ERP: com ele, nome, razão social, cidade, UF e situação vêm da sincronização (só leitura no painel) */
+  erpId: number | null
 }
 export type LocatedClient = Client & { latitude: number; longitude: number }
+
+/** Última sincronização dos clientes com o ERP (pasta sync/ no computador da empresa). */
+export type ErpSyncStatus = {
+  /** Já existem clientes do ERP: o cadastro manual fica fechado */
+  erpActive: boolean
+  last: {
+    at: string
+    sourceModifiedAt: string | null
+    total: number
+    created: number
+    updated: number
+    inactivated: number
+    reactivated: number
+    linked: number
+    /** Receberam a localização do ERP nesse envio */
+    located: number
+    unlocated: number
+  } | null
+}
 
 /** Cidade com clientes cadastrados */
 export type ClientCity = { state: string; city: string; clients: number }

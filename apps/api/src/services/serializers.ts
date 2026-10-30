@@ -34,7 +34,11 @@ export function serializeClient(client: Client) {
     state: client.state,
     latitude: client.latitude,
     longitude: client.longitude,
+    /** ERP: a sincronização atualiza; PAINEL: editada no painel, a sincronização não muda */
+    locationSource: client.locationSource,
     active: client.active,
+    /** Código no ERP: com ele, nome, razão social, cidade, UF e situação vêm da sincronização */
+    erpId: client.erpId,
   }
 }
 

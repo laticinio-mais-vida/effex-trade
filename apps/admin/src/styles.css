@@ -467,6 +467,13 @@ textarea.input {
   outline-offset: -1px;
   border-color: transparent;
 }
+/* Campos que vêm do ERP (só leitura no cadastro do cliente) */
+.input[readonly],
+.input:disabled {
+  background: var(--idle-bg);
+  border-color: var(--rule);
+  color: var(--muted);
+}
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

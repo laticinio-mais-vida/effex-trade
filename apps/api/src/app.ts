@@ -14,18 +14,23 @@ import { auditRoutes } from './routes/audit'
 import { authRoutes } from './routes/auth'
 import { promotorRoutes } from './routes/promotor'
 import { supervisorRoutes } from './routes/supervisor'
+import { syncRoutes } from './routes/sync'
 import { trackingRoutes } from './routes/tracking'
+import { updatesRoutes } from './routes/updates'
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
-  const app = Fastify({ logger: opts.logger ?? true, bodyLimit: 20 * 1024 * 1024 })
+  const app = Fastify({ logger: opts.logger ?? true, bodyLimit: 20 * 1024 * 1024, trustProxy: env.trustProxy })
 
   // O padrão do @fastify/cors só libera GET/HEAD/POST; o painel também usa PUT, PATCH e DELETE
-  await app.register(cors, { origin: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'], exposedHeaders: ['Content-Disposition'] })
+  await app.register(cors, { origin: env.corsOrigins ?? true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'], exposedHeaders: ['Content-Disposition'] })
   // Limite só onde for configurado na rota (ex.: login), para não atrapalhar o envio de fotos e pings
   await app.register(rateLimit, { global: false })
   await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 1 } })
   mkdirSync(env.uploadDir, { recursive: true })
   await app.register(fastifyStatic, { root: env.uploadDir, prefix: '/uploads/', decorateReply: false })
+  // Bundle e assets das atualizações do app: cada publicação tem pasta própria e nunca muda (com ponto: ainda copiando)
+  mkdirSync(env.updatesDir, { recursive: true })
+  await app.register(fastifyStatic, { root: env.updatesDir, prefix: '/updates/files/', decorateReply: false, immutable: true, maxAge: '365d', dotfiles: 'ignore' })
   await registerAuth(app)
 
   app.setErrorHandler((error, req, reply) => {
@@ -50,6 +55,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(adminCadastrosRoutes, { prefix: '/admin' })
   await app.register(adminOperacaoRoutes, { prefix: '/admin' })
   await app.register(adminProdutosRoutes, { prefix: '/admin' })
+  await app.register(syncRoutes, { prefix: '/sync' })
+  await app.register(updatesRoutes, { prefix: '/updates' })
 
   return app
 }

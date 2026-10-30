@@ -25,6 +25,8 @@ O celular não acessa `localhost`. Por padrão o app usa o IP do computador que 
 - na tela de login, toque em **Servidor: ... alterar**, informe o endereço e toque em **Testar e salvar** (fica salvo no aparelho); ou
 - crie `apps/mobile/.env` com `EXPO_PUBLIC_API_URL=http://SEU_IP:3333` (veja `.env.example`).
 
+O servidor de produção é `https://effextrade.maisvida.cloud/api` (o painel fica no mesmo domínio). O APK e as atualizações já saem apontando para ele (`PRODUCTION_API_URL` em `src/lib/config.ts`: eles não leem arquivos `.env`). Digitado na tela de login sem `http://`, um domínio vai com `https://` (o APK não aceita http) e um IP vai com `http://`.
+
 Se o Windows bloquear, libere a porta 3333 no firewall para a rede privada.
 
 Logins de teste (senha `123456`): `promotor1`, `promotor2`, `promotor3`, `vendedor1`, `vendedor2`, `supervisor`.
@@ -52,15 +54,9 @@ As fotos chegam ao servidor e recebem uma faixa gravada na imagem com data e hor
 - **No app instalado** (development build ou APK), uma tarefa em segundo plano envia a posição mesmo com a tela desligada. No Android aparece a notificação fixa "jornada em andamento". O app pede a permissão de localização "o tempo todo".
 - As posições ficam numa fila no aparelho e são reenviadas em lote quando a internet volta.
 
-Para gerar o APK de teste (build na nuvem, sem Android Studio):
+## APK e atualizações
 
-```bash
-npx eas-cli@latest login
-npx eas-cli@latest build:configure
-npx eas-cli@latest build -p android --profile preview
-```
-
-No `eas.json`, use `"preview": { "distribution": "internal", "android": { "buildType": "apk" } }`.
+O app é distribuído como APK (sem Play Store, só Android), gerado neste computador com `deploy\gerar-apk.ps1` (antes, uma vez: `deploy\preparar-android.ps1`, que instala o Android SDK e cria a chave de assinatura), na pasta `apk\` da raiz do projeto. O código novo chega aos celulares por atualização automática (expo-updates), servida pela própria API (`/updates`) e publicada com `deploy\atualizar-app.ps1`; APK novo só quando muda a parte nativa (o script avisa). A tela Conta (todos os perfis) mostra a versão e o código em uso e tem o botão **Buscar atualização**, que aplica na hora. Passo a passo, mensagem para os usuários e cuidados: [docs/app_android.md](../../docs/app_android.md).
 
 ## Telas
 
@@ -74,7 +70,7 @@ No `eas.json`, use `"preview": { "distribution": "internal", "android": { "build
 | `/promotor/pedido` | Pedir liberação (fora da cerca, dispensa de fotos, troca de cliente) |
 | `/promotor/ordem` | Propor nova ordem dos pendentes (ex.: antecipar cliente) |
 | `/promotor/liberacoes` | Pedidos de hoje e status; cancelar pendente |
-| `/promotor/conta` | Conta, troca de senha, status do rastreamento |
+| `/promotor/conta` | Conta, troca de senha, status do rastreamento, versão do app e "Buscar atualização" (a versão e o botão também estão na Conta do vendedor e do supervisor) |
 | `/vendedor` | Auditoria de fotos (pendentes / auditadas / todas, filtros) |
 | `/supervisor` | Alertas (almoço acima do limite, com duração ao vivo, "Ligar" e "Ciente") e liberações: aprovar ou negar pedidos dos promotores. O contador da aba soma pedidos e alertas; alerta novo mostra um aviso e vibra, uma vez por alerta, com o app aberto |
 | `/supervisor/fotos` | Auditoria de fotos da equipe (vê a decisão do vendedor) |
@@ -91,6 +87,6 @@ src/components/  componentes de interface (botões, campos, folhas, abas)
 src/lib/         API, login, localização, rastreamento, formatação, tipos
 ```
 
-Verificação: `npm run typecheck` e `npm run export:android`.
+Verificação: `npm run typecheck`, `npm run export:android` e `npx expo-doctor`.
 
-**Alertas com o app fechado:** o aviso de almoço acima do limite aparece com o app aberto (consulta a cada 45 s). Notificação com o app fechado (push) exige o app instalado via EAS e um projeto Expo configurado; ainda não está ligada.
+**Alertas com o app fechado:** o aviso de almoço acima do limite aparece com o app aberto (consulta a cada 45 s). Notificação com o app fechado (push) ainda não está ligada: o APK e o projeto Expo já existem, falta configurar o envio (Firebase/FCM) e o registro dos aparelhos.

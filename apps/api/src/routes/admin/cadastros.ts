@@ -7,7 +7,7 @@ import { cityKey, zCity, zUf } from '../../lib/cities'
 import { fromDbDate, toDbDate } from '../../lib/dates'
 import { badRequest, conflict, notFound } from '../../lib/errors'
 import { parse, zDate, zId, zIdParam, zLat, zLng, zPage, zQueryBool } from '../../lib/validate'
-import { clientMatcher, clientSearch, located, unlocated, withCityKey } from '../../services/clients'
+import { clientMatcher, clientSearch, erpActive, erpFieldChanges, located, panelLocation, unlocated, withCityKey } from '../../services/clients'
 import { listPermissionTypes } from '../../services/permissions'
 import { frequencyColumns, serializeFrequency, zFrequency } from '../../services/route-frequency'
 import { distanceMatrix } from '../../services/routing'
@@ -252,7 +252,7 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     const where = await clientWhere(req.user, q)
     const [total, missingLocation, clients] = await Promise.all([
       prisma.client.count({ where }),
-      prisma.client.count({ where: { AND: [await clientScope(req.user), unlocated] } }),
+      prisma.client.count({ where: { AND: [await clientScope(req.user), unlocated, { active: true }] } }),
       prisma.client.findMany({ where, orderBy: { name: 'asc' }, skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
     ])
     return { total, page: q.page, pageSize: q.pageSize, missingLocation, items: clients.map(serializeClient) }
@@ -265,30 +265,70 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     return clients.map(serializeClient)
   })
 
+  /** Última sincronização com o ERP (pasta sync/ no computador da empresa). */
+  app.get('/clients/sync-status', async () => {
+    const [last, fromErp] = await Promise.all([
+      prisma.erpSync.findFirst({ where: { kind: 'CLIENTES' }, orderBy: { receivedAt: 'desc' } }),
+      erpActive(),
+    ])
+    return {
+      erpActive: fromErp,
+      last: last && {
+        at: last.receivedAt,
+        sourceModifiedAt: last.sourceModifiedAt,
+        total: last.total,
+        created: last.created,
+        updated: last.updated,
+        inactivated: last.inactivated,
+        reactivated: last.reactivated,
+        linked: last.linked,
+        located: last.located,
+        unlocated: last.unlocated,
+      },
+    }
+  })
+
   app.post('/clients', async (req) => {
+    assertAdmin(req.user)
+    if (await erpActive()) throw conflict('Os clientes vêm do ERP: cadastre o cliente no ERP e rode a sincronização.', 'CLIENTE_PELO_ERP')
     const body = parse(z.object(clientFields), req.body)
     assertCoordinates(body)
-    return serializeClient(await prisma.client.create({ data: withCityKey(body) }))
+    return serializeClient(await prisma.client.create({ data: withCityKey({ ...body, ...panelLocation({}, body) }) }))
   })
 
   app.patch('/clients/:id', async (req) => {
     const { id } = parse(zIdParam, req.params)
     const body = parse(z.object(clientFields).partial(), req.body)
     assertCoordinates(body)
-    const client = await prisma.client.findFirst({ where: { AND: [{ id }, await clientScope(req.user)] }, select: { id: true } })
+    const client = await prisma.client.findFirst({ where: { AND: [{ id }, await clientScope(req.user)] } })
     if (!client) throw notFound('Cliente')
-    return serializeClient(await prisma.client.update({ where: { id }, data: withCityKey(body) }))
+    if (client.erpId != null) {
+      const changed = erpFieldChanges(client, body)
+      if (changed.length) {
+        throw conflict(
+          `Nome, razão social, cidade, UF e situação deste cliente vêm do ERP (código ${client.erpId}). Altere no ERP e rode a sincronização.`,
+          'CAMPO_DO_ERP',
+          { fields: changed },
+        )
+      }
+    }
+    // Cliente do ERP: só a localização muda aqui (e, mudando, a sincronização não a muda mais)
+    const { latitude: _lat, longitude: _lng, ...fields } = body
+    const data = { ...(client.erpId != null ? {} : fields), ...panelLocation(client, body) }
+    return serializeClient(await prisma.client.update({ where: { id }, data: withCityKey(data) }))
   })
 
   /**
    * Importação da planilha de clientes. A linha com id (planilha baixada do painel) altera aquele cliente; sem id,
    * o cliente é procurado pelo nome fantasia (ou razão social) na cidade e UF, e é cadastrado se não existir.
-   * Latitude e longitude vazias mantêm a localização atual.
+   * Latitude e longitude vazias mantêm a localização atual. Nos clientes do ERP só a localização é importada, e,
+   * depois da primeira sincronização, linha sem cliente correspondente não cria cadastro.
    */
   app.post('/clients/import', async (req) => {
     assertAdmin(req.user)
     const body = parse(z.object({ clients: z.array(importRow).min(1).max(5000) }), req.body)
     const matcher = await clientMatcher()
+    const fromErp = await erpActive()
     let created = 0
     let updated = 0
     let withLocation = 0
@@ -315,16 +355,30 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
         problems.push({ line, message: `cliente de id ${row.id} não existe` })
         continue
       }
+      if ('error' in found && fromErp) {
+        problems.push({ line, message: `cliente "${row.name || row.legalName}" não está no ERP: cadastre no ERP e rode a sincronização` })
+        continue
+      }
+      // Localização igual à atual não muda nada; diferente passa a ser do painel (a sincronização não muda mais)
+      const location = panelLocation('client' in found ? found.client : {}, coords)
+      if ('client' in found && found.client.erpId != null) {
+        // Cliente do ERP: nome, cidade e UF da planilha são ignorados (vêm da sincronização)
+        if (location.latitude == null) continue
+        matcher.add(await prisma.client.update({ where: { id: found.client.id }, data: location }))
+        updated++
+        withLocation++
+        continue
+      }
       const names = { ...(row.name ? { name: row.name } : {}), ...(row.legalName ? { legalName: row.legalName } : {}) }
       const place = { ...(row.city ? { city: row.city } : {}), ...(row.state ? { state: row.state } : {}) }
       const saved =
         'client' in found
-          ? await prisma.client.update({ where: { id: found.client.id }, data: withCityKey({ ...names, ...place, ...coords }) })
-          : await prisma.client.create({ data: withCityKey({ name: (row.name || row.legalName)!, legalName: row.legalName || null, city: row.city!, state: row.state!, ...coords }) })
+          ? await prisma.client.update({ where: { id: found.client.id }, data: withCityKey({ ...names, ...place, ...location }) })
+          : await prisma.client.create({ data: withCityKey({ name: (row.name || row.legalName)!, legalName: row.legalName || null, city: row.city!, state: row.state!, ...location }) })
       matcher.add(saved)
       if ('client' in found) updated++
       else created++
-      if (coords.latitude != null) withLocation++
+      if (location.latitude != null) withLocation++
     }
     return { created, updated, located: withLocation, problems }
   })

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Alert, Text } from 'react-native'
 import { Banner, Button, Card, Field, Muted, Screen, SectionTitle, styles } from '@/components/ui'
+import { AppVersionCard } from '@/features/AppVersionCard'
 import { api, errorMessage } from '@/lib/api'
 import { roleLabels, useAuth } from '@/lib/auth'
 import { apiUrl } from '@/lib/config'
@@ -47,6 +48,7 @@ export function AccountScreen({ extra }: { extra?: React.ReactNode }) {
         {msg ? <Banner tone={msg.ok ? 'success' : 'danger'} text={msg.text} /> : null}
         <Button title="Salvar nova senha" variant="secondary" onPress={changePassword} loading={busy} disabled={!current || next.length < 6} />
       </Card>
+      <AppVersionCard />
       <Button
         title="Sair"
         variant="danger"

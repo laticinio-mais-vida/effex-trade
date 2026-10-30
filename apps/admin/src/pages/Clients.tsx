@@ -4,14 +4,15 @@ import { useEffect, useState } from 'react'
 import { Circle, MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { downloadCsv, fmtNumber, parseCsv, UFS } from '../format'
-import type { Client, ClientCity, Paged, ProductRef, SettingsResponse } from '../types'
+import { downloadCsv, fmtDateTime, fmtNumber, parseCsv, UFS } from '../format'
+import type { Client, ClientCity, ErpSyncStatus, Paged, ProductRef, SettingsResponse } from '../types'
 import { Empty, ErrorBox, Field, Loading, Modal, PageHead, Pager, ProductPicker, Segmented } from '../ui'
 
 const PAGE_SIZE = 50
 
 type Located = 'todos' | 'com' | 'sem'
-type Filters = { search: string; state: string; city: string; located: Located }
+type Situation = 'ativos' | 'inativos' | 'todos'
+type Filters = { search: string; state: string; city: string; located: Located; active: Situation }
 
 type Form = {
   name: string
@@ -41,17 +42,21 @@ const filterQuery = (f: Filters) => ({
   state: f.state,
   city: f.city,
   located: f.located === 'todos' ? undefined : f.located === 'com',
+  active: f.active === 'todos' ? undefined : f.active === 'ativos',
 })
 
 export function ClientsPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'ADMIN'
   const [search, setSearch] = useState('')
-  const [filters, setFilters] = useState<Filters>({ search: '', state: '', city: '', located: 'todos' })
+  const [filters, setFilters] = useState<Filters>({ search: '', state: '', city: '', located: 'todos', active: 'ativos' })
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<Client | 'new' | null>(null)
   const [importing, setImporting] = useState(false)
   const cities = useQuery({ queryKey: ['client-cities'], queryFn: () => api<ClientCity[]>('/admin/client-cities') })
+  const sync = useQuery({ queryKey: ['erp-sync'], queryFn: () => api<ErpSyncStatus>('/admin/clients/sync-status') })
+  const fromErp = sync.data?.erpActive ?? false
+  const last = sync.data?.last
   const states = [...new Set(cities.data?.map((c) => c.state))]
   const setFilter = (patch: Partial<Filters>) => {
     setFilters((f) => ({ ...f, ...patch }))
@@ -73,8 +78,8 @@ export function ClientsPage() {
     onSuccess: (clients, f) =>
       downloadCsv(
         f.located === 'sem' ? 'clientes-sem-localizacao.csv' : 'clientes.csv',
-        IMPORT_COLUMNS,
-        clients.map((c) => [c.id, c.legalName, c.name, c.city, c.state, c.latitude, c.longitude]),
+        EXPORT_COLUMNS,
+        clients.map((c) => [c.id, c.erpId, c.legalName, c.name, c.city, c.state, c.latitude, c.longitude, locationOrigin(c)]),
       ),
   })
 
@@ -83,7 +88,11 @@ export function ClientsPage() {
     <div>
       <PageHead
         title="Clientes"
-        description="Pontos de venda atendidos pelos promotores. A localização define a cerca eletrônica do check-in: cliente sem latitude e longitude não entra em roteiro."
+        description={
+          fromErp
+            ? 'Pontos de venda atendidos pelos promotores. O cadastro e a localização vêm do ERP. A localização define a cerca eletrônica do check-in (cliente sem latitude e longitude não entra em roteiro); corrigida aqui ou pela planilha, ela passa a valer no lugar da do ERP.'
+            : 'Pontos de venda atendidos pelos promotores. A localização define a cerca eletrônica do check-in: cliente sem latitude e longitude não entra em roteiro.'
+        }
         actions={
           <>
             <button className="btn" disabled={download.isPending} onClick={() => download.mutate(filters)}>
@@ -94,29 +103,45 @@ export function ClientsPage() {
                 Importar planilha
               </button>
             )}
-            <button className="btn primary" onClick={() => setEditing('new')}>
-              Novo cliente
-            </button>
+            {isAdmin && !fromErp && (
+              <button className="btn primary" onClick={() => setEditing('new')}>
+                Novo cliente
+              </button>
+            )}
           </>
         }
       />
+      {last && (
+        <p className="small muted" style={{ margin: '-6px 0 14px' }}>
+          Atualizado do ERP em {fmtDateTime(last.at)}
+          {last.sourceModifiedAt && ` (cópia do banco de ${fmtDateTime(last.sourceModifiedAt)})`}: {fmtNumber(last.created)} novos, {fmtNumber(last.updated)} alterados,{' '}
+          {fmtNumber(last.inactivated)} inativados, {fmtNumber(last.located)} localizações do ERP. Clientes novos ou alterados no ERP chegam quando a sincronização roda no
+          computador da empresa.
+        </p>
+      )}
       {missing > 0 && filters.located !== 'sem' && (
         <div className="alert" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <span style={{ flex: '1 1 320px' }}>
-            {missing === 1 ? '1 cliente está' : `${fmtNumber(missing)} clientes estão`} sem localização e não {missing === 1 ? 'pode' : 'podem'} entrar em roteiro. Baixe a
+            {missing === 1 ? '1 cliente ativo está' : `${fmtNumber(missing)} clientes ativos estão`} sem localização e não {missing === 1 ? 'pode' : 'podem'} entrar em roteiro. Baixe a
             planilha deles, preencha a latitude e a longitude e importe de volta.
           </span>
-          <button className="btn small" onClick={() => setFilter({ located: 'sem' })}>
+          <button className="btn small" onClick={() => setFilter({ located: 'sem', active: 'ativos' })}>
             Ver só eles
           </button>
-          <button className="btn small" disabled={download.isPending} onClick={() => download.mutate({ search: '', state: '', city: '', located: 'sem' })}>
+          <button className="btn small" disabled={download.isPending} onClick={() => download.mutate({ search: '', state: '', city: '', located: 'sem', active: 'ativos' })}>
             Baixar planilha deles
           </button>
         </div>
       )}
       <div className="toolbar">
         <Field label="Buscar">
-          <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nome fantasia, razão social ou cidade" style={{ minWidth: 260 }} />
+          <input
+            className="input"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={fromErp ? 'Nome, razão social, cidade ou código do ERP' : 'Nome fantasia, razão social ou cidade'}
+            style={{ minWidth: 260 }}
+          />
         </Field>
         <Field label="UF">
           <select className="input" value={filters.state} onChange={(e) => setFilter({ state: e.target.value, city: '' })}>
@@ -151,6 +176,17 @@ export function ClientsPage() {
             ]}
           />
         </Field>
+        <Field label="Situação">
+          <Segmented<Situation>
+            value={filters.active}
+            onChange={(active) => setFilter({ active })}
+            options={[
+              { value: 'ativos', label: 'Ativos' },
+              { value: 'inativos', label: 'Inativos' },
+              { value: 'todos', label: 'Todos' },
+            ]}
+          />
+        </Field>
       </div>
       {query.isLoading && <Loading />}
       <ErrorBox error={query.error ?? download.error} />
@@ -171,12 +207,20 @@ export function ClientsPage() {
                 <tr key={c.id} className="clickable" onClick={() => setEditing(c)}>
                   <td>
                     <strong>{c.name}</strong>
+                    {c.erpId != null && (
+                      <span className="chip" title="Cadastro vindo do ERP" style={{ marginLeft: 8 }}>
+                        ERP {c.erpId}
+                      </span>
+                    )}
                     {c.legalName && c.legalName !== c.name && <div className="small muted">{c.legalName}</div>}
                   </td>
                   <td>{[c.city, c.state].filter(Boolean).join(' - ') || <span className="muted">—</span>}</td>
                   <td className="num">
                     {c.latitude != null && c.longitude != null ? (
-                      `${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)}`
+                      <>
+                        {`${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)}`}
+                        {c.erpId != null && c.locationSource && <div className="small muted">{c.locationSource === 'PAINEL' ? 'editada no painel' : 'do ERP'}</div>}
+                      </>
                     ) : (
                       <span style={{ color: 'var(--notdone)' }}>Sem localização</span>
                     )}
@@ -190,7 +234,7 @@ export function ClientsPage() {
       )}
       {query.data && <Pager page={page} pageSize={PAGE_SIZE} total={query.data.total} onPage={setPage} />}
       {editing && <ClientForm client={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
-      {importing && <ImportClients onClose={() => setImporting(false)} />}
+      {importing && <ImportClients fromErp={fromErp} onClose={() => setImporting(false)} />}
     </div>
   )
 }
@@ -244,16 +288,14 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
   const near = neighbor.data?.items[0]
   const center: [number, number] = hasPoint ? [lat, lng] : near ? [near.latitude!, near.longitude!] : [-12.97, -38.48]
 
+  // Cliente do ERP: nome, razão social, cidade, UF e situação só mudam no ERP; aqui só a localização
+  const fromErp = client?.erpId != null
   const save = useMutation({
     mutationFn: () => {
-      const body = {
-        name: form.name,
-        legalName: form.legalName || null,
-        city: form.city,
-        state: form.state,
-        ...(hasPoint ? { latitude: lat, longitude: lng } : {}),
-        active: form.active,
-      }
+      const point = hasPoint ? { latitude: lat, longitude: lng } : {}
+      const body = fromErp
+        ? point
+        : { name: form.name, legalName: form.legalName || null, city: form.city, state: form.state, ...point, active: form.active }
       return client ? api(`/admin/clients/${client.id}`, { method: 'PATCH', body }) : api('/admin/clients', { method: 'POST', body })
     },
     onSuccess: () => {
@@ -265,6 +307,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
 
   // Quem já tem localização não volta a ficar sem (os roteiros dependem dela)
   const removingPoint = client?.latitude != null && !hasPoint
+  const invalid = fromErp ? !hasPoint : form.name.trim().length < 2 || form.city.trim().length < 2
   return (
     <Modal
       wide
@@ -275,22 +318,32 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
           <button className="btn" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending || form.name.trim().length < 2 || form.city.trim().length < 2 || halfPoint || removingPoint}>
-            {client ? 'Salvar cliente' : 'Cadastrar cliente'}
+          <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending || invalid || halfPoint || removingPoint}>
+            {client ? (fromErp ? 'Salvar localização' : 'Salvar cliente') : 'Cadastrar cliente'}
           </button>
         </>
       }
     >
       <div className="cols-2" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)' }}>
         <div className="form-grid" style={{ alignContent: 'start' }}>
+          {fromErp && (
+            <span className="small muted full">
+              Código {client!.erpId} no ERP. Nome fantasia, razão social, cidade, UF e situação vêm do ERP: altere lá e rode a sincronização. Aqui muda só a localização.{' '}
+              {client!.locationSource === 'PAINEL'
+                ? 'A localização foi editada no painel: a sincronização com o ERP não a muda mais.'
+                : client!.locationSource === 'ERP'
+                  ? 'A localização veio do ERP. Se você corrigir aqui, passa a valer a sua, e a sincronização não a muda mais.'
+                  : 'O ERP não tem a localização deste cliente: a que você marcar aqui passa a valer, e a sincronização não a muda mais.'}
+            </span>
+          )}
           <Field label="Nome fantasia" className="full">
-            <input className="input" value={form.name} onChange={(e) => set({ name: e.target.value })} />
+            <input className="input" value={form.name} readOnly={fromErp} onChange={(e) => set({ name: e.target.value })} />
           </Field>
           <Field label="Razão social" className="full">
-            <input className="input" value={form.legalName} onChange={(e) => set({ legalName: e.target.value })} />
+            <input className="input" value={form.legalName} readOnly={fromErp} onChange={(e) => set({ legalName: e.target.value })} />
           </Field>
           <Field label="Cidade">
-            <input className="input" list="client-form-cities" value={form.city} onChange={(e) => set({ city: e.target.value })} />
+            <input className="input" list="client-form-cities" value={form.city} readOnly={fromErp} onChange={(e) => set({ city: e.target.value })} />
             <datalist id="client-form-cities">
               {cities.data
                 ?.filter((c) => c.state === form.state)
@@ -300,7 +353,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
             </datalist>
           </Field>
           <Field label="UF">
-            <select className="input" value={form.state} onChange={(e) => set({ state: e.target.value })}>
+            <select className="input" value={form.state} disabled={fromErp} onChange={(e) => set({ state: e.target.value })}>
               {UFS.map((uf) => (
                 <option key={uf} value={uf}>
                   {uf}
@@ -321,7 +374,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
           {halfPoint && <span className="small full" style={{ color: 'var(--notdone)' }}>Preencha latitude e longitude válidas (as duas).</span>}
           {removingPoint && <span className="small full" style={{ color: 'var(--notdone)' }}>A localização não pode ser apagada: corrija os números ou marque no mapa.</span>}
           <label className="check full">
-            <input type="checkbox" checked={form.active} onChange={(e) => set({ active: e.target.checked })} />
+            <input type="checkbox" checked={form.active} disabled={fromErp} onChange={(e) => set({ active: e.target.checked })} />
             Cliente ativo (inativos saem dos roteiros dos próximos dias)
           </label>
         </div>
@@ -390,6 +443,9 @@ function ClientMix({ clientId }: { clientId: string }) {
 }
 
 const IMPORT_COLUMNS = ['id', 'razao_social', 'nome_fantasia', 'cidade', 'uf', 'latitude', 'longitude']
+/** A planilha baixada também traz o código do ERP e a origem da localização (só para conferência: a importação os ignora). */
+const EXPORT_COLUMNS = ['id', 'codigo_erp', ...IMPORT_COLUMNS.slice(1), 'origem_localizacao']
+const locationOrigin = (c: Client) => (c.latitude == null ? '' : c.locationSource === 'ERP' ? 'ERP' : 'painel')
 
 /** Cabeçalho sem acento, minúsculo e com _ ("Razão Social" = razao_social); aceita nomes alternativos. */
 const HEADER_ALIASES: Record<string, string> = { fantasia: 'nome_fantasia', nome: 'nome_fantasia', estado: 'uf', lat: 'latitude', lng: 'longitude', lon: 'longitude' }
@@ -453,7 +509,7 @@ function readRows(table: string[][]) {
   return { rows, problems, missing }
 }
 
-function ImportClients({ onClose }: { onClose: () => void }) {
+function ImportClients({ fromErp, onClose }: { fromErp: boolean; onClose: () => void }) {
   const qc = useQueryClient()
   const [read, setRead] = useState<ReturnType<typeof readRows> | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
@@ -500,7 +556,15 @@ function ImportClients({ onClose }: { onClose: () => void }) {
           {IMPORT_COLUMNS.join(';')}
         </code>
         <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-          <li>Linha com id altera aquele cliente. Sem id, o cliente é procurado pelo nome fantasia (ou razão social) na mesma cidade e UF; se não existir, é cadastrado.</li>
+          {fromErp ? (
+            <>
+              <li>Linha com id altera aquele cliente. Sem id, o cliente é procurado pelo nome fantasia (ou razão social) na mesma cidade e UF.</li>
+              <li>Os clientes vêm do ERP: deles só a latitude e a longitude são importadas, e linha sem cliente correspondente não cria cadastro.</li>
+              <li>Localização diferente da atual passa a valer no lugar da do ERP, e a sincronização não a muda mais. Igual à atual (ex.: a planilha baixada sem mudar nada) não muda nada.</li>
+            </>
+          ) : (
+            <li>Linha com id altera aquele cliente. Sem id, o cliente é procurado pelo nome fantasia (ou razão social) na mesma cidade e UF; se não existir, é cadastrado.</li>
+          )}
           <li>Latitude e longitude vazias mantêm a localização atual. No lugar delas, aceita uma coluna “coordenadas” com o texto copiado do Google Maps.</li>
           <li>Números com vírgula ou ponto (-12,9714 ou -12.9714).</li>
         </ul>

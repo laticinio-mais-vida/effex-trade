@@ -1,0 +1,15 @@
+# Painel do EFFEX Trade (container effex_web). O HTTPS e o /api ficam no Caddy do app-promotoria (caddy-bloco.txt).
+:80 {
+	root * /srv
+	encode gzip
+
+	# Arquivos com hash no nome: cache longo. O resto (index.html) é conferido a cada acesso, para a versão nova chegar
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@outros not path /assets/*
+	header @outros Cache-Control "no-cache"
+
+	# Rotas do painel (ex.: /clientes) abrem o index.html
+	try_files {path} /index.html
+	file_server
+}

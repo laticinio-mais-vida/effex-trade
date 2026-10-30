@@ -1,0 +1,16 @@
+
+# EFFEX Trade (stack separada em /opt/effex-trade)
+effextrade.maisvida.cloud {
+	encode gzip
+	# API: /api/... chega na API sem o /api (ex.: /api/auth/login -> /auth/login)
+	handle_path /api/* {
+		reverse_proxy effex_api:3333 {
+			# IP real de quem acessa, para o limite de tentativas de login (TRUST_PROXY=true no api.env)
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+	# Painel
+	handle {
+		reverse_proxy effex_web:80
+	}
+}
