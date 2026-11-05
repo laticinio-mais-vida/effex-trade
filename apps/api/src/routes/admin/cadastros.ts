@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { requireRole, type AuthUser } from '../../auth'
 import { isUniqueViolation, prisma, Prisma, Role, TaskRecurrence, VisitModule } from '../../db'
 import { cityKey, zCity, zUf } from '../../lib/cities'
-import { fromDbDate, toDbDate } from '../../lib/dates'
+import { fromDbDate, toDbDate, todayIn } from '../../lib/dates'
 import { badRequest, conflict, notFound } from '../../lib/errors'
 import { parse, zDate, zId, zIdParam, zLat, zLng, zPage, zQueryBool } from '../../lib/validate'
 import { clientMatcher, clientSearch, erpActive, erpFieldChanges, located, panelLocation, unlocated, withCityKey } from '../../services/clients'
@@ -15,6 +15,7 @@ import { DEFAULT_MODULES, zModules } from '../../services/visit-structure'
 import { areaWhere, assertAdmin, clientScope, inAreas, loadAreas, promotorScope } from '../../services/scope'
 import { serializeClient, serializeUser } from '../../services/serializers'
 import { photoTypeLabels } from '../../services/settings'
+import { lockPromotorDay, planRouteDay, syncTodayWithRoute } from '../../services/workdays'
 
 const userSelect = {
   id: true,
@@ -409,7 +410,10 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     items?: { clientId: string; frequency?: z.infer<typeof zFrequency>; modules?: VisitModule[] }[]
   }
 
-  /** Substitui o roteiro dos dias informados, numa transação só. Sem frequência (ou só clientIds), o cliente entra como semanal. */
+  /**
+   * Substitui o roteiro dos dias informados e leva a alteração ao dia de hoje do promotor (só nos clientes ainda
+   * pendentes), numa transação só. Sem frequência (ou só clientIds), o cliente entra como semanal.
+   */
   const replaceRouteDays = async (promotorId: string, input: RouteDayInput[]) => {
     const days = input.map((d) => ({
       weekday: d.weekday,
@@ -438,8 +442,17 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
         modules: modules ?? DEFAULT_MODULES,
       })),
     }))
-    await prisma.$transaction(
-      rows.flatMap(({ weekday, data }) => [prisma.routeItem.deleteMany({ where: { promotorId, weekday } }), prisma.routeItem.createMany({ data })]),
+    return prisma.$transaction(
+      async (tx) => {
+        await lockPromotorDay(tx, promotorId)
+        const before = await planRouteDay(tx, promotorId, todayIn())
+        for (const { weekday, data } of rows) {
+          await tx.routeItem.deleteMany({ where: { promotorId, weekday } })
+          await tx.routeItem.createMany({ data })
+        }
+        return syncTodayWithRoute(tx, promotorId, before)
+      },
+      { timeout: 30_000 },
     )
   }
   const zRouteDay = {
@@ -453,8 +466,8 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     if (new Set(body.days.map((d) => d.weekday)).size !== body.days.length) throw badRequest('Dia da semana repetido.')
     const promotor = await prisma.user.findFirst({ where: { id, ...promotorScope(req.user) } })
     if (!promotor) throw notFound('Promotor')
-    await replaceRouteDays(id, body.days)
-    return { ok: true, days: body.days.map((d) => ({ weekday: d.weekday, count: (d.items ?? d.clientIds ?? []).length })) }
+    const today = await replaceRouteDays(id, body.days)
+    return { ok: true, days: body.days.map((d) => ({ weekday: d.weekday, count: (d.items ?? d.clientIds ?? []).length })), today }
   })
 
   app.put('/routes/:id/:weekday', async (req) => {
@@ -462,8 +475,8 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     const body = parse(z.object(zRouteDay), req.body)
     const promotor = await prisma.user.findFirst({ where: { id: params.id, ...promotorScope(req.user) } })
     if (!promotor) throw notFound('Promotor')
-    await replaceRouteDays(params.id, [{ weekday: params.weekday, ...body }])
-    return { ok: true, count: (body.items ?? body.clientIds ?? []).length }
+    const today = await replaceRouteDays(params.id, [{ weekday: params.weekday, ...body }])
+    return { ok: true, count: (body.items ?? body.clientIds ?? []).length, today }
   })
 
   /** Distâncias entre os clientes de um dia (pelas ruas, se houver OSRM), para mostrar o deslocamento e sugerir a ordem. */

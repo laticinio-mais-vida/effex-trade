@@ -1,6 +1,6 @@
 import { prisma, Prisma, type PhotoType, type Visit, type VisitModule } from '../db'
 import { fromDbDate, minutesBetween, toDbDate, todayIn } from '../lib/dates'
-import { badRequest, conflict, forbidden, notFound, ruleViolation } from '../lib/errors'
+import { badRequest, conflict, forbidden, HttpError, notFound, ruleViolation } from '../lib/errors'
 import { distanceMeters, formatDistance } from '../lib/geo'
 import type { UploadedImage } from '../lib/multipart'
 import type { LocationInput } from '../lib/validate'
@@ -27,7 +27,10 @@ type Tx = Prisma.TransactionClient
 
 async function loadOwnVisit(promotorId: string, visitId: string) {
   const visit = await prisma.visit.findUnique({ where: { id: visitId }, include: { client: true, workDay: true } })
-  if (!visit || visit.promotorId !== promotorId) throw notFound('Visita')
+  // A visita some quando o administrador tira o cliente (ainda pendente) do roteiro de hoje
+  if (!visit || visit.promotorId !== promotorId) {
+    throw new HttpError(404, 'Este cliente não está mais no seu roteiro de hoje. Volte e atualize a tela.', 'NAO_ENCONTRADO')
+  }
   return visit
 }
 

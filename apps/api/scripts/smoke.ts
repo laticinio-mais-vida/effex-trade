@@ -348,6 +348,64 @@ check('alerta resolvido quando o promotor voltou', !!alerts.find((a) => a.id ===
 const testReport = (await call(admin, 'GET', `/admin/reports/visits?promotorId=${testId}&from=${today}&to=${today}`)).data
 check('jornada marca almoço acima do limite', testReport.days[0]?.lunchOverdue === true, testReport.days[0])
 
+console.log('Roteiro alterado durante o dia (só os pendentes mudam)')
+// Hoje: t1 atendido, t2 justificado, t3 pendente
+const [c1, c2, c3] = [t1.client.id, t2.client.id, t3.client.id]
+const salvador = (await call(admin, 'GET', '/admin/clients?pageSize=200&located=true&state=BA&city=Salvador')).data.items as any[]
+// Dois clientes do fim da lista (as seções seguintes escolhem do começo)
+const [nA, nB] = salvador.filter((c) => !tDay.visits.some((v: any) => v.client.id === c.id)).slice(-2).map((c) => c.id as string)
+const liveDay = async () => (await call(tester, 'GET', '/promotor/day')).data.visits as any[]
+const ids = (list: { id: string }[] | undefined) => list?.map((c) => c.id).join()
+const statusOf = (list: any[], clientId: string) => list.find((v) => v.client.id === clientId)?.status
+const order = (list: any[]) => list.map((v) => v.client.id).join()
+r = await call(admin, 'PUT', `/admin/routes/${testId}/${weekday}`, { clientIds: [c1, nA, c3, nB] })
+check(
+  'incluir e retirar no meio do dia: entram os novos, o já justificado fica',
+  r.status === 200 && ids(r.data.today?.added) === [nA, nB].join() && r.data.today.removed.length === 0 && ids(r.data.today.kept) === c2,
+  r.data,
+)
+let live = await liveDay()
+check(
+  'novos entram no lugar do roteiro; status de quem já foi atendido não muda',
+  order(live) === [c1, nA, c2, c3, nB].join() && statusOf(live, c1) === 'CONCLUIDA' && statusOf(live, c2) === 'JUSTIFICADA' && statusOf(live, nA) === 'PENDENTE',
+  live.map((v) => [v.client.name, v.status, v.position]),
+)
+const nAVisit = live.find((v) => v.client.id === nA)
+const nARequest = (await call(tester, 'POST', '/promotor/requests', { type: 'CHECKIN_FORA_CERCA', visitId: nAVisit.id, reason: 'GPS impreciso' })).data
+r = await call(admin, 'PUT', `/admin/routes/${testId}/${weekday}`, { clientIds: [nB, c3, c1] })
+check('pendente retirado e ordem trocada', r.status === 200 && ids(r.data.today?.removed) === nA && r.data.today.reordered === true, r.data)
+live = await liveDay()
+check(
+  'pendentes seguem a ordem nova; atendidos ficam onde estavam',
+  order(live) === [c1, c2, nB, c3].join() && statusOf(live, c1) === 'CONCLUIDA' && statusOf(live, c2) === 'JUSTIFICADA',
+  live.map((v) => [v.client.name, v.status, v.position]),
+)
+r = await call(tester, 'GET', `/promotor/visits/${nAVisit.id}`)
+check('cliente retirado avisa o promotor', r.status === 404 && r.data.error.includes('não está mais no seu roteiro'), r.data)
+const nARequestNow = ((await call(tester, 'GET', '/promotor/requests')).data as any[]).find((x) => x.id === nARequest.id)
+check('pedido do cliente retirado cancelado', nARequestNow?.status === 'CANCELADA', nARequestNow)
+r = await call(admin, 'PUT', `/admin/routes/${testId}/${weekday}`, { items: [{ clientId: nB, modules: ['ESTOQUE'] }, { clientId: c3 }, { clientId: c1, modules: ['ESTOQUE'] }] })
+live = await liveDay()
+check(
+  'estrutura nova vale só para os pendentes',
+  ids(r.data.today?.changed) === nB && live.find((v) => v.client.id === nB)?.modules.join() === 'ESTOQUE' && live.find((v) => v.client.id === c1)?.modules.join() !== 'ESTOQUE',
+  r.data,
+)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: nA, date: today })
+const pontualA = r.data
+r = await call(admin, 'PUT', `/admin/routes/${testId}/${weekday}`, { clientIds: [nB, c3, c1, nA] })
+const asRoute = (await liveDay()).find((v) => v.client.id === nA)
+check('pontual pendente que entra no roteiro vira visita do roteiro', asRoute?.id === pontualA.visit?.id && asRoute.origin === 'ROTEIRO', asRoute)
+r = await call(admin, 'PUT', `/admin/routes/${testId}/${weekday}`, { clientIds: [nB, c3, c1] })
+live = await liveDay()
+const backToPontual = live.find((v) => v.client.id === nA)
+check(
+  'e volta a ser pontual, no fim da lista, quando sai do roteiro',
+  backToPontual?.origin === 'PONTUAL' && backToPontual.position === Math.max(...live.map((v) => v.position)) && r.data.today.kept.some((c: any) => c.id === nA),
+  backToPontual,
+)
+await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${pontualA.id}`)
+
 console.log('Roteiro com frequência (quinzenal, mensal e personalizado)')
 // Datas fixas no futuro (a quinta 07/01/2027 como primeira visita), para o teste não depender do dia em que roda
 const d1 = '2027-01-07'
@@ -355,7 +413,7 @@ const w1 = 4
 const weekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay()
 const allClients = (await call(admin, 'GET', '/admin/clients?pageSize=200&located=true&state=BA&city=Salvador')).data.items as any[]
 const [fa, fb, fc, fd] = allClients
-// Só a quinta no roteiro do promotor de teste (o dia de hoje dele já foi gerado e não muda)
+// Só a quinta no roteiro do promotor de teste (do dia de hoje dele saem os pendentes; os atendidos ficam)
 await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, clientIds: [] })) })
 r = await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [{ weekday: w1, items: [{ clientId: fa.id, frequency: { type: 'QUINZENAL' } }] }] })
 check('quinzenal sem primeira visita recusado', r.status === 400 && r.data.code === 'FREQUENCIA_INVALIDA', r.data)
@@ -406,8 +464,8 @@ check('visita pontual incluída hoje', r.status === 200 && r.data.visit?.status 
 const todayPontual = r.data
 r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient.id, date: today })
 check('cliente já incluído hoje recusado', r.status === 409 && r.data.code === 'CLIENTE_NO_ROTEIRO', r.data)
-r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: t3.client.id, date: today })
-check('cliente que já está no roteiro de hoje recusado', r.status === 409 && r.data.code === 'CLIENTE_NO_ROTEIRO', r.data)
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: t1.client.id, date: today })
+check('cliente já atendido hoje recusado', r.status === 409 && r.data.code === 'CLIENTE_NO_ROTEIRO', r.data)
 let nextThursday = addDays(today, 1)
 while (weekdayOf(nextThursday) !== w1) nextThursday = addDays(nextThursday, 1)
 r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: fa.id, date: nextThursday })

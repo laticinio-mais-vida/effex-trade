@@ -3,7 +3,7 @@ import L from 'leaflet'
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from 'react-leaflet'
 import { api } from '../api'
-import { areaLabel, DEFAULT_MODULES, distanceModeLabel, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
+import { areaLabel, DEFAULT_MODULES, distanceModeLabel, fmtDate, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
 import {
   DAYS_INTERVAL,
   fmtShortDay,
@@ -18,7 +18,7 @@ import {
   withType,
 } from '../routeFrequency'
 import { distanceMeters, pathMeters, suggestOrder } from '../routeOrder'
-import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, Task, VisitModule } from '../types'
+import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, Task, TodayRouteUpdate, VisitModule } from '../types'
 import { ClientPicker, Empty, ErrorBox, Field, Loading, PageHead, Tabs, useLookups } from '../ui'
 import { TaskForm } from './Tasks'
 
@@ -74,7 +74,7 @@ export function RoutesPage() {
     <div>
       <PageHead
         title="Roteiros"
-        description="Clientes que cada promotor atende em cada dia da semana, na ordem de atendimento. As mudanças valem a partir do próximo dia; o roteiro de hoje já foi gerado."
+        description="Clientes que cada promotor atende em cada dia da semana, na ordem de atendimento. Ao salvar, o roteiro de hoje do promotor também muda, mas só nos clientes ainda pendentes: os já atendidos, justificados ou em atendimento ficam como estão."
       />
       {lookups.isLoading && <Loading />}
       {lookups.data?.promotores.length === 0 && <Empty>Cadastre um usuário com perfil de promotor para montar o roteiro.</Empty>}
@@ -123,17 +123,20 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
       return next
     })
 
+  /** O que o último salvamento mudou no dia de hoje do promotor. */
+  const [todayUpdate, setTodayUpdate] = useState<TodayRouteUpdate | null>(null)
   const save = useMutation({
     mutationFn: () =>
-      api(`/admin/routes/${promotorId}`, {
+      api<{ today: TodayRouteUpdate | null }>(`/admin/routes/${promotorId}`, {
         method: 'PUT',
         body: {
           days: dirtyDays.map((d) => ({ weekday: d, items: listOf(d).map((c) => ({ clientId: c.id, frequency: c.frequency, modules: c.modules })) })),
         },
       }),
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await qc.invalidateQueries({ queryKey: ['route', promotorId] })
       setDrafts({})
+      setTodayUpdate(data.today)
     },
   })
 
@@ -274,6 +277,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
           roteiro ou inclua a cidade no cadastro do promotor; enquanto isso, o dia com eles não pode ser salvo.
         </div>
       )}
+      {todayUpdate && <TodayUpdateNotice update={todayUpdate} onClose={() => setTodayUpdate(null)} />}
 
       {adding && (
         <AddClients
@@ -459,6 +463,45 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
         </div>
       )}
     </>
+  )
+}
+
+/** O que salvar o roteiro mudou no dia de hoje do promotor. */
+function TodayUpdateNotice({ update, onClose }: { update: TodayRouteUpdate; onClose: () => void }) {
+  const names = (list: Ref[]) => new Intl.ListFormat('pt-BR').format(list.map((c) => c.name))
+  const changed = update.added.length + update.removed.length + update.changed.length > 0 || update.reordered
+  if (!update.closed && !changed && update.kept.length === 0) return null
+  return (
+    <div className="alert ok" role="status" style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <strong>
+          {update.closed
+            ? `O promotor já encerrou o roteiro de hoje (${fmtDate(update.date)}): as mudanças valem a partir do próximo dia.`
+            : changed
+              ? `Roteiro de hoje (${fmtDate(update.date)}) atualizado no app do promotor.`
+              : `O roteiro de hoje (${fmtDate(update.date)}) do promotor não mudou.`}
+        </strong>
+        <button className="btn small" onClick={onClose}>
+          Fechar
+        </button>
+      </div>
+      {!update.closed && (
+        <>
+          <ul style={{ margin: '6px 0', paddingLeft: 20 }}>
+            {update.added.length > 0 && <li>Incluídos: {names(update.added)}.</li>}
+            {update.removed.length > 0 && <li>Retirados: {names(update.removed)}.</li>}
+            {update.changed.length > 0 && <li>Nova estrutura de atendimento: {names(update.changed)}.</li>}
+            {update.reordered && <li>Os clientes pendentes seguem a nova ordem.</li>}
+            {update.kept.length > 0 && (
+              <li>
+                Continuam no dia como estão (já atendidos, justificados, em atendimento ou visita pontual): {names(update.kept)}.
+              </li>
+            )}
+          </ul>
+          {changed && <div className="small">O promotor vê a mudança ao atualizar a tela do app ou ao voltar para ele.</div>}
+        </>
+      )}
+    </div>
   )
 }
 
