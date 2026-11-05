@@ -10,6 +10,7 @@ import { parse, zDate, zId, zIdParam, zLat, zLng, zPage, zQueryBool } from '../.
 import { clientMatcher, clientSearch, erpActive, erpFieldChanges, located, panelLocation, unlocated, withCityKey } from '../../services/clients'
 import { listPermissionTypes } from '../../services/permissions'
 import { frequencyColumns, serializeFrequency, zFrequency } from '../../services/route-frequency'
+import { listRouteSkips, skipRouteDate, undoRouteSkip } from '../../services/route-skips'
 import { distanceMatrix } from '../../services/routing'
 import { DEFAULT_MODULES, zModules } from '../../services/visit-structure'
 import { areaWhere, assertAdmin, clientScope, inAreas, loadAreas, promotorScope } from '../../services/scope'
@@ -389,9 +390,10 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     const { id } = parse(zIdParam, req.params)
     const promotor = await prisma.user.findFirst({ where: { id, ...promotorScope(req.user) }, select: { id: true, name: true } })
     if (!promotor) throw notFound('Promotor')
-    const [items, areas] = await Promise.all([
+    const [items, areas, skips] = await Promise.all([
       prisma.routeItem.findMany({ where: { promotorId: id }, include: { client: true }, orderBy: [{ weekday: 'asc' }, { position: 'asc' }] }),
       loadAreas(id),
+      listRouteSkips(id),
     ])
     return {
       promotor: { ...promotor, areas },
@@ -401,6 +403,8 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
           .filter((i) => i.weekday === weekday)
           .map((i) => ({ ...serializeClient(i.client), frequency: serializeFrequency(i), modules: i.modules, outsideArea: !inAreas(i.client, areas) })),
       })),
+      /** Datas de hoje em diante em que o cliente foi tirado do roteiro só naquele dia */
+      skips,
     }
   })
 
@@ -450,6 +454,9 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
           await tx.routeItem.deleteMany({ where: { promotorId, weekday } })
           await tx.routeItem.createMany({ data })
         }
+        // Quem saiu do roteiro inteiro perde as datas puladas: se voltar depois, não some de um dia sem ninguém ver
+        const remaining = await tx.routeItem.findMany({ where: { promotorId }, select: { clientId: true }, distinct: ['clientId'] })
+        await tx.routeSkip.deleteMany({ where: { promotorId, date: { gte: toDbDate(todayIn()) }, clientId: { notIn: remaining.map((r) => r.clientId) } } })
         return syncTodayWithRoute(tx, promotorId, before)
       },
       { timeout: 30_000 },
@@ -477,6 +484,19 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     if (!promotor) throw notFound('Promotor')
     const today = await replaceRouteDays(params.id, [{ weekday: params.weekday, ...body }])
     return { ok: true, count: (body.items ?? body.clientIds ?? []).length, today }
+  })
+
+  /** Tira o cliente do roteiro numa única data (nas outras semanas ele continua); grava na hora. */
+  app.post('/routes/:id/skips', async (req) => {
+    const { id } = parse(zIdParam, req.params)
+    const body = parse(z.object({ clientId: zId, date: zDate }), req.body)
+    return skipRouteDate(req.user, id, body)
+  })
+
+  /** Desfaz a data pulada: o cliente volta ao roteiro nela. */
+  app.delete('/routes/:id/skips/:skipId', async (req) => {
+    const params = parse(z.object({ id: zId, skipId: zId }), req.params)
+    return undoRouteSkip(req.user, params.id, params.skipId)
   })
 
   /** Distâncias entre os clientes de um dia (pelas ruas, se houver OSRM), para mostrar o deslocamento e sugerir a ordem. */

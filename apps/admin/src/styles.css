@@ -1166,6 +1166,50 @@ textarea.input {
 .freq-chip[aria-expanded='true'] {
   border-color: var(--ink);
 }
+/* Datas em que o cliente foi tirado do roteiro só naquele dia */
+.skip-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.route-list .skip-list {
+  margin-top: 4px;
+}
+.skip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 8px;
+  border: 1px dashed var(--notdone);
+  border-radius: 999px;
+  background: var(--notdone-bg);
+  color: var(--notdone);
+  font-weight: 600;
+}
+.skip-chip button {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.skip-chip button:hover,
+.skip-chip button:focus-visible {
+  background: var(--panel);
+}
+.skip-chip button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.remove-date {
+  justify-self: start;
+  width: auto;
+  margin-top: 6px;
+  padding: 4px 6px;
+}
 .route-list.sortable li .freq-edit {
   grid-column: 2 / -1;
   display: grid;

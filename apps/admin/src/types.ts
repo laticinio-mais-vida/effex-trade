@@ -354,6 +354,8 @@ export type Frequency = { type: FrequencyType; interval: number | null; startDat
 /** Cliente do roteiro (sempre com localização). outsideArea: fora das cidades do promotor (precisa sair do roteiro). */
 export type RouteClient = LocatedClient & { frequency: Frequency; modules: VisitModule[]; outsideArea?: boolean }
 export type RouteDay = { weekday: number; clients: RouteClient[] }
+/** Data em que o cliente foi tirado do roteiro só naquele dia (nas outras semanas continua). */
+export type RouteSkip = { id: string; clientId: string; date: string }
 /** O que salvar o roteiro mudou no dia de hoje do promotor (nulo quando o dia de hoje ainda não foi gerado). */
 export type TodayRouteUpdate = {
   date: string

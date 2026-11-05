@@ -406,6 +406,28 @@ check(
 )
 await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${pontualA.id}`)
 
+console.log('Cliente tirado do roteiro só numa data (hoje)')
+// Roteiro de hoje: nB e c3 pendentes, c1 atendido
+r = await call(admin, 'POST', `/admin/routes/${testId}/skips`, { clientId: c3, date: today })
+const skipC3 = r.data.skip
+check('tirar só hoje um pendente: sai do dia', r.status === 200 && skipC3?.date === today && ids(r.data.today?.removed) === c3, r.data)
+live = await liveDay()
+check('cliente tirado hoje some do app do promotor', !live.some((v) => v.client.id === c3), live.map((v) => v.client.name))
+r = await call(admin, 'POST', `/admin/routes/${testId}/skips`, { clientId: c3, date: today })
+check('tirar de novo na mesma data recusado', r.status === 409 && r.data.code === 'JA_RETIRADO', r.data)
+r = await call(admin, 'POST', `/admin/routes/${testId}/skips`, { clientId: c1, date: today })
+check('tirar hoje quem já foi atendido recusado', r.status === 409 && r.data.code === 'CLIENTE_JA_ATENDIDO', r.data)
+r = await call(admin, 'POST', `/admin/routes/${testId}/skips`, { clientId: nA, date: today })
+check('tirar quem não está no roteiro na data recusado', r.status === 400 && r.data.code === 'CLIENTE_FORA_DO_ROTEIRO', r.data)
+r = await call(admin, 'POST', `/admin/routes/${testId}/skips`, { clientId: c3, date: addDays(today, -1) })
+check('tirar numa data passada recusado', r.status === 400, r.data)
+const routeSkips = (await call(admin, 'GET', `/admin/routes/${testId}`)).data.skips as any[]
+check('datas puladas devolvidas ao painel (só a que valeu)', ids(routeSkips) === skipC3?.id && routeSkips[0].clientId === c3, routeSkips)
+r = await call(admin, 'DELETE', `/admin/routes/${testId}/skips/${skipC3?.id}`)
+check('desfazer devolve o cliente ao dia', r.status === 200 && ids(r.data.today?.added) === c3, r.data)
+live = await liveDay()
+check('cliente volta pendente, depois de quem vem antes no roteiro', order(live).includes([nB, c3].join()) && statusOf(live, c3) === 'PENDENTE', live.map((v) => [v.client.name, v.status]))
+
 console.log('Roteiro com frequência (quinzenal, mensal e personalizado)')
 // Datas fixas no futuro (a quinta 07/01/2027 como primeira visita), para o teste não depender do dia em que roda
 const d1 = '2027-01-07'
@@ -456,6 +478,18 @@ check('de 3 em 3 dias no domingo passa para a segunda', clientIds(await generate
 check('a série continua contando do domingo (sábado 16, não quinta 14)', clientIds(await generatedDay('2027-01-16')) === fc.id)
 check('2ª semana: semanal e quinzenal', clientIds(await generatedDay(addDays(d1, 7))) === [fa.id, fb.id].join())
 check('4ª semana: todos coincidem', clientIds(await generatedDay(addDays(d1, 21))) === [fa.id, fb.id, fc.id, fd.id].join())
+// Tirado só numa data: gravado direto, porque a API só aceita de hoje em diante (ela é testada na visita pontual, abaixo)
+const skipDates = [d1, '2027-01-13'].map((date) => new Date(`${date}T00:00:00Z`))
+await prisma.routeSkip.createMany({
+  data: [
+    { promotorId: testId, clientId: fa.id, date: skipDates[0]!, createdById: testId },
+    { promotorId: testId, clientId: fc.id, date: skipDates[1]!, createdById: testId },
+  ],
+})
+check('semanal tirado só numa data não entra nela', clientIds(await generatedDay(d1)) === [fc.id, fd.id].join())
+check('e continua na semana seguinte', clientIds(await generatedDay(addDays(d1, 7))) === [fa.id, fb.id].join())
+check('de X em X dias tirado no dia em que cai fora do dia da semana', clientIds(await generatedDay('2027-01-13')) === '')
+await prisma.routeSkip.deleteMany({ where: { promotorId: testId, date: { in: skipDates } } })
 
 console.log('Visita pontual incluída pelo supervisor')
 const [pontualClient, pontualClient2] = allClients.filter((c) => !tDay.visits.some((v: any) => v.client.id === c.id) && ![fa.id, fb.id, fc.id, fd.id].includes(c.id))
@@ -470,6 +504,13 @@ let nextThursday = addDays(today, 1)
 while (weekdayOf(nextThursday) !== w1) nextThursday = addDays(nextThursday, 1)
 r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: fa.id, date: nextThursday })
 check('cliente que cai no roteiro fixo do dia futuro recusado', r.status === 409 && r.data.code === 'CLIENTE_NO_ROTEIRO', r.data)
+r = await call(admin, 'POST', `/admin/routes/${testId}/skips`, { clientId: fa.id, date: nextThursday })
+const faSkip = r.data.skip
+check('tirar numa data futura grava sem mexer no dia de hoje', r.status === 200 && faSkip?.date === nextThursday && r.data.today === null, r.data)
+check('na data tirada o cliente não entra no dia', !(await generatedDay(nextThursday)).some((v) => v.clientId === fa.id))
+r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: fa.id, date: nextThursday })
+check('na data tirada do roteiro, a visita pontual é aceita', r.status === 200, r.data)
+if (r.status === 200) await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${r.data.id}`)
 r = await call(supervisor, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient.id, date: addDays(today, -1) })
 check('dia passado recusado', r.status === 400, r.data)
 const tDayPontual = (await call(tester, 'GET', '/promotor/day')).data
@@ -510,7 +551,9 @@ r = await call(admin, 'PUT', `/admin/routes/${testId}`, {
   ],
 })
 check('roteiro com estruturas salvo', r.status === 200, r.data)
-const structRoute = (await call(admin, 'GET', `/admin/routes/${testId}`)).data.weekdays
+const structRouteData = (await call(admin, 'GET', `/admin/routes/${testId}`)).data
+const structRoute = structRouteData.weekdays
+check('quem sai do roteiro inteiro perde as datas puladas', !structRouteData.skips.some((s: any) => s.id === faSkip?.id), structRouteData.skips)
 check('estrutura devolvida ao painel', structRoute[4].clients[0].modules.join() === 'ATIVIDADES' && structRoute[6].clients[0].modules.join() === 'ESTOQUE', structRoute[6].clients[0])
 check('só atividade extra, sem atividade: cliente não entra no dia', !(await generatedDay('2027-01-07')).some((v) => v.clientId === fe.id))
 r = await call(admin, 'POST', '/admin/tasks', { title: 'Conferir placas de preço', clientId: fe.id, promotorId: testId, startDate: today, endDate: null, recurrence: 'SEMANAL', requiresPhoto: false })

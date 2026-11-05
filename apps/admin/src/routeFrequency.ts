@@ -11,7 +11,7 @@ export const WEEKS_SKIPPED = { min: 1, max: 12, initial: 2 }
 
 const DAY_MS = 86_400_000
 const asDate = (date: string) => new Date(`${date}T00:00:00Z`)
-const weekdayOf = (date: string) => asDate(date).getUTCDay()
+export const weekdayOf = (date: string) => asDate(date).getUTCDay()
 const daysBetween = (from: string, to: string) => Math.round((asDate(to).getTime() - asDate(from).getTime()) / DAY_MS)
 /** Ocorrência do dia da semana no mês (1ª a 4ª); a 5ª conta como "última". */
 const weekOfMonth = (date: string) => Math.min(Math.ceil(Number(date.slice(8, 10)) / 7), 5)

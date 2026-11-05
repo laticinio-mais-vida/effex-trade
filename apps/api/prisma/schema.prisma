@@ -121,6 +121,8 @@ model User {
   alertsAcknowledged Alert[]            @relation("AlertAck")
   scheduledVisits   ScheduledVisit[]    @relation("ScheduledPromotor")
   scheduledCreated  ScheduledVisit[]    @relation("ScheduledCreator")
+  routeSkips        RouteSkip[]         @relation("RouteSkipPromotor")
+  routeSkipsCreated RouteSkip[]         @relation("RouteSkipCreator")
 }
 
 /// Cidade (ou UF inteira, sem cidade) atendida por promotor, vendedor ou supervisor: só os clientes dela aparecem para ele
@@ -158,6 +160,7 @@ model Client {
   tasks           Task[]
   mix             ClientProduct[]
   scheduledVisits ScheduledVisit[]
+  routeSkips      RouteSkip[]
 
   @@index([state, cityKey])
 }
@@ -180,6 +183,23 @@ model RouteItem {
   modules    VisitModule[]  @default([FOTOS, ATIVIDADES])
 
   @@index([promotorId, weekday])
+}
+
+/// Cliente do roteiro fixo tirado de uma única data do promotor; nas outras datas continua no roteiro.
+/// Fica por promotor + cliente + data (e não pelo item do roteiro, que é recriado a cada vez que o roteiro é salvo).
+model RouteSkip {
+  id          String   @id @default(cuid())
+  promotorId  String
+  promotor    User     @relation("RouteSkipPromotor", fields: [promotorId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  createdById String
+  createdBy   User     @relation("RouteSkipCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([promotorId, clientId, date])
+  @@index([promotorId, date])
 }
 
 /// Visita pontual: cliente incluído pelo supervisor num único dia do promotor, fora do roteiro fixo.

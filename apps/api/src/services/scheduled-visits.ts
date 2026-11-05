@@ -85,7 +85,9 @@ export async function scheduleVisit(user: AuthUser, input: ScheduleInput) {
     }
   } else {
     const items = await prisma.routeItem.findMany({ where: { promotorId: promotor.id, clientId: client.id } })
-    if (items.some((item) => fallsOn(routeRule(item), input.date))) throw conflict(`${client.name} já está no roteiro do promotor ${when}.`, 'CLIENTE_NO_ROTEIRO')
+    // Tirado do roteiro só nesta data: aceita a visita pontual
+    const skipped = await prisma.routeSkip.findUnique({ where: { promotorId_clientId_date: { promotorId: promotor.id, clientId: client.id, date: day } } })
+    if (!skipped && items.some((item) => fallsOn(routeRule(item), input.date))) throw conflict(`${client.name} já está no roteiro do promotor ${when}.`, 'CLIENTE_NO_ROTEIRO')
   }
 
   try {

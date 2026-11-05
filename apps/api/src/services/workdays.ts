@@ -12,16 +12,21 @@ export type PlannedVisit = { clientId: string; modules: VisitModule[] }
 /**
  * Clientes do roteiro fixo que caem na data, na ordem de atendimento (dia da semana, frequência e estrutura de cada
  * cliente). Os do próprio dia vêm na ordem do roteiro; os "de X em X dias" cadastrados em outro dia, no fim.
- * Cliente que cai mais de uma vez no dia vira uma visita só, com as etapas somadas.
+ * Cliente que cai mais de uma vez no dia vira uma visita só, com as etapas somadas. Cliente tirado só desta data
+ * (RouteSkip) fica de fora.
  */
 export async function planRouteDay(db: Tx | typeof prisma, promotorId: string, date: string): Promise<PlannedVisit[]> {
-  const weekday = toDbDate(date).getUTCDay()
+  const day = toDbDate(date)
+  const weekday = day.getUTCDay()
+  // Em sequência: db pode ser a transação, que roda uma consulta por vez
   const items = await db.routeItem.findMany({
     where: { promotorId, client: { active: true }, OR: [{ weekday }, { frequency: 'DIAS' }] },
     orderBy: { position: 'asc' },
   })
+  const skips = await db.routeSkip.findMany({ where: { promotorId, date: day }, select: { clientId: true } })
+  const skipped = new Set(skips.map((s) => s.clientId))
   const due = items
-    .filter((item) => fallsOn(routeRule(item), date))
+    .filter((item) => !skipped.has(item.clientId) && fallsOn(routeRule(item), date))
     .sort((a, b) => Number(a.weekday !== weekday) - Number(b.weekday !== weekday) || a.weekday - b.weekday || a.position - b.position)
   const planned = new Map<string, VisitModule[]>()
   for (const item of due) planned.set(item.clientId, mergeModules(planned.get(item.clientId) ?? [], item.modules))

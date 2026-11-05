@@ -1,11 +1,12 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import L from 'leaflet'
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from 'react-leaflet'
 import { api } from '../api'
 import { areaLabel, DEFAULT_MODULES, distanceModeLabel, fmtDate, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
 import {
   DAYS_INTERVAL,
+  fallsOn,
   fmtShortDay,
   frequencyError,
   frequencyLabel,
@@ -13,18 +14,22 @@ import {
   sameFrequency,
   upcomingWeekdays,
   WEEKLY,
+  weekdayOf,
   weekOfMonthLabel,
   WEEKS_SKIPPED,
   withType,
 } from '../routeFrequency'
 import { distanceMeters, pathMeters, suggestOrder } from '../routeOrder'
-import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, Task, TodayRouteUpdate, VisitModule } from '../types'
-import { ClientPicker, Empty, ErrorBox, Field, Loading, PageHead, Tabs, useLookups } from '../ui'
+import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, RouteSkip, Task, TodayRouteUpdate, VisitModule } from '../types'
+import { ClientPicker, Empty, ErrorBox, Field, Loading, Modal, PageHead, Tabs, useLookups } from '../ui'
 import { TaskForm } from './Tasks'
 
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
 const dayName = (d: number) => weekdayLabel[d]!.toLowerCase()
+/** "da segunda", "do sábado" */
+const ofDay = (d: number) => `${d === 0 || d === 6 ? 'do' : 'da'} ${dayName(d)}`
 const listDays = (days: number[]) => new Intl.ListFormat('pt-BR').format(days.map(dayName))
+type DayFrequencyMap = Partial<Record<number, Frequency>>
 const fmtKm = (meters: number) => `${fmtNumber(meters / 1000, 1)} km`
 const sameRoute = (a: RouteClient[], b: RouteClient[]) =>
   a.length === b.length &&
@@ -87,11 +92,18 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const qc = useQueryClient()
   const lookups = useLookups()
   const [weekday, setWeekday] = useState(1)
-  const query = useQuery({ queryKey: ['route', promotorId], queryFn: () => api<{ promotor: Ref & { areas: Area[] }; weekdays: RouteDay[] }>(`/admin/routes/${promotorId}`) })
+  const query = useQuery({
+    queryKey: ['route', promotorId],
+    queryFn: () => api<{ promotor: Ref & { areas: Area[] }; weekdays: RouteDay[]; skips: RouteSkip[] }>(`/admin/routes/${promotorId}`),
+  })
   /** Alterações ainda não salvas, por dia da semana; salvar grava todos os dias alterados de uma vez. */
   const [drafts, setDrafts] = useState<Partial<Record<number, RouteClient[]>>>({})
   /** Clientes marcados para entrar no roteiro e a frequência escolhida em cada dia marcado. */
-  const [adding, setAdding] = useState<{ clients: LocatedClient[]; days: Partial<Record<number, Frequency>>; modules: VisitModule[] } | null>(null)
+  const [adding, setAdding] = useState<{ clients: LocatedClient[]; days: DayFrequencyMap; modules: VisitModule[] } | null>(null)
+  /** Cliente com a janela de tirar do roteiro aberta (só numa data, do dia da semana ou de todos os dias). */
+  const [removing, setRemoving] = useState<RouteClient | null>(null)
+  /** Cliente com a janela de mudar os dias da semana aberta. */
+  const [editingDays, setEditingDays] = useState<RouteClient | null>(null)
   /** Cliente da lista do dia com a frequência e a estrutura abertas para edição. */
   const [editingFreq, setEditingFreq] = useState<string | null>(null)
   /** Atalho para cadastrar atividade extra para um cliente deste promotor. */
@@ -140,6 +152,26 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
     },
   })
 
+  /** Datas puladas (cliente fora do roteiro só naquele dia): gravam na hora, fora do rascunho. */
+  const skips = query.data?.skips ?? []
+  const skipDatesOf = (clientId: string) => new Set(skips.filter((s) => s.clientId === clientId).map((s) => s.date))
+  const afterSkipChange = async (data: { today: TodayRouteUpdate | null }) => {
+    await qc.invalidateQueries({ queryKey: ['route', promotorId] })
+    if (data.today) setTodayUpdate(data.today)
+  }
+  const skip = useMutation({
+    mutationFn: (input: { clientId: string; date: string }) =>
+      api<{ today: TodayRouteUpdate | null }>(`/admin/routes/${promotorId}/skips`, { method: 'POST', body: input }),
+    onSuccess: async (data) => {
+      await afterSkipChange(data)
+      setRemoving(null)
+    },
+  })
+  const unskip = useMutation({
+    mutationFn: (skipId: string) => api<{ today: TodayRouteUpdate | null }>(`/admin/routes/${promotorId}/skips/${skipId}`, { method: 'DELETE' }),
+    onSuccess: afterSkipChange,
+  })
+
   useEffect(() => {
     if (!dirty) return
     const warn = (e: BeforeUnloadEvent) => e.preventDefault()
@@ -165,6 +197,29 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   }
 
   const inDay = (d: number, clientId: string) => listOf(d).some((c) => c.id === clientId)
+  /** Dias da semana em que o cliente está (com as alterações não salvas). */
+  const daysOf = (clientId: string) => WEEK_ORDER.filter((d) => inDay(d, clientId))
+  const frequenciesOf = (clientId: string): DayFrequencyMap =>
+    Object.fromEntries(daysOf(clientId).map((d) => [d, listOf(d).find((c) => c.id === clientId)!.frequency]))
+  /** Tira o cliente dos dias desmarcados, põe no fim dos marcados e troca a frequência dos que mudaram. */
+  const applyDays = (client: RouteClient, next: DayFrequencyMap) => {
+    setDays(
+      WEEK_ORDER.flatMap((d): [number, RouteClient[]][] => {
+        const day = listOf(d)
+        const current = day.find((c) => c.id === client.id)
+        const f = next[d]
+        if (current && !f) return [[d, day.filter((c) => c.id !== client.id)]]
+        if (!current && f) return [[d, [...day, { ...client, frequency: f }]]]
+        if (current && f && !sameFrequency(current.frequency, f)) return [[d, day.map((c) => (c.id === client.id ? { ...c, frequency: f } : c))]]
+        return []
+      }),
+    )
+    setEditingDays(null)
+  }
+  const removeFrom = (clientId: string, days: number[]) => {
+    setDays(days.map((d) => [d, listOf(d).filter((c) => c.id !== clientId)]))
+    setRemoving(null)
+  }
   /** Seleção de vários clientes: cada clique na busca marca ou desmarca. O dia aberto já vem marcado como semanal. */
   const pick = (found: Client[]) => {
     // A busca já traz só clientes com localização; o filtro garante o tipo
@@ -326,6 +381,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                 </button>
               </div>
               <div className="panel-body stack">
+                <ErrorBox error={unskip.error} />
                 {suggestion && (
                   <div className="alert ok">
                     {suggestion.before - suggestion.after < 1
@@ -341,80 +397,111 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                       Arraste os clientes para cima ou para baixo para mudar a ordem de atendimento.
                     </p>
                     <ol className="route-list sortable" ref={listRef}>
-                      {list.map((c, i) => (
-                        <li
-                          key={c.id}
-                          draggable={editingFreq !== c.id}
-                          className={dragId === c.id ? 'dragging' : undefined}
-                          onDragStart={(e) => {
-                            setDragId(c.id)
-                            e.dataTransfer.effectAllowed = 'move'
-                            e.dataTransfer.setData('text/plain', c.name)
-                          }}
-                          onDragOver={(e) => dragOver(e, i)}
-                          onDrop={(e) => e.preventDefault()}
-                          onDragEnd={() => setDragId(null)}
-                        >
-                          <button
-                            type="button"
-                            className="drag-handle"
-                            data-handle={c.id}
-                            aria-label={`${c.name}, posição ${i + 1} de ${list.length}. Arraste ou use as setas para mudar a posição.`}
-                            onKeyDown={(e) => handleKey(e, i)}
+                      {list.map((c, i) => {
+                        const skipped = skipDatesOf(c.id)
+                        // Datas puladas que aparecem neste dia: as que caem nele ou, no "de X em X dias", todas
+                        const skipsHere = skips.filter((s) => s.clientId === c.id && (c.frequency.type === 'DIAS' || weekdayOf(s.date) === weekday))
+                        const next = c.frequency.type !== 'SEMANAL' && !frequencyError(c.frequency) ? nextVisits(weekday, c.frequency, skipped.size + 1).find((d) => !skipped.has(d)) : undefined
+                        return (
+                          <li
+                            key={c.id}
+                            draggable={editingFreq !== c.id}
+                            className={dragId === c.id ? 'dragging' : undefined}
+                            onDragStart={(e) => {
+                              setDragId(c.id)
+                              e.dataTransfer.effectAllowed = 'move'
+                              e.dataTransfer.setData('text/plain', c.name)
+                            }}
+                            onDragOver={(e) => dragOver(e, i)}
+                            onDrop={(e) => e.preventDefault()}
+                            onDragEnd={() => setDragId(null)}
                           >
-                            <svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true">
-                              {[2, 8].flatMap((x) => [3, 8, 13].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.6" fill="currentColor" />))}
-                            </svg>
-                          </button>
-                          <span className="route-num">{i + 1}</span>
-                          <span>
-                            {c.name}
-                            <div className="small muted">{[c.city, c.state].filter(Boolean).join(' - ')}</div>
-                            {c.outsideArea && <div className="small" style={{ color: 'var(--notdone)' }}>Fora das cidades do promotor</div>}
                             <button
                               type="button"
-                              className={`freq-chip${c.frequency.type === 'SEMANAL' && isDefaultStructure(c.modules) ? '' : ' custom'}${frequencyError(c.frequency) ? ' bad' : ''}`}
-                              aria-expanded={editingFreq === c.id}
-                              title="Alterar a frequência e a estrutura do atendimento"
-                              onClick={() => setEditingFreq(editingFreq === c.id ? null : c.id)}
+                              className="drag-handle"
+                              data-handle={c.id}
+                              aria-label={`${c.name}, posição ${i + 1} de ${list.length}. Arraste ou use as setas para mudar a posição.`}
+                              onKeyDown={(e) => handleKey(e, i)}
                             >
-                              {frequencyLabel(weekday, c.frequency)}
-                              {c.frequency.type !== 'SEMANAL' && !frequencyError(c.frequency) && ` · próxima ${fmtShortDay(nextVisits(weekday, c.frequency, 1)[0]!)}`}
-                              {!isDefaultStructure(c.modules) && ` · ${structureLabel(c.modules)}`}
+                              <svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true">
+                                {[2, 8].flatMap((x) => [3, 8, 13].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.6" fill="currentColor" />))}
+                              </svg>
                             </button>
-                          </span>
-                          <button
-                            className="btn icon danger"
-                            aria-label={`Remover ${c.name} de ${dayName(weekday)}`}
-                            onClick={() => setDays([[weekday, list.filter((_, j) => j !== i)]])}
-                          >
-                            ✕
-                          </button>
-                          {editingFreq === c.id && (
-                            <div className="freq-edit">
-                              <div className="freq-edit-section">
-                                <h4>Frequência</h4>
-                                <FrequencyPicker weekday={weekday} value={c.frequency} onChange={(f) => setFrequency(c.id, f)} name={`edit-${c.id}`} />
-                              </div>
-                              <div className="freq-edit-section">
-                                <h4>Estrutura do atendimento</h4>
-                                <StructurePicker value={c.modules} onChange={(m) => setModules(c.id, m)} />
-                              </div>
-                              {c.modules.includes('ATIVIDADES') && (
-                                <div className="freq-edit-section">
-                                  <h4>Atividades extras deste cliente</h4>
-                                  <ClientTasks clientId={c.id} promotorId={promotorId} onNew={() => setNewTaskFor(c)} />
+                            <span className="route-num">{i + 1}</span>
+                            <span>
+                              {c.name}
+                              <div className="small muted">{[c.city, c.state].filter(Boolean).join(' - ')}</div>
+                              {c.outsideArea && <div className="small" style={{ color: 'var(--notdone)' }}>Fora das cidades do promotor</div>}
+                              <button
+                                type="button"
+                                className={`freq-chip${c.frequency.type === 'SEMANAL' && isDefaultStructure(c.modules) ? '' : ' custom'}${frequencyError(c.frequency) ? ' bad' : ''}`}
+                                aria-expanded={editingFreq === c.id}
+                                title="Alterar a frequência e a estrutura do atendimento"
+                                onClick={() => setEditingFreq(editingFreq === c.id ? null : c.id)}
+                              >
+                                {frequencyLabel(weekday, c.frequency)}
+                                {next && ` · próxima ${fmtShortDay(next)}`}
+                                {!isDefaultStructure(c.modules) && ` · ${structureLabel(c.modules)}`}
+                              </button>
+                              {skipsHere.length > 0 && (
+                                <div className="skip-list small">
+                                  <span className="muted">Não vai em:</span>
+                                  {skipsHere.map((s) => (
+                                    <span key={s.id} className="skip-chip">
+                                      {fmtShortDay(s.date)}
+                                      {s.date === today() && ' (hoje)'}
+                                      <button
+                                        type="button"
+                                        title="Desfazer: o cliente volta ao roteiro nesta data"
+                                        aria-label={`Desfazer: ${c.name} volta ao roteiro em ${fmtShortDay(s.date)}`}
+                                        disabled={unskip.isPending}
+                                        onClick={() => unskip.mutate(s.id)}
+                                      >
+                                        ✕
+                                      </button>
+                                    </span>
+                                  ))}
                                 </div>
                               )}
-                              <div className="btn-row">
-                                <button type="button" className="btn small" onClick={() => setEditingFreq(null)}>
-                                  Fechar
-                                </button>
+                            </span>
+                            <button className="btn icon danger" aria-label={`Tirar ${c.name} do roteiro`} title="Tirar do roteiro" onClick={() => setRemoving(c)}>
+                              ✕
+                            </button>
+                            {editingFreq === c.id && (
+                              <div className="freq-edit">
+                                <div className="freq-edit-section">
+                                  <h4>Dias da semana</h4>
+                                  <div className="skip-list">
+                                    <span>{listDays(daysOf(c.id))}</span>
+                                    <button type="button" className="btn small" onClick={() => setEditingDays(c)}>
+                                      Mudar dias
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="freq-edit-section">
+                                  <h4>Frequência</h4>
+                                  <FrequencyPicker weekday={weekday} value={c.frequency} onChange={(f) => setFrequency(c.id, f)} name={`edit-${c.id}`} />
+                                </div>
+                                <div className="freq-edit-section">
+                                  <h4>Estrutura do atendimento</h4>
+                                  <StructurePicker value={c.modules} onChange={(m) => setModules(c.id, m)} />
+                                </div>
+                                {c.modules.includes('ATIVIDADES') && (
+                                  <div className="freq-edit-section">
+                                    <h4>Atividades extras deste cliente</h4>
+                                    <ClientTasks clientId={c.id} promotorId={promotorId} onNew={() => setNewTaskFor(c)} />
+                                  </div>
+                                )}
+                                <div className="btn-row">
+                                  <button type="button" className="btn small" onClick={() => setEditingFreq(null)}>
+                                    Fechar
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          )}
-                        </li>
-                      ))}
+                            )}
+                          </li>
+                        )
+                      })}
                     </ol>
                   </div>
                 )}
@@ -440,6 +527,33 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
       )}
 
       {newTaskFor && <TaskForm task={null} preset={{ client: newTaskFor, promotorId }} onClose={() => setNewTaskFor(null)} />}
+
+      {removing && (
+        <RemoveClientModal
+          client={removing}
+          weekday={weekday}
+          days={daysOf(removing.id)}
+          saved={savedOf(weekday).find((c) => c.id === removing.id)}
+          skipped={skipDatesOf(removing.id)}
+          skipping={skip.isPending}
+          error={skip.error}
+          onSkip={(date) => skip.mutate({ clientId: removing.id, date })}
+          onRemoveDay={() => removeFrom(removing.id, [weekday])}
+          onRemoveAll={() => removeFrom(removing.id, daysOf(removing.id))}
+          onChangeDays={() => {
+            setEditingDays(removing)
+            setRemoving(null)
+            skip.reset()
+          }}
+          onClose={() => {
+            setRemoving(null)
+            skip.reset()
+          }}
+        />
+      )}
+      {editingDays && (
+        <ClientDaysModal client={editingDays} initial={frequenciesOf(editingDays.id)} onApply={(days) => applyDays(editingDays, days)} onClose={() => setEditingDays(null)} />
+      )}
 
       {dirty && (
         <div className="savebar" role="region" aria-label="Alterações não salvas">
@@ -614,7 +728,7 @@ function AddClients({
   onConfirm,
 }: {
   clients: Client[]
-  days: Partial<Record<number, Frequency>>
+  days: DayFrequencyMap
   modules: VisitModule[]
   onModules: (modules: VisitModule[]) => void
   alreadyIn: (d: number) => number
@@ -650,32 +764,27 @@ function AddClients({
           <StructurePicker value={modules} onChange={onModules} />
         </div>
       </div>
-      <fieldset className="add-client-days">
-        <legend className="small muted">Em quais dias? Os clientes entram no final da ordem de cada dia.</legend>
-        {WEEK_ORDER.map((d) => {
+      <DayFrequencies
+        legend="Em quais dias? Os clientes entram no final da ordem de cada dia."
+        days={days}
+        name="add"
+        disabled={(d) => alreadyIn(d) === n}
+        note={(d) => {
           const has = alreadyIn(d)
-          const all = has === n
-          const f = days[d]
+          if (has === 0) return null
           return (
-            <div key={d} className={`day-freq${f ? ' on' : ''}`}>
-              <label className="day-check">
-                <input type="checkbox" checked={!!f} disabled={all} onChange={() => onToggleDay(d)} />
-                <span className="day-name">{weekdayLabel[d]}</span>
-                {has > 0 && (
-                  <span className="small muted">
-                    {all
-                      ? n === 1
-                        ? 'já está neste dia'
-                        : 'todos já estão neste dia'
-                      : `${has} de ${n} já ${has === 1 ? 'está' : 'estão'} neste dia e não se repete${has === 1 ? '' : 'm'}`}
-                  </span>
-                )}
-              </label>
-              {f && <FrequencyPicker weekday={d} value={f} onChange={(v) => onFrequency(d, v)} name={`add-${d}`} />}
-            </div>
+            <span className="small muted">
+              {has === n
+                ? n === 1
+                  ? 'já está neste dia'
+                  : 'todos já estão neste dia'
+                : `${has} de ${n} já ${has === 1 ? 'está' : 'estão'} neste dia e não se repete${has === 1 ? '' : 'm'}`}
+            </span>
           )
-        })}
-      </fieldset>
+        }}
+        onToggle={onToggleDay}
+        onFrequency={onFrequency}
+      />
       <div className="btn-row add-client-actions">
         <button className="btn" onClick={onCancel}>
           Cancelar
@@ -687,6 +796,228 @@ function AddClients({
         </button>
       </div>
     </section>
+  )
+}
+
+/** Dias da semana com caixa de marcar e, em cada dia marcado, a frequência. */
+function DayFrequencies({
+  legend,
+  days,
+  name,
+  disabled,
+  note,
+  onToggle,
+  onFrequency,
+}: {
+  legend: string
+  days: DayFrequencyMap
+  /** Prefixo dos grupos de rádio da frequência personalizada (únicos na página) */
+  name: string
+  disabled?: (d: number) => boolean
+  note?: (d: number) => ReactNode
+  onToggle: (d: number) => void
+  onFrequency: (d: number, f: Frequency) => void
+}) {
+  return (
+    <fieldset className="add-client-days">
+      <legend className="small muted">{legend}</legend>
+      {WEEK_ORDER.map((d) => {
+        const f = days[d]
+        return (
+          <div key={d} className={`day-freq${f ? ' on' : ''}`}>
+            <label className="day-check">
+              <input type="checkbox" checked={!!f} disabled={disabled?.(d)} onChange={() => onToggle(d)} />
+              <span className="day-name">{weekdayLabel[d]}</span>
+              {note?.(d)}
+            </label>
+            {f && <FrequencyPicker weekday={d} value={f} onChange={(v) => onFrequency(d, v)} name={`${name}-${d}`} />}
+          </div>
+        )
+      })}
+    </fieldset>
+  )
+}
+
+type RemoveChoice = 'date' | 'day' | 'all'
+
+/**
+ * Tirar o cliente do roteiro: só numa data (grava na hora; nas outras semanas continua), do dia da semana aberto
+ * ou de todos os dias em que ele está (essas duas entram nas alterações não salvas).
+ */
+function RemoveClientModal({
+  client,
+  weekday,
+  days,
+  saved,
+  skipped,
+  skipping,
+  error,
+  onSkip,
+  onRemoveDay,
+  onRemoveAll,
+  onChangeDays,
+  onClose,
+}: {
+  client: RouteClient
+  weekday: number
+  /** Dias da semana em que o cliente está */
+  days: number[]
+  /** O cliente como está gravado neste dia (sem ele, ainda não foi salvo aqui) */
+  saved: RouteClient | undefined
+  /** Datas já puladas deste cliente */
+  skipped: Set<string>
+  skipping: boolean
+  error: unknown
+  onSkip: (date: string) => void
+  onRemoveDay: () => void
+  onRemoveAll: () => void
+  onChangeDays: () => void
+  onClose: () => void
+}) {
+  const t0 = today()
+  // Próximas datas pela frequência gravada: hoje, se cair hoje, e as seguintes
+  const dates = saved
+    ? [...(fallsOn(weekday, saved.frequency, t0) ? [t0] : []), ...nextVisits(weekday, saved.frequency, 8 + skipped.size)].filter((d) => !skipped.has(d)).slice(0, 8)
+    : []
+  const others = days.filter((d) => d !== weekday)
+  const [choice, setChoice] = useState<RemoveChoice>(dates.length > 0 ? 'date' : 'day')
+  const [date, setDate] = useState(dates[0] ?? '')
+  const submit = () => {
+    if (choice === 'date') onSkip(date)
+    else if (choice === 'day') onRemoveDay()
+    else onRemoveAll()
+  }
+  const label =
+    choice === 'date' ? (date === t0 ? 'Tirar só hoje' : `Tirar só em ${fmtShortDay(date)}`) : choice === 'day' ? `Tirar ${ofDay(weekday)}` : 'Tirar de todos os dias'
+  return (
+    <Modal
+      title={`Tirar ${client.name} do roteiro`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Voltar
+          </button>
+          <button className="btn danger" disabled={skipping || (choice === 'date' && !date)} onClick={submit}>
+            {skipping ? 'Gravando…' : label}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <div className="structure" role="radiogroup" aria-label="De onde tirar o cliente">
+          <label className={`structure-opt${choice === 'date' ? ' on' : ''}`}>
+            <input type="radio" name="remove-choice" checked={choice === 'date'} disabled={dates.length === 0} onChange={() => setChoice('date')} />
+            <span>
+              <strong>Só em um dia</strong>
+              <span className="small muted">Nas outras semanas ele continua no roteiro. Grava na hora, sem precisar salvar o roteiro.</span>
+              {dates.length > 0 ? (
+                <select className="input remove-date" aria-label="Data" value={date} onChange={(e) => {
+                    setDate(e.target.value)
+                    setChoice('date')
+                  }}>
+                  {dates.map((d) => (
+                    <option key={d} value={d}>
+                      {fmtShortDay(d)}
+                      {d === t0 ? ' (hoje)' : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="small freq-error">
+                  {saved ? 'Não há próximas datas dele neste dia.' : 'Salve o roteiro antes: este cliente ainda não foi gravado neste dia.'}
+                </span>
+              )}
+            </span>
+          </label>
+          <label className={`structure-opt${choice === 'day' ? ' on' : ''}`}>
+            <input type="radio" name="remove-choice" checked={choice === 'day'} onChange={() => setChoice('day')} />
+            <span>
+              <strong>{ofDay(weekday)[0]!.toUpperCase() + ofDay(weekday).slice(1)}, em todas as semanas</strong>
+              <span className="small muted">
+                {others.length > 0 ? `Continua em ${listDays(others)}.` : `É o único dia dele no roteiro: ele sai do roteiro do promotor.`}
+              </span>
+            </span>
+          </label>
+          {others.length > 0 && (
+            <label className={`structure-opt${choice === 'all' ? ' on' : ''}`}>
+              <input type="radio" name="remove-choice" checked={choice === 'all'} onChange={() => setChoice('all')} />
+              <span>
+                <strong>De todos os dias</strong>
+                <span className="small muted">Sai do roteiro do promotor: {listDays(days)}.</span>
+              </span>
+            </label>
+          )}
+        </div>
+        {choice !== 'date' && <div className="small muted">A mudança entra nas alterações não salvas: depois, clique em Salvar roteiro.</div>}
+        {choice === 'date' && date === t0 && (
+          <div className="small muted">Se o promotor ainda não atendeu nem justificou este cliente hoje, ele sai do app na hora.</div>
+        )}
+        <div className="skip-list small">
+          <span className="muted">Quer só trocar os dias ou a frequência?</span>
+          <button type="button" className="btn small" onClick={onChangeDays}>
+            Mudar os dias da semana
+          </button>
+        </div>
+        <ErrorBox error={error} />
+      </div>
+    </Modal>
+  )
+}
+
+/** Dias da semana do cliente no roteiro, com a frequência em cada um; dia novo entra no fim da ordem daquele dia. */
+function ClientDaysModal({
+  client,
+  initial,
+  onApply,
+  onClose,
+}: {
+  client: RouteClient
+  initial: DayFrequencyMap
+  onApply: (days: DayFrequencyMap) => void
+  onClose: () => void
+}) {
+  const [days, setDays] = useState<DayFrequencyMap>(initial)
+  const selected = WEEK_ORDER.filter((d) => days[d])
+  const incomplete = selected.some((d) => frequencyError(days[d]!))
+  const changed = WEEK_ORDER.some((d) => {
+    const a = initial[d]
+    const b = days[d]
+    return !a || !b ? a !== b : !sameFrequency(a, b)
+  })
+  const toggle = (d: number) =>
+    setDays(({ [d]: current, ...rest }) => (current ? rest : { ...rest, [d]: initial[d] ?? WEEKLY }))
+  return (
+    <Modal
+      title={`Dias de ${client.name} no roteiro`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Voltar
+          </button>
+          <button className="btn primary" disabled={selected.length === 0 || incomplete || !changed} onClick={() => onApply(days)}>
+            Aplicar
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <DayFrequencies
+          legend="Em quais dias o promotor atende este cliente? Em dia novo, ele entra no final da ordem, com a mesma estrutura de atendimento."
+          days={days}
+          name={`days-${client.id}`}
+          note={(d) => (initial[d] ? null : days[d] ? <span className="small muted">novo</span> : null)}
+          onToggle={toggle}
+          onFrequency={(d, f) => setDays((prev) => ({ ...prev, [d]: f }))}
+        />
+        {selected.length === 0 ? (
+          <div className="small freq-error">Marque pelo menos um dia. Para tirar o cliente de todos os dias, use o ✕ dele na lista.</div>
+        ) : (
+          <div className="small muted">Ao aplicar, a mudança entra nas alterações não salvas: depois, clique em Salvar roteiro.</div>
+        )}
+      </div>
+    </Modal>
   )
 }
 
