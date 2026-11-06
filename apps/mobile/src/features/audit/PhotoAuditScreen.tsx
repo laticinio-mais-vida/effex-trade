@@ -1,22 +1,24 @@
 import { Image } from 'expo-image'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, RefreshControl, Text, View } from 'react-native'
+import { ActivityIndicator, FlatList, Keyboard, RefreshControl, Text, View } from 'react-native'
 import { Badge, Banner, Button, Card, CheckOption, EmptyState, Field, Muted, MultiPickerSheet, Row, Segmented, Sheet, styles } from '@/components/ui'
 import { FilterChip } from '@/features/audit/FilterChip'
-import { PhotoViewer } from '@/features/PhotoViewer'
+import { PhotoViewer, useViewerTyping } from '@/features/PhotoViewer'
 import { api, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
 import { emitBadgesChanged } from '@/lib/events'
 import { auditStatusInfo, formatDate, formatTime, photoTypeLabels, todayLocal } from '@/lib/format'
 import { colors, radius, space } from '@/lib/theme'
-import type { Audit, AuditPhoto, Paged, PhotoType } from '@/lib/types'
+import type { Audit, AuditPhoto, Paged, PhotoType, Role } from '@/lib/types'
 
 type Status = 'pendentes' | 'auditadas' | 'todas'
 type Month = 'atual' | 'anterior'
 /** Sem mês marcado e sem período livre = padrão da API (últimos 7 dias). */
 type Period = { months: Month[]; custom: { from: string; to: string } | null }
 type Filters = { clientIds: string[]; promotorIds: string[]; types: PhotoType[]; period: Period }
+
+const roleLabels: Partial<Record<Role, string>> = { VENDEDOR: 'vendedor', SUPERVISOR: 'supervisor', ADMIN: 'administrador' }
 type FilterOptions = { clients: { id: string; name: string; city: string | null }[]; promotores: { id: string; name: string }[] }
 
 const PAGE_SIZE = 20
@@ -382,6 +384,7 @@ function AuditPanel({ photo, onAudited }: { photo: AuditPhoto; onAudited: (p: Au
   const meta = photo.meta ? Object.entries(photo.meta).map(([k, v]) => `${k}: ${v}`).join(' · ') : null
 
   async function submit(statusValue: 'APROVADA' | 'REPROVADA') {
+    Keyboard.dismiss()
     setBusy(statusValue)
     setError(null)
     try {
@@ -396,8 +399,43 @@ function AuditPanel({ photo, onAudited }: { photo: AuditPhoto; onAudited: (p: Au
     }
   }
 
+  // Escrevendo a justificativa, a caixa vai para o alto do visualizador e o teclado abre abaixo dela
+  useViewerTyping(rejecting)
+  const stopRejecting = () => {
+    Keyboard.dismiss()
+    setRejecting(false)
+  }
+
+  const decision = locked ? (
+    <Banner tone="info" text="Sua auditoria já foi conferida pelo supervisor e não pode mais ser alterada." />
+  ) : rejecting ? (
+    <>
+      <Field
+        label="Por que a foto está reprovada?"
+        value={justification}
+        onChangeText={setJustification}
+        multiline
+        autoFocus
+        placeholder="Ex.: foto escura, gôndola desorganizada"
+        hint="Mínimo de 5 caracteres"
+        style={{ minHeight: 80 }}
+      />
+      <Row>
+        <Button title="Voltar" variant="secondary" onPress={stopRejecting} style={{ flex: 1 }} />
+        <Button title="Reprovar" variant="danger" onPress={() => submit('REPROVADA')} loading={busy === 'REPROVADA'} disabled={justification.trim().length < 5} style={{ flex: 1 }} />
+      </Row>
+    </>
+  ) : (
+    <Row>
+      <Button title="Reprovar" variant="danger" onPress={() => setRejecting(true)} style={{ flex: 1 }} />
+      <Button title="Aprovar" variant="success" onPress={() => submit('APROVADA')} loading={busy === 'APROVADA'} style={{ flex: 1 }} />
+    </Row>
+  )
+
   return (
     <>
+      {rejecting ? decision : null}
+      {rejecting && error ? <Banner tone="danger" text={error} /> : null}
       <Text style={styles.sectionTitle}>{photo.client.name}</Text>
       <Muted>
         {photoTypeLabels[photo.type]} · {formatDate(photo.visit.date)} às {formatTime(photo.takenAt)} · {photo.promotor.name}
@@ -406,27 +444,11 @@ function AuditPanel({ photo, onAudited }: { photo: AuditPhoto; onAudited: (p: Au
       {photo.notes ? <Text style={styles.text}>{photo.notes}</Text> : null}
       {photo.products?.length ? <Muted>Produtos marcados pelo promotor: {photo.products.map((p) => p.name).join(', ')}</Muted> : null}
       {photo.otherAudits.map((a) => (
-        <AuditLine key={a.id} audit={a} title={`${a.auditor.name} (${a.auditor.role === 'VENDEDOR' ? 'vendedor' : 'supervisor'})`} />
+        <AuditLine key={a.id} audit={a} title={`${a.auditor.name} (${roleLabels[a.auditor.role] ?? a.auditor.role})`} />
       ))}
       {photo.myAudit ? <AuditLine audit={photo.myAudit} title="Sua auditoria" /> : null}
-
-      {locked ? (
-        <Banner tone="info" text="Sua auditoria já foi conferida pelo supervisor e não pode mais ser alterada." />
-      ) : rejecting ? (
-        <>
-          <Field label="Por que a foto está reprovada?" value={justification} onChangeText={setJustification} multiline placeholder="Ex.: foto escura, gôndola desorganizada" hint="Mínimo de 5 caracteres" />
-          <Row>
-            <Button title="Voltar" variant="secondary" onPress={() => setRejecting(false)} style={{ flex: 1 }} />
-            <Button title="Reprovar" variant="danger" onPress={() => submit('REPROVADA')} loading={busy === 'REPROVADA'} disabled={justification.trim().length < 5} style={{ flex: 1 }} />
-          </Row>
-        </>
-      ) : (
-        <Row>
-          <Button title="Reprovar" variant="danger" onPress={() => setRejecting(true)} style={{ flex: 1 }} />
-          <Button title="Aprovar" variant="success" onPress={() => submit('APROVADA')} loading={busy === 'APROVADA'} style={{ flex: 1 }} />
-        </Row>
-      )}
-      {error ? <Banner tone="danger" text={error} /> : null}
+      {rejecting ? null : decision}
+      {!rejecting && error ? <Banner tone="danger" text={error} /> : null}
     </>
   )
 }

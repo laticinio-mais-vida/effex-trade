@@ -16,9 +16,6 @@ export function serializePhoto(photo: Photo & { products?: { product: Product }[
     longitude: photo.longitude,
     notes: photo.notes,
     meta: photo.meta,
-    score: photo.score,
-    reviewNotes: photo.reviewNotes,
-    reviewedAt: photo.reviewedAt,
     products: photo.products?.map((pp) => productRef(pp.product)),
   }
 }

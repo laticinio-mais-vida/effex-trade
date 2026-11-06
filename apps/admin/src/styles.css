@@ -345,6 +345,7 @@ table.data tr.clickable {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .chip.warn {
   background: var(--justified-bg);
@@ -545,6 +546,22 @@ textarea.input {
 .btn.good {
   color: var(--done);
   border-color: #a8d5bd;
+}
+.btn.approve {
+  background: var(--done);
+  border-color: var(--done);
+  color: #fff;
+}
+.btn.approve:hover {
+  background: #17734a;
+}
+.btn.reject {
+  background: var(--notdone);
+  border-color: var(--notdone);
+  color: #fff;
+}
+.btn.reject:hover {
+  background: #a3332d;
 }
 .btn.small {
   min-height: 28px;
@@ -855,15 +872,6 @@ textarea.input {
   align-items: center;
   gap: 6px;
 }
-.score {
-  font-family: var(--font-cond);
-  font-weight: 700;
-  background: var(--tag);
-  color: var(--tag-ink);
-  border-radius: 3px;
-  padding: 0 7px;
-  font-size: 14px;
-}
 .viewer {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
@@ -875,27 +883,6 @@ textarea.input {
   background: var(--idle-bg);
   max-height: 70vh;
   object-fit: contain;
-}
-.score-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.score-picker button {
-  font: inherit;
-  font-family: var(--font-cond);
-  font-weight: 700;
-  font-size: 16px;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-s);
-  border: 1px solid var(--rule-strong);
-  background: var(--panel);
-  cursor: pointer;
-}
-.score-picker button.on {
-  background: var(--tag);
-  border-color: var(--tag-deep);
 }
 .kv {
   display: grid;

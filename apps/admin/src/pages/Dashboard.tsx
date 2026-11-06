@@ -112,7 +112,7 @@ export function DashboardPage() {
           </div>
           <div className="panel-body stack">
             <TodoLine to="/liberacoes" count={d.pendingRequests} text="pedidos de liberação aguardando decisão" />
-            <TodoLine to="/fotos" count={d.photosUnreviewed} text="fotos dos últimos 7 dias sem nota" />
+            <TodoLine to="/fotos" count={d.photosUnreviewed} text="fotos dos últimos 7 dias para você aprovar ou reprovar" />
             <TodoLine to="/relatorios" count={d.visits.pending} text="clientes do roteiro de hoje ainda sem atendimento" />
             <p className="muted small" style={{ margin: 0 }}>
               {d.photosToday} fotos registradas hoje.

@@ -607,12 +607,13 @@ async function main() {
         },
       })
     }
-    // Admin avalia parte das fotos
+    // Admin aprova ou reprova parte das fotos pelo painel (decisão final, sem conferência)
     if (rand() < 0.4) {
-      await prisma.photo.update({
-        where: { id: photo.id },
-        data: { score: between(5, 10), reviewNotes: rand() < 0.3 ? 'Boa execução da gôndola.' : null, reviewedById: admin.id, reviewedAt: new Date() },
+      const adminRejects = rand() < 0.1
+      await prisma.photoAudit.create({
+        data: { photoId: photo.id, auditorId: admin.id, status: adminRejects ? 'REPROVADA' : 'APROVADA', justification: adminRejects ? pick(rejectReasons) : null },
       })
+      audits++
     }
   }
 

@@ -397,7 +397,8 @@ model Photo {
   meta      Json? // ex.: { produto, validade, quantidade }
   createdAt DateTime  @default(now())
 
-  // Avaliação no painel administrativo
+  // Legado: nota da antiga avaliação do painel. Desde 11/2026 o painel aprova ou reprova (PhotoAudit) e as fotos
+  // com nota viraram aprovadas (migração avaliacao_fotos_aprovar_reprovar). Não é mais lido nem gravado.
   score        Int?
   reviewNotes  String?
   reviewedById String?
@@ -457,7 +458,8 @@ model VisitRupture {
   @@id([visitId, productId])
 }
 
-/// Auditoria de foto feita por vendedor (ou supervisor)
+/// Auditoria de foto: aprovação ou reprovação de um vendedor, supervisor ou administrador (pelo app ou pelo painel,
+/// uma por pessoa e foto). Só as dos vendedores são conferidas pelo supervisor (AuditReview); as demais valem como estão.
 model PhotoAudit {
   id            String      @id @default(cuid())
   photoId       String

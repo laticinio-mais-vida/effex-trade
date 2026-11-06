@@ -4,10 +4,11 @@ import { requireRole, type AuthUser } from '../../auth'
 import { PhotoType, prisma, Prisma, RequestStatus } from '../../db'
 import { addDays, fromDbDate, localDayRange, toDbDate, todayIn } from '../../lib/dates'
 import { badRequest, forbidden, notFound } from '../../lib/errors'
-import { parse, zDate, zId, zIdParam, zPage, zQueryBool } from '../../lib/validate'
+import { parse, zDate, zId, zIdParam, zPage } from '../../lib/validate'
 import { ALERT_LUNCH, alertInclude, checkLunchAlerts, serializeAlert } from '../../services/alerts'
 import { auditErrorsData, auditErrorsPdf } from '../../services/audit-errors'
 import { requestInclude, serializeRequest } from '../../services/permissions'
+import { auditBodySchema, saveAudit } from '../../services/photo-audits'
 import { visitReport } from '../../services/reports'
 import { assertAdmin, inAreas, promotorScope } from '../../services/scope'
 import { serializePhoto } from '../../services/serializers'
@@ -21,6 +22,40 @@ import {
   updateSettings,
 } from '../../services/settings'
 import { ensureWorkDaysForAll } from '../../services/workdays'
+
+const panelPhotoInclude = {
+  visit: { include: { client: { select: { id: true, name: true, city: true } }, promotor: { select: { id: true, name: true } } } },
+  audits: {
+    include: { auditor: { select: { id: true, name: true, role: true } }, review: { include: { supervisor: { select: { id: true, name: true } } } } },
+    orderBy: { createdAt: 'asc' },
+  },
+  task: { select: { id: true, title: true } },
+  products: { include: { product: true } },
+} satisfies Prisma.PhotoInclude
+
+type PanelPhoto = Prisma.PhotoGetPayload<{ include: typeof panelPhotoInclude }>
+
+function serializePanelPhoto(p: PanelPhoto, userId: string) {
+  const audits = p.audits.map((a) => ({
+    id: a.id,
+    status: a.status,
+    justification: a.justification,
+    auditor: a.auditor,
+    createdAt: a.createdAt,
+    updatedAt: a.updatedAt,
+    review: a.review ? { verdict: a.review.verdict, comment: a.review.comment, supervisor: a.review.supervisor, createdAt: a.review.createdAt } : null,
+  }))
+  return {
+    ...serializePhoto(p),
+    visit: { id: p.visit.id, date: fromDbDate(p.visit.date), status: p.visit.status },
+    client: p.visit.client,
+    promotor: p.visit.promotor,
+    task: p.task,
+    /** Aprovação ou reprovação de quem está no painel (a mesma do app) */
+    myAudit: audits.find((a) => a.auditor.id === userId) ?? null,
+    audits,
+  }
+}
 
 async function scopedPromotorIds(user: AuthUser, promotorId?: string) {
   const promotores = await prisma.user.findMany({ where: { ...promotorScope(user), ...(promotorId ? { id: promotorId } : {}) }, select: { id: true } })
@@ -99,7 +134,8 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
       prisma.visit.groupBy({ by: ['status'], where: { date: toDbDate(today), promotorId: { in: ids }, status: { not: 'CANCELADA' } }, _count: true }),
       prisma.permissionRequest.count({ where: { status: 'PENDENTE', date: toDbDate(today), promotorId: { in: ids } } }),
       prisma.photo.count({ where: { visit: { date: toDbDate(today), promotorId: { in: ids } } } }),
-      prisma.photo.count({ where: { score: null, visit: { date: { gte: toDbDate(addDays(today, -7)) }, promotorId: { in: ids } } } }),
+      // Fotos da semana que quem está no painel ainda não aprovou nem reprovou
+      prisma.photo.count({ where: { audits: { none: { auditorId: req.user.sub } }, visit: { date: { gte: toDbDate(addDays(today, -7)) }, promotorId: { in: ids } } } }),
       prisma.locationPing.groupBy({ by: ['promotorId'], where: { promotorId: { in: ids }, recordedAt: { gte: new Date(Date.now() - 15 * 60_000) } } }),
     ])
     const count = (s: string) => byStatus.find((b) => b.status === s)?._count ?? 0
@@ -214,6 +250,8 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
   })
 
   // ---------------- Avaliação de fotos ----------------
+  // O painel aprova ou reprova como o app (PhotoAudit, uma por pessoa e foto): o que o supervisor decide no app
+  // aparece aqui e vice-versa. "Pendentes" são as fotos que quem está no painel ainda não aprovou nem reprovou.
   app.get('/photos', async (req) => {
     const range = rangeQuery(6)
     const q = parse(
@@ -223,70 +261,42 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
         promotorId: zId.optional(),
         clientId: zId.optional(),
         type: z.enum(PhotoType).optional(),
-        reviewed: zQueryBool.optional(),
+        status: z.enum(['pendentes', 'auditadas', 'todas']).default('todas'),
         ...zPage,
       }),
       req.query,
     )
     const { from, to } = range.resolve(q)
     const ids = await scopedPromotorIds(req.user, q.promotorId)
+    const me = req.user.sub
     const where: Prisma.PhotoWhereInput = {
       visit: { date: { gte: toDbDate(from), lte: toDbDate(to) }, promotorId: { in: ids }, ...(q.clientId ? { clientId: q.clientId } : {}) },
       ...(q.type ? { type: q.type } : {}),
-      ...(q.reviewed === true ? { reviewedAt: { not: null } } : q.reviewed === false ? { reviewedAt: null } : {}),
+      ...(q.status === 'pendentes' ? { audits: { none: { auditorId: me } } } : q.status === 'auditadas' ? { audits: { some: { auditorId: me } } } : {}),
     }
     const [total, photos] = await Promise.all([
       prisma.photo.count({ where }),
       prisma.photo.findMany({
         where,
-        include: {
-          visit: { include: { client: { select: { id: true, name: true, city: true } }, promotor: { select: { id: true, name: true } } } },
-          reviewedBy: { select: { id: true, name: true } },
-          audits: { include: { auditor: { select: { id: true, name: true, role: true } }, review: true } },
-          task: { select: { id: true, title: true } },
-          products: { include: { product: true } },
-        },
+        include: panelPhotoInclude,
         orderBy: [{ visit: { date: 'desc' } }, { takenAt: 'desc' }],
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
       }),
     ])
-    return {
-      total,
-      page: q.page,
-      pageSize: q.pageSize,
-      items: photos.map((p) => ({
-        ...serializePhoto(p),
-        visit: { id: p.visit.id, date: fromDbDate(p.visit.date), status: p.visit.status },
-        client: p.visit.client,
-        promotor: p.visit.promotor,
-        task: p.task,
-        reviewedBy: p.reviewedBy,
-        audits: p.audits.map((a) => ({
-          id: a.id,
-          status: a.status,
-          justification: a.justification,
-          auditor: a.auditor,
-          createdAt: a.createdAt,
-          review: a.review ? { verdict: a.review.verdict, comment: a.review.comment } : null,
-        })),
-      })),
-    }
+    return { total, page: q.page, pageSize: q.pageSize, items: photos.map((p) => serializePanelPhoto(p, me)) }
   })
 
-  app.patch('/photos/:id/review', async (req) => {
+  /** Aprovar ou reprovar a foto pelo painel (a reprovação exige justificativa). */
+  app.post('/photos/:id/audit', async (req) => {
     const { id } = parse(zIdParam, req.params)
-    const settings = await getSettings()
-    const body = parse(z.object({ score: z.number().int().min(0).max(settings.photoScoreMax).nullable(), notes: z.string().trim().max(2000).nullish() }), req.body)
+    const body = parse(auditBodySchema, req.body)
     const photo = await prisma.photo.findUnique({ where: { id }, include: { visit: { select: { promotorId: true } } } })
     if (!photo) throw notFound('Foto')
     const ids = await scopedPromotorIds(req.user)
     if (!ids.includes(photo.visit.promotorId)) throw forbidden('Esta foto não é de um promotor da sua equipe.')
-    const updated = await prisma.photo.update({
-      where: { id },
-      data: { score: body.score, reviewNotes: body.notes ?? null, reviewedById: req.user.sub, reviewedAt: new Date() },
-    })
-    return serializePhoto(updated)
+    await saveAudit(id, req.user.sub, body)
+    return serializePanelPhoto(await prisma.photo.findUniqueOrThrow({ where: { id }, include: panelPhotoInclude }), req.user.sub)
   })
 
   // ---------------- Liberações (histórico) ----------------

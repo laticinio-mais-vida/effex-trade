@@ -264,10 +264,12 @@ export async function supervisorRoutes(app: FastifyInstance) {
     if (audit.auditor.role !== 'VENDEDOR') throw conflict('Só auditorias de vendedores são conferidas.')
     if (req.user.role !== 'ADMIN' && audit.auditor.supervisorId !== req.user.sub) throw forbidden('Este vendedor não pertence à sua equipe.')
 
+    // Sem comentário, a conferência fica sem: marcar correta depois de incorreta não leva a explicação antiga ao PDF
+    const comment = body.comment || null
     await prisma.auditReview.upsert({
       where: { auditId: id },
-      create: { auditId: id, supervisorId: req.user.sub, verdict: body.verdict, comment: body.comment },
-      update: { supervisorId: req.user.sub, verdict: body.verdict, comment: body.comment },
+      create: { auditId: id, supervisorId: req.user.sub, verdict: body.verdict, comment },
+      update: { supervisorId: req.user.sub, verdict: body.verdict, comment },
     })
     return serializeVendorAudit(await prisma.photoAudit.findUniqueOrThrow({ where: { id }, include: vendorAuditInclude }))
   })

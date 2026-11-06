@@ -1,46 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api, apiUrl } from '../api'
+import { AuditList, JustificationBox, PhotoFacts } from '../audit'
+import { auditLabel, MIN_JUSTIFICATION, useViewerKeys } from '../audit-labels'
 import { addDays, fmtDate, fmtDateTime, photoTypeLabel, today } from '../format'
-import type { Paged, PhotoItem, PhotoType, SettingsResponse } from '../types'
+import type { AuditStatus, Paged, PhotoItem, PhotoType } from '../types'
 import { DateRange, Empty, ErrorBox, Field, Loading, Modal, PageHead, Pager, PromotorSelect, Segmented, StatusPill } from '../ui'
 
-type Reviewed = 'pendentes' | 'avaliadas' | 'todas'
+type AuditFilter = 'pendentes' | 'auditadas' | 'todas'
 const PAGE_SIZE = 48
-
-const metaLabels: Record<string, string> = {
-  produto: 'Produto',
-  validade: 'Validade',
-  quantidade: 'Quantidade',
-  avisoIntervaloCurto: 'Aviso de foto rápida',
-  minutosAposAntes: 'Minutos após a foto de antes',
-}
-
-function metaValue(key: string, value: unknown) {
-  if (key === 'validade') return fmtDate(String(value))
-  if (key === 'avisoIntervaloCurto') return value ? 'o app avisou e o promotor confirmou que é de depois' : 'não'
-  if (key === 'minutosAposAntes') return `${String(value).replace('.', ',')} min`
-  return String(value)
-}
 
 export function PhotosPage() {
   const [range, setRange] = useState({ from: addDays(today(), -6), to: today() })
   const [promotorId, setPromotorId] = useState('')
   const [type, setType] = useState<PhotoType | ''>('')
-  const [reviewed, setReviewed] = useState<Reviewed>('pendentes')
+  const [status, setStatus] = useState<AuditFilter>('pendentes')
   const [page, setPage] = useState(1)
   const [openIndex, setOpenIndex] = useState<number | null>(null)
-  // Notas salvas com o visualizador aberto: a lista só é recarregada ao fechar, para a foto não
-  // sumir da tela (no filtro "Sem nota") logo depois de salvar
-  const [localReviews, setLocalReviews] = useState<Record<string, Pick<PhotoItem, 'score' | 'reviewNotes'>>>({})
+  // Fotos auditadas com o visualizador aberto: a lista só é recarregada ao fechar, para a foto não
+  // sumir da tela (no filtro "Pendentes") logo depois de aprovar ou reprovar
+  const [localAudits, setLocalAudits] = useState<Record<string, PhotoItem>>({})
   const qc = useQueryClient()
 
-  const filters = { ...range, promotorId, type, reviewed: reviewed === 'todas' ? undefined : reviewed === 'avaliadas', page, pageSize: PAGE_SIZE }
+  const filters = { ...range, promotorId, type, status, page, pageSize: PAGE_SIZE }
   const query = useQuery({
     queryKey: ['photos', filters],
     queryFn: () => api<Paged<PhotoItem>>('/admin/photos', { query: filters }),
   })
-  const items = (query.data?.items ?? []).map((p) => (localReviews[p.id] ? { ...p, ...localReviews[p.id] } : p))
+  const items = (query.data?.items ?? []).map((p) => localAudits[p.id] ?? p)
   const resetPage = <T,>(fn: (v: T) => void) => (v: T) => {
     fn(v)
     setPage(1)
@@ -48,7 +35,10 @@ export function PhotosPage() {
 
   return (
     <div>
-      <PageHead title="Avaliar fotos" description="Veja as fotos dos atendimentos, dê uma nota e registre observações. As decisões dos vendedores aparecem ao lado da foto." />
+      <PageHead
+        title="Avaliar fotos"
+        description="Aprove ou reprove as fotos dos atendimentos; a reprovação exige justificativa. É a mesma auditoria do app do supervisor (aba Auditoria de fotos): o que você decide aqui aparece lá, e vice-versa. As decisões dos vendedores aparecem junto da foto."
+      />
       <div className="toolbar">
         <DateRange from={range.from} to={range.to} onChange={resetPage(setRange)} />
         <PromotorSelect value={promotorId} onChange={resetPage(setPromotorId)} />
@@ -62,19 +52,21 @@ export function PhotosPage() {
             ))}
           </select>
         </Field>
-        <Segmented<Reviewed>
-          value={reviewed}
-          onChange={resetPage(setReviewed)}
+        <Segmented<AuditFilter>
+          value={status}
+          onChange={resetPage(setStatus)}
           options={[
-            { value: 'pendentes', label: 'Sem nota' },
-            { value: 'avaliadas', label: 'Avaliadas' },
+            { value: 'pendentes', label: 'Pendentes' },
+            { value: 'auditadas', label: 'Auditadas por você' },
             { value: 'todas', label: 'Todas' },
           ]}
         />
       </div>
       {query.isLoading && <Loading />}
       <ErrorBox error={query.error} />
-      {query.data && items.length === 0 && <Empty>{reviewed === 'pendentes' ? 'Todas as fotos do período já têm nota.' : 'Nenhuma foto no período.'}</Empty>}
+      {query.data && items.length === 0 && (
+        <Empty>{status === 'pendentes' ? 'Você já aprovou ou reprovou todas as fotos do período.' : 'Nenhuma foto no período.'}</Empty>
+      )}
       <div className="photo-grid">
         {items.map((p, i) => (
           <button key={p.id} className="photo-card" onClick={() => setOpenIndex(i)}>
@@ -82,17 +74,19 @@ export function PhotosPage() {
             <div className="photo-card-body">
               <div className="photo-card-top">
                 <span className="chip">{photoTypeLabel[p.type]}</span>
-                {p.score != null && <span className="score num">{p.score}</span>}
+                {p.myAudit ? <StatusPill status={p.myAudit.status} label={`Você: ${auditLabel[p.myAudit.status].toLowerCase()}`} /> : <span className="chip warn">Pendente</span>}
               </div>
               <strong title={p.client.name}>{p.client.name}</strong>
               <span className="muted">
                 {p.promotor.name}, {fmtDate(p.visit.date)}
               </span>
-              {p.audits.length > 0 && (
+              {p.audits.some((a) => a.id !== p.myAudit?.id) && (
                 <span className="btn-row" style={{ gap: 4 }}>
-                  {p.audits.map((a) => (
-                    <StatusPill key={a.id} status={a.status} label={`${a.auditor.name.split(' ')[0]}: ${a.status === 'APROVADA' ? 'aprovou' : 'reprovou'}`} />
-                  ))}
+                  {p.audits
+                    .filter((a) => a.id !== p.myAudit?.id)
+                    .map((a) => (
+                      <StatusPill key={a.id} status={a.status} label={`${a.auditor.name.split(' ')[0]}: ${a.status === 'APROVADA' ? 'aprovou' : 'reprovou'}`} />
+                    ))}
                 </span>
               )}
             </div>
@@ -102,16 +96,21 @@ export function PhotosPage() {
       {query.data && <Pager page={page} pageSize={PAGE_SIZE} total={query.data.total} onPage={setPage} />}
       {openIndex != null && items[openIndex] && (
         <PhotoViewer
+          // Cada foto abre o visualizador do zero (sem reprovação em andamento da anterior)
+          key={items[openIndex].id}
           photo={items[openIndex]}
           hasPrev={openIndex > 0}
           hasNext={openIndex < items.length - 1}
           onPrev={() => setOpenIndex(openIndex - 1)}
           onNext={() => setOpenIndex(openIndex + 1)}
-          onSaved={(id, review) => setLocalReviews((r) => ({ ...r, [id]: review }))}
+          onSaved={(updated) => {
+            setLocalAudits((r) => ({ ...r, [updated.id]: updated }))
+            qc.invalidateQueries({ queryKey: ['dashboard'] })
+          }}
           onClose={() => {
             setOpenIndex(null)
-            if (Object.keys(localReviews).length) {
-              setLocalReviews({})
+            if (Object.keys(localAudits).length) {
+              setLocalAudits({})
               qc.invalidateQueries({ queryKey: ['photos'] })
             }
           }}
@@ -136,49 +135,43 @@ function PhotoViewer({
   onPrev: () => void
   onNext: () => void
   onClose: () => void
-  onSaved: (id: string, review: Pick<PhotoItem, 'score' | 'reviewNotes'>) => void
+  onSaved: (photo: PhotoItem) => void
 }) {
-  const qc = useQueryClient()
-  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<SettingsResponse>('/admin/settings') })
-  const max = Number(settings.data?.values.photoScoreMax ?? 10)
-  const [score, setScore] = useState<number | null>(photo.score)
-  const [notes, setNotes] = useState(photo.reviewNotes ?? '')
-  const [saved, setSaved] = useState(false)
-
-  // Recarrega o formulário só ao trocar de foto (salvar não pode apagar o aviso de "salva")
-  useEffect(() => {
-    setScore(photo.score)
-    setNotes(photo.reviewNotes ?? '')
-    setSaved(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photo.id])
+  const [rejecting, setRejecting] = useState(false)
+  const [justification, setJustification] = useState('')
+  const [saved, setSaved] = useState<AuditStatus | null>(null)
 
   const save = useMutation({
-    mutationFn: () => api(`/admin/photos/${photo.id}/review`, { method: 'PATCH', body: { score, notes: notes || null } }),
-    onSuccess: () => {
-      setSaved(true)
-      onSaved(photo.id, { score, reviewNotes: notes || null })
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    mutationFn: (status: AuditStatus) =>
+      api<PhotoItem>(`/admin/photos/${photo.id}/audit`, { method: 'POST', body: { status, justification: status === 'REPROVADA' ? justification.trim() : undefined } }),
+    onSuccess: (updated, status) => {
+      onSaved(updated)
+      // Depois de decidir, passa para a próxima foto; na última, fica nela mostrando o que foi gravado
+      if (hasNext) onNext()
+      else {
+        setRejecting(false)
+        setSaved(status)
+      }
     },
   })
 
-  const saveAndNext = useCallback(async () => {
-    await save.mutateAsync()
-    if (hasNext) onNext()
-  }, [save, hasNext, onNext])
+  const canReject = justification.trim().length >= MIN_JUSTIFICATION
+  const approve = () => !save.isPending && save.mutate('APROVADA')
+  const confirmReject = () => canReject && !save.isPending && save.mutate('REPROVADA')
+  const startReject = () => {
+    setJustification(photo.myAudit?.status === 'REPROVADA' ? (photo.myAudit.justification ?? '') : '')
+    setRejecting(true)
+  }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'TEXTAREA') return
-      if (e.key === 'ArrowRight' && hasNext) onNext()
-      if (e.key === 'ArrowLeft' && hasPrev) onPrev()
-      if (/^[0-9]$/.test(e.key) && Number(e.key) <= max) setScore(Number(e.key))
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [hasNext, hasPrev, onNext, onPrev, max])
+  useViewerKeys({
+    ArrowRight: hasNext && onNext,
+    ArrowLeft: hasPrev && onPrev,
+    a: !rejecting && approve,
+    r: !rejecting && startReject,
+  })
 
-  const meta = Object.entries(photo.meta ?? {})
+  const others = photo.audits.filter((a) => a.id !== photo.myAudit?.id)
+  const mine = photo.myAudit
   return (
     <Modal
       wide
@@ -193,13 +186,26 @@ function PhotoViewer({
             Próxima
           </button>
           <span style={{ flex: 1 }} />
-          {saved && <span className="muted small">Avaliação salva</span>}
-          <button className="btn" onClick={() => save.mutate()} disabled={save.isPending}>
-            Salvar avaliação
-          </button>
-          <button className="btn primary" onClick={saveAndNext} disabled={save.isPending || !hasNext}>
-            Salvar e ir para a próxima
-          </button>
+          {saved && <span className="muted small">Foto {auditLabel[saved].toLowerCase()}.</span>}
+          {rejecting ? (
+            <>
+              <button className="btn" onClick={() => setRejecting(false)} disabled={save.isPending}>
+                Cancelar
+              </button>
+              <button className="btn reject" onClick={confirmReject} disabled={!canReject || save.isPending}>
+                {save.isPending ? 'Gravando…' : 'Confirmar reprovação'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn reject" onClick={startReject} disabled={save.isPending}>
+                Reprovar
+              </button>
+              <button className="btn approve" onClick={approve} disabled={save.isPending}>
+                {save.isPending ? 'Gravando…' : 'Aprovar'}
+              </button>
+            </>
+          )}
         </>
       }
     >
@@ -208,79 +214,31 @@ function PhotoViewer({
           <img src={apiUrl(photo.url)} alt={`${photoTypeLabel[photo.type]} em ${photo.client.name}`} />
         </a>
         <div className="stack">
-          <dl className="kv">
-            <dt>Cliente</dt>
-            <dd>
-              {photo.client.name}
-              {photo.client.city ? `, ${photo.client.city}` : ''}
-            </dd>
-            <dt>Promotor</dt>
-            <dd>{photo.promotor.name}</dd>
-            <dt>Tirada em</dt>
-            <dd>{fmtDateTime(photo.takenAt)}</dd>
-            {photo.task && (
-              <>
-                <dt>Atividade</dt>
-                <dd>{photo.task.title}</dd>
-              </>
-            )}
-            {meta.map(([k, v]) => (
-              <div key={k} style={{ display: 'contents' }}>
-                <dt>{metaLabels[k] ?? k}</dt>
-                <dd style={k === 'avisoIntervaloCurto' ? { color: 'var(--justified)', fontWeight: 600 } : undefined}>{metaValue(k, v)}</dd>
-              </div>
-            ))}
-            {photo.notes && (
-              <>
-                <dt>Observação</dt>
-                <dd>{photo.notes}</dd>
-              </>
-            )}
-            {!!photo.products?.length && (
-              <>
-                <dt>Produtos na foto</dt>
-                <dd>{photo.products.map((p) => p.name).join(', ')}</dd>
-              </>
-            )}
-          </dl>
-
-          {photo.audits.length > 0 && (
-            <div className="stack" style={{ gap: 8 }}>
-              <h3>Auditorias</h3>
-              {photo.audits.map((a) => (
-                <div key={a.id} className="small">
-                  <StatusPill status={a.status} label={a.status === 'APROVADA' ? 'Aprovada' : 'Reprovada'} /> por {a.auditor.name}
-                  {a.justification && <div className="muted">"{a.justification}"</div>}
-                  {a.review && (
-                    <div>
-                      Conferida pelo supervisor: <StatusPill status={a.review.verdict} label={a.review.verdict === 'CORRETA' ? 'correta' : 'incorreta'} />
-                      {a.review.comment && <span className="muted"> {a.review.comment}</span>}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <PhotoFacts client={photo.client} promotor={photo.promotor} takenAt={photo.takenAt} task={photo.task} meta={photo.meta} notes={photo.notes} products={photo.products} />
+          <AuditList audits={others} title="Auditorias de outras pessoas" />
 
           <div className="stack" style={{ gap: 8 }}>
-            <h3>Nota</h3>
-            <div className="score-picker" role="group" aria-label="Nota da foto">
-              {Array.from({ length: max + 1 }, (_, n) => (
-                <button key={n} className={score === n ? 'on' : ''} aria-pressed={score === n} onClick={() => setScore(score === n ? null : n)}>
-                  {n}
-                </button>
-              ))}
-            </div>
-            <span className="muted small">Atalhos: teclas 0 a 9 para a nota, setas para navegar.</span>
+            <h3>Sua auditoria</h3>
+            {mine ? (
+              <div className="small">
+                <StatusPill status={mine.status} label={auditLabel[mine.status]} /> em {fmtDateTime(mine.updatedAt)}
+                {mine.justification && <div className="muted">"{mine.justification}"</div>}
+                {!rejecting && <div className="muted">Pode alterar com os botões abaixo.</div>}
+              </div>
+            ) : (
+              !rejecting && <span className="muted small">Ainda não aprovada nem reprovada por você.</span>
+            )}
+            {rejecting && (
+              <JustificationBox
+                label="Por que a foto está reprovada?"
+                value={justification}
+                onChange={setJustification}
+                onSubmit={confirmReject}
+                placeholder="Ex.: foto escura, gôndola desorganizada, preço não aparece"
+              />
+            )}
+            {!rejecting && <span className="muted small">Atalhos: A aprova, R reprova, setas navegam. Depois de decidir, abre a próxima foto.</span>}
           </div>
-          <Field label="Observações">
-            <textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ex.: produtos sem frente, preço não aparece" />
-          </Field>
-          {photo.reviewedBy && (
-            <span className="muted small">
-              Última avaliação por {photo.reviewedBy.name} em {fmtDateTime(photo.reviewedAt)}
-            </span>
-          )}
           <ErrorBox error={save.error} />
         </div>
       </div>

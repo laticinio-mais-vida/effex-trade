@@ -1,10 +1,10 @@
 import { Image } from 'expo-image'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, RefreshControl, Text, View } from 'react-native'
+import { ActivityIndicator, FlatList, Keyboard, RefreshControl, Text, View } from 'react-native'
 import { Badge, Banner, Button, Card, EmptyState, Field, Muted, PickerSheet, Row, Segmented, styles } from '@/components/ui'
 import { FilterChip } from '@/features/audit/FilterChip'
-import { PhotoViewer } from '@/features/PhotoViewer'
+import { PhotoViewer, useViewerTyping } from '@/features/PhotoViewer'
 import { api, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
 import { emitBadgesChanged } from '@/lib/events'
@@ -186,11 +186,13 @@ function ReviewPanel({ audit, onReviewed }: { audit: VendorAudit; onReviewed: (a
   const correct = audit.status === 'APROVADA' ? 'reprovada' : 'aprovada'
 
   async function submit(verdict: 'CORRETA' | 'INCORRETA') {
+    Keyboard.dismiss()
     setBusy(verdict)
     setError(null)
     try {
       const updated = await api<VendorAudit>(`/supervisor/vendor-audits/${audit.id}/review`, {
-        body: { verdict, comment: comment.trim() || undefined },
+        // A explicação é da conferência incorreta (é ela que vai no PDF do vendedor)
+        body: { verdict, comment: verdict === 'INCORRETA' ? comment.trim() : undefined },
       })
       onReviewed(updated)
     } catch (e) {
@@ -200,8 +202,40 @@ function ReviewPanel({ audit, onReviewed }: { audit: VendorAudit; onReviewed: (a
     }
   }
 
+  // Escrevendo a justificativa, a caixa vai para o alto do visualizador e o teclado abre abaixo dela
+  useViewerTyping(marking)
+  const stopMarking = () => {
+    Keyboard.dismiss()
+    setMarking(false)
+  }
+
+  const decision = marking ? (
+    <>
+      <Field
+        label={`O que o vendedor errou? (a foto deveria ser ${correct})`}
+        value={comment}
+        onChangeText={setComment}
+        multiline
+        autoFocus
+        hint="Mínimo de 5 caracteres. Vai no PDF de correções para o vendedor."
+        style={{ minHeight: 80 }}
+      />
+      <Row>
+        <Button title="Voltar" variant="secondary" onPress={stopMarking} style={{ flex: 1 }} />
+        <Button title="Marcar incorreta" variant="danger" onPress={() => submit('INCORRETA')} loading={busy === 'INCORRETA'} disabled={comment.trim().length < 5} style={{ flex: 1 }} />
+      </Row>
+    </>
+  ) : (
+    <Row>
+      <Button title="Incorreta" variant="danger" onPress={() => setMarking(true)} style={{ flex: 1 }} />
+      <Button title="Correta" variant="success" onPress={() => submit('CORRETA')} loading={busy === 'CORRETA'} style={{ flex: 1 }} />
+    </Row>
+  )
+
   return (
     <>
+      {marking ? decision : null}
+      {marking && error ? <Banner tone="danger" text={error} /> : null}
       <Text style={styles.sectionTitle}>{audit.client.name}</Text>
       <Muted>
         {photoTypeLabels[audit.photo.type]} · visita {formatDate(audit.visit.date)} às {formatTime(audit.photo.takenAt)} · {audit.promotor.name}
@@ -221,27 +255,8 @@ function ReviewPanel({ audit, onReviewed }: { audit: VendorAudit; onReviewed: (a
           text={`Você marcou como ${audit.review.verdict === 'CORRETA' ? 'correta' : 'incorreta'}${audit.review.comment ? `: ${audit.review.comment}` : ''}. Pode alterar abaixo.`}
         />
       ) : null}
-      {marking ? (
-        <>
-          <Field
-            label={`O que o vendedor errou? (a foto deveria ser ${correct})`}
-            value={comment}
-            onChangeText={setComment}
-            multiline
-            hint="Mínimo de 5 caracteres. Vai no PDF de correções para o vendedor."
-          />
-          <Row>
-            <Button title="Voltar" variant="secondary" onPress={() => setMarking(false)} style={{ flex: 1 }} />
-            <Button title="Marcar incorreta" variant="danger" onPress={() => submit('INCORRETA')} loading={busy === 'INCORRETA'} disabled={comment.trim().length < 5} style={{ flex: 1 }} />
-          </Row>
-        </>
-      ) : (
-        <Row>
-          <Button title="Incorreta" variant="danger" onPress={() => setMarking(true)} style={{ flex: 1 }} />
-          <Button title="Correta" variant="success" onPress={() => submit('CORRETA')} loading={busy === 'CORRETA'} style={{ flex: 1 }} />
-        </Row>
-      )}
-      {error ? <Banner tone="danger" text={error} /> : null}
+      {marking ? null : decision}
+      {!marking && error ? <Banner tone="danger" text={error} /> : null}
     </>
   )
 }

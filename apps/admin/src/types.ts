@@ -238,6 +238,23 @@ export type Report = {
   rows: ReportRow[]
 }
 
+export type AuditStatus = 'APROVADA' | 'REPROVADA'
+export type ReviewVerdict = 'CORRETA' | 'INCORRETA'
+
+/** Conferência do supervisor sobre a auditoria de um vendedor */
+export type AuditReviewInfo = { verdict: ReviewVerdict; comment: string | null; supervisor: Ref; createdAt: string }
+
+/** Aprovação ou reprovação de uma foto (vendedor, supervisor ou administrador; pelo app ou pelo painel) */
+export type PhotoAuditInfo = {
+  id: string
+  status: AuditStatus
+  justification: string | null
+  auditor: Ref & { role: Role }
+  createdAt: string
+  updatedAt: string
+  review: AuditReviewInfo | null
+}
+
 export type PhotoItem = {
   id: string
   visitId: string
@@ -249,23 +266,36 @@ export type PhotoItem = {
   longitude: number | null
   notes: string | null
   meta: Record<string, unknown> | null
-  score: number | null
-  reviewNotes: string | null
-  reviewedAt: string | null
   products?: ProductRef[]
   visit: { id: string; date: string; status: VisitStatus }
   client: { id: string; name: string; city: string | null }
   promotor: Ref
   task: { id: string; title: string } | null
-  reviewedBy: Ref | null
-  audits: {
+  /** Aprovação ou reprovação de quem está no painel (a mesma do app) */
+  myAudit: PhotoAuditInfo | null
+  audits: PhotoAuditInfo[]
+}
+
+/** Auditoria de um vendedor para o supervisor conferir (GET /supervisor/vendor-audits) */
+export type VendorAudit = {
+  id: string
+  status: AuditStatus
+  justification: string | null
+  createdAt: string
+  vendedor: Ref
+  review: AuditReviewInfo | null
+  photo: {
     id: string
-    status: 'APROVADA' | 'REPROVADA'
-    justification: string | null
-    auditor: Ref & { role: Role }
-    createdAt: string
-    review: { verdict: 'CORRETA' | 'INCORRETA'; comment: string | null } | null
-  }[]
+    type: PhotoType
+    url: string
+    takenAt: string
+    notes: string | null
+    meta: Record<string, unknown> | null
+    products?: ProductRef[]
+  }
+  visit: { id: string; date: string }
+  client: { id: string; name: string; city: string | null }
+  promotor: Ref
 }
 
 export type PermissionRequest = {
@@ -292,10 +322,10 @@ export type AuditErrors = {
   stats: { audited: number; reviewed: number; incorrect: number; accuracy: number | null }
   items: {
     auditId: string
-    vendedorStatus: 'APROVADA' | 'REPROVADA'
+    vendedorStatus: AuditStatus
     vendedorJustification: string | null
     auditedAt: string
-    correctStatus: 'APROVADA' | 'REPROVADA'
+    correctStatus: AuditStatus
     supervisorComment: string | null
     supervisor: string
     reviewedAt: string

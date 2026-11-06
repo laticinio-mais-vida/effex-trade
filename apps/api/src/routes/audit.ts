@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, type AuthUser } from '../auth'
-import { AuditStatus, PhotoType, prisma, Prisma } from '../db'
+import { PhotoType, prisma, Prisma } from '../db'
 import { addDays, fromDbDate, toDbDate, todayIn } from '../lib/dates'
-import { conflict, notFound } from '../lib/errors'
+import { notFound } from '../lib/errors'
 import { parse, zDate, zId, zIdParam, zList, zPage } from '../lib/validate'
+import { auditBodySchema, saveAudit } from '../services/photo-audits'
 import { photoScope } from '../services/scope'
 import { serializePhoto } from '../services/serializers'
 
@@ -113,26 +114,11 @@ export async function auditRoutes(app: FastifyInstance) {
 
   app.post('/photos/:id', async (req) => {
     const { id } = parse(zIdParam, req.params)
-    const body = parse(
-      z
-        .object({ status: z.enum(AuditStatus), justification: z.string().trim().max(1000).optional() })
-        .refine((b) => b.status === 'APROVADA' || (b.justification?.length ?? 0) >= 5, {
-          message: 'informe a justificativa da reprovação (mínimo 5 caracteres)',
-          path: ['justification'],
-        }),
-      req.body,
-    )
+    const body = parse(auditBodySchema, req.body)
     const photo = await prisma.photo.findFirst({ where: { AND: [{ id }, await photoScope(req.user)] } })
     if (!photo) throw notFound('Foto')
 
-    const existing = await prisma.photoAudit.findUnique({ where: { photoId_auditorId: { photoId: id, auditorId: req.user.sub } }, include: { review: true } })
-    if (existing?.review) throw conflict('Esta auditoria já foi conferida pelo supervisor e não pode mais ser alterada.', 'AUDITORIA_CONFERIDA')
-
-    await prisma.photoAudit.upsert({
-      where: { photoId_auditorId: { photoId: id, auditorId: req.user.sub } },
-      create: { photoId: id, auditorId: req.user.sub, status: body.status, justification: body.justification },
-      update: { status: body.status, justification: body.justification },
-    })
+    await saveAudit(id, req.user.sub, body)
     const updated = await prisma.photo.findUniqueOrThrow({ where: { id }, include: auditPhotoInclude })
     return serializeAuditPhoto(updated, req.user.sub)
   })
