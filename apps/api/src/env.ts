@@ -7,6 +7,12 @@ function required(name: string) {
   return value
 }
 
+/** Valores separados por vírgula; vazio vira null (um [] no CORS liberaria nenhuma origem em vez de todas). */
+function list(value: string | undefined) {
+  const items = (value ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  return items.length ? items : null
+}
+
 export const env = {
   databaseUrl: required('DATABASE_URL'),
   jwtSecret: required('JWT_SECRET'),
@@ -22,7 +28,7 @@ export const env = {
   /** Chave da sincronização com o ERP (a mesma do sync/config.ini no computador da empresa). Vazia: /sync desligado. */
   syncKey: process.env.SYNC_KEY?.trim() || null,
   /** Origens liberadas no CORS, separadas por vírgula (ex.: https://effextrade.maisvida.cloud). Vazio: qualquer origem. */
-  corsOrigins: process.env.CORS_ORIGIN?.split(',').map((s) => s.trim()).filter(Boolean) || null,
+  corsOrigins: list(process.env.CORS_ORIGIN),
   /** true atrás de proxy (Caddy): o IP de quem acessa vem do X-Forwarded-For, para o limite de tentativas de login. */
   trustProxy: process.env.TRUST_PROXY === 'true',
 }
