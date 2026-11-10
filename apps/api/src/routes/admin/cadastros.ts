@@ -73,7 +73,17 @@ const clientFields = {
   latitude: zLat.optional(),
   longitude: zLng.optional(),
   active: z.boolean().optional(),
+  /** Dispensa da cerca eletrônica: check-in e check-out neste cliente de qualquer lugar */
+  geofenceExempt: z.boolean().optional(),
 }
+
+/** Liga ou desliga a dispensa da cerca do cliente, guardando quem mudou e quando (só quando muda). */
+function geofenceExemptData(current: boolean, next: boolean | undefined, userId: string) {
+  if (next === undefined || next === current) return {}
+  return { geofenceExempt: next, geofenceExemptById: userId, geofenceExemptAt: new Date() }
+}
+
+const clientExemptInclude = { geofenceExemptBy: { select: { name: true } } } satisfies Prisma.ClientInclude
 
 function assertCoordinates(body: { latitude?: number | null; longitude?: number | null }) {
   if ((body.latitude == null) !== (body.longitude == null)) throw badRequest('Informe a latitude e a longitude juntas.')
@@ -227,6 +237,8 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     /** Só os clientes das cidades deste promotor (roteiro) */
     promotorId: zId.optional(),
     active: zQueryBool.optional(),
+    /** true: só os dispensados da cerca eletrônica */
+    geofenceExempt: zQueryBool.optional(),
   })
 
   const clientWhere = async (user: AuthUser, q: z.infer<typeof clientQuery>): Promise<Prisma.ClientWhereInput> => {
@@ -244,6 +256,7 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
         q.city ? { cityKey: cityKey(q.city) } : {},
         q.located === true ? located : q.located === false ? unlocated : {},
         q.active !== undefined ? { active: q.active } : {},
+        q.geofenceExempt !== undefined ? { geofenceExempt: q.geofenceExempt } : {},
         q.search ? clientSearch(q.search) : {},
       ],
     }
@@ -255,7 +268,7 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     const [total, missingLocation, clients] = await Promise.all([
       prisma.client.count({ where }),
       prisma.client.count({ where: { AND: [await clientScope(req.user), unlocated, { active: true }] } }),
-      prisma.client.findMany({ where, orderBy: { name: 'asc' }, skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
+      prisma.client.findMany({ where, include: clientExemptInclude, orderBy: { name: 'asc' }, skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
     ])
     return { total, page: q.page, pageSize: q.pageSize, missingLocation, items: clients.map(serializeClient) }
   })
@@ -293,9 +306,10 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
   app.post('/clients', async (req) => {
     assertAdmin(req.user)
     if (await erpActive()) throw conflict('Os clientes vêm do ERP: cadastre o cliente no ERP e rode a sincronização.', 'CLIENTE_PELO_ERP')
-    const body = parse(z.object(clientFields), req.body)
+    const { geofenceExempt, ...body } = parse(z.object(clientFields), req.body)
     assertCoordinates(body)
-    return serializeClient(await prisma.client.create({ data: withCityKey({ ...body, ...panelLocation({}, body) }) }))
+    const data = { ...body, ...panelLocation({}, body), ...geofenceExemptData(false, geofenceExempt, req.user.sub) }
+    return serializeClient(await prisma.client.create({ data: withCityKey(data), include: clientExemptInclude }))
   })
 
   app.patch('/clients/:id', async (req) => {
@@ -314,10 +328,14 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
         )
       }
     }
-    // Cliente do ERP: só a localização muda aqui (e, mudando, a sincronização não a muda mais)
-    const { latitude: _lat, longitude: _lng, ...fields } = body
-    const data = { ...(client.erpId != null ? {} : fields), ...panelLocation(client, body) }
-    return serializeClient(await prisma.client.update({ where: { id }, data: withCityKey(data) }))
+    // Cliente do ERP: só a localização e a dispensa da cerca mudam aqui (e a localização mudada a sincronização não muda mais)
+    const { latitude: _lat, longitude: _lng, geofenceExempt, ...fields } = body
+    const data = {
+      ...(client.erpId != null ? {} : fields),
+      ...panelLocation(client, body),
+      ...geofenceExemptData(client.geofenceExempt, geofenceExempt, req.user.sub),
+    }
+    return serializeClient(await prisma.client.update({ where: { id }, data: withCityKey(data), include: clientExemptInclude }))
   })
 
   /**

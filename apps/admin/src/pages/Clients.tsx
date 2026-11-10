@@ -12,7 +12,8 @@ const PAGE_SIZE = 50
 
 type Located = 'todos' | 'com' | 'sem'
 type Situation = 'ativos' | 'inativos' | 'todos'
-type Filters = { search: string; state: string; city: string; located: Located; active: Situation }
+type Fence = 'todos' | 'sem'
+type Filters = { search: string; state: string; city: string; located: Located; active: Situation; fence: Fence }
 
 type Form = {
   name: string
@@ -22,9 +23,10 @@ type Form = {
   latitude: string
   longitude: string
   active: boolean
+  geofenceExempt: boolean
 }
 
-const emptyForm: Form = { name: '', legalName: '', city: '', state: 'BA', latitude: '', longitude: '', active: true }
+const emptyForm: Form = { name: '', legalName: '', city: '', state: 'BA', latitude: '', longitude: '', active: true, geofenceExempt: false }
 
 const toNumber = (v: string) => Number(v.trim().replace(',', '.'))
 /** "-12.9714, -38.5014" (copiado do Google Maps) ou "-12,9714; -38,5014" */
@@ -43,13 +45,14 @@ const filterQuery = (f: Filters) => ({
   city: f.city,
   located: f.located === 'todos' ? undefined : f.located === 'com',
   active: f.active === 'todos' ? undefined : f.active === 'ativos',
+  geofenceExempt: f.fence === 'sem' ? true : undefined,
 })
 
 export function ClientsPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'ADMIN'
   const [search, setSearch] = useState('')
-  const [filters, setFilters] = useState<Filters>({ search: '', state: '', city: '', located: 'todos', active: 'ativos' })
+  const [filters, setFilters] = useState<Filters>({ search: '', state: '', city: '', located: 'todos', active: 'ativos', fence: 'todos' })
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<Client | 'new' | null>(null)
   const [importing, setImporting] = useState(false)
@@ -128,7 +131,7 @@ export function ClientsPage() {
           <button className="btn small" onClick={() => setFilter({ located: 'sem', active: 'ativos' })}>
             Ver só eles
           </button>
-          <button className="btn small" disabled={download.isPending} onClick={() => download.mutate({ search: '', state: '', city: '', located: 'sem', active: 'ativos' })}>
+          <button className="btn small" disabled={download.isPending} onClick={() => download.mutate({ search: '', state: '', city: '', located: 'sem', active: 'ativos', fence: 'todos' })}>
             Baixar planilha deles
           </button>
         </div>
@@ -187,6 +190,16 @@ export function ClientsPage() {
             ]}
           />
         </Field>
+        <Field label="Cerca eletrônica">
+          <Segmented<Fence>
+            value={filters.fence}
+            onChange={(fence) => setFilter({ fence })}
+            options={[
+              { value: 'todos', label: 'Todos' },
+              { value: 'sem', label: 'Sem cerca' },
+            ]}
+          />
+        </Field>
       </div>
       {query.isLoading && <Loading />}
       <ErrorBox error={query.error ?? download.error} />
@@ -210,6 +223,11 @@ export function ClientsPage() {
                     {c.erpId != null && (
                       <span className="chip" title="Cadastro vindo do ERP" style={{ marginLeft: 8 }}>
                         ERP {c.erpId}
+                      </span>
+                    )}
+                    {c.geofenceExempt && (
+                      <span className="chip warn" title="Dispensado da cerca eletrônica: check-in e check-out de qualquer lugar" style={{ marginLeft: 8 }}>
+                        Sem cerca
                       </span>
                     )}
                     {c.legalName && c.legalName !== c.name && <div className="small muted">{c.legalName}</div>}
@@ -269,6 +287,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
           latitude: client.latitude != null ? String(client.latitude) : '',
           longitude: client.longitude != null ? String(client.longitude) : '',
           active: client.active,
+          geofenceExempt: client.geofenceExempt,
         }
       : emptyForm,
   )
@@ -294,8 +313,8 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
     mutationFn: () => {
       const point = hasPoint ? { latitude: lat, longitude: lng } : {}
       const body = fromErp
-        ? point
-        : { name: form.name, legalName: form.legalName || null, city: form.city, state: form.state, ...point, active: form.active }
+        ? { ...point, geofenceExempt: form.geofenceExempt }
+        : { name: form.name, legalName: form.legalName || null, city: form.city, state: form.state, ...point, active: form.active, geofenceExempt: form.geofenceExempt }
       return client ? api(`/admin/clients/${client.id}`, { method: 'PATCH', body }) : api('/admin/clients', { method: 'POST', body })
     },
     onSuccess: () => {
@@ -319,7 +338,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
             Cancelar
           </button>
           <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending || invalid || halfPoint || removingPoint}>
-            {client ? (fromErp ? 'Salvar localização' : 'Salvar cliente') : 'Cadastrar cliente'}
+            {client ? 'Salvar cliente' : 'Cadastrar cliente'}
           </button>
         </>
       }
@@ -377,6 +396,22 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
             <input type="checkbox" checked={form.active} disabled={fromErp} onChange={(e) => set({ active: e.target.checked })} />
             Cliente ativo (inativos saem dos roteiros dos próximos dias)
           </label>
+          <label className="check full">
+            <input type="checkbox" checked={form.geofenceExempt} onChange={(e) => set({ geofenceExempt: e.target.checked })} />
+            Dispensar a cerca eletrônica: check-in e check-out neste cliente de qualquer lugar
+          </label>
+          {form.geofenceExempt && (
+            <span className="small full" style={{ color: 'var(--justified)' }}>
+              Qualquer promotor poderá dar entrada neste cliente sem estar nele. Cada check-in feito fora do raio de {radius} m fica marcado como "sem cerca" no relatório
+              de execução.
+            </span>
+          )}
+          {client?.geofenceExemptAt && (
+            <span className="small muted full">
+              {client.geofenceExempt ? 'Cerca dispensada' : 'Cerca voltou a ser exigida'}
+              {client.geofenceExemptBy ? ` por ${client.geofenceExemptBy}` : ''} em {fmtDateTime(client.geofenceExemptAt)}.
+            </span>
+          )}
         </div>
         <div className="stack" style={{ gap: 8 }}>
           <div style={{ height: 360, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--rule)' }}>

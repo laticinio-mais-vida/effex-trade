@@ -15,6 +15,7 @@ import {
 import { alertInclude, checkLunchAlerts, serializeAlert } from '../services/alerts'
 import { cancelScheduled, listScheduled, scheduleVisit, SCHEDULE_DAYS_AHEAD } from '../services/scheduled-visits'
 import { clientSearch, located } from '../services/clients'
+import { contestListQuery, decideBodySchema, decideContest, listContests, pendingContestsCount } from '../services/contests'
 import { areaWhere, clientScope, loadAreas, promotorScope } from '../services/scope'
 import { zModules } from '../services/visit-structure'
 import { serializeClient, serializePhoto, serializeVisit } from '../services/serializers'
@@ -54,12 +55,13 @@ export async function supervisorRoutes(app: FastifyInstance) {
 
   app.get('/summary', async (req) => {
     await checkLunchAlerts()
-    const [pendingRequests, pendingVendorAudits, openAlerts] = await Promise.all([
+    const [pendingRequests, pendingVendorAudits, openAlerts, pendingContests] = await Promise.all([
       prisma.permissionRequest.count({ where: { status: 'PENDENTE', date: toDbDate(todayIn()), promotor: promotorScope(req.user) } }),
       prisma.photoAudit.count({ where: { review: null, auditor: vendedorScope(req.user) } }),
       prisma.alert.count({ where: { acknowledgedAt: null, promotor: promotorScope(req.user) } }),
+      pendingContestsCount(req.user),
     ])
-    return { pendingRequests, pendingVendorAudits, openAlerts }
+    return { pendingRequests, pendingVendorAudits, openAlerts, pendingContests }
   })
 
   /** Alertas da equipe (ex.: almoço acima do limite). "abertos" = ainda sem "ciente". */
@@ -272,5 +274,18 @@ export async function supervisorRoutes(app: FastifyInstance) {
       update: { supervisorId: req.user.sub, verdict: body.verdict, comment },
     })
     return serializeVendorAudit(await prisma.photoAudit.findUniqueOrThrow({ where: { id }, include: vendorAuditInclude }))
+  })
+
+  // ---------------- Contestações dos promotores ----------------
+  /** Contestações dos promotores da equipe (administrador: todas), no app do supervisor e no painel. */
+  app.get('/contests', async (req) => {
+    const q = parse(contestListQuery.extend(zPage), req.query)
+    return listContests(req.user, q, q.page, q.pageSize)
+  })
+
+  /** Aceita (a foto passa a valer como aprovada) ou nega (resposta obrigatória). */
+  app.post('/contests/:id/decide', async (req) => {
+    const { id } = parse(zIdParam, req.params)
+    return decideContest(req.user, id, parse(decideBodySchema, req.body))
   })
 }

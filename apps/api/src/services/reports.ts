@@ -225,6 +225,9 @@ function toRow(v: ReportVisit, travel?: Travel) {
     gpsPending: !!travel && !v.workDay.gpsKmAt,
     checkinDistance: v.checkinDistance,
     geofenceWaived: v.geofenceWaived,
+    /** Check-in fora do raio aceito porque o cliente está dispensado da cerca */
+    checkinWithoutGeofence: v.checkinWithoutGeofence,
+    clientGeofenceExempt: v.client.geofenceExempt,
     photosWaived: v.photosWaived,
     autoClosed: v.autoClosed,
     photoCount: v._count.photos,
@@ -267,6 +270,7 @@ function summarize(rows: Row[]) {
       totalGpsEstimatedKm: sumOrNull(list.map((r) => r.gpsEstimatedKm)),
       gpsPendingDays: new Set(list.filter((r) => r.gpsPending).map((r) => r.date)).size,
       geofenceWaivers: list.filter((r) => r.geofenceWaived).length,
+    checkinsWithoutGeofence: list.filter((r) => r.checkinWithoutGeofence).length,
       photoWaivers: list.filter((r) => r.photosWaived).length,
       autoClosed: list.filter((r) => r.autoClosed).length,
       ruptures: list.reduce((s, r) => s + r.ruptures.length, 0),

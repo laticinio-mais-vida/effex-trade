@@ -738,6 +738,113 @@ r = await call(admin, 'GET', `/admin/audit-errors/pdf?vendedorId=${vend.id}`)
 const pdf = Buffer.from(r.data as ArrayBuffer)
 check('PDF gerado', r.status === 200 && pdf.subarray(0, 4).toString() === '%PDF', { status: r.status, size: pdf.length })
 
+console.log('Cliente dispensado da cerca eletrônica')
+const promotor1 = await login('promotor1')
+const promotor1Id = (await call(promotor1, 'GET', '/auth/me')).data.id
+const day1 = (await call(promotor1, 'GET', '/promotor/day')).data
+const exemptVisit = day1.visits.find((v: any) => v.id === day1.nextVisitId) ?? day1.visits.find((v: any) => v.status === 'PENDENTE')
+const exemptClient = exemptVisit.client
+const exemptFar: Loc = { latitude: exemptClient.latitude + 0.05, longitude: exemptClient.longitude }
+r = await call(promotor1, 'POST', `/promotor/visits/${exemptVisit.id}/checkin`, checkinForm(exemptFar))
+check('sem dispensa, check-in longe do cliente é bloqueado', r.status === 422 && r.data.code === 'FORA_DA_CERCA', r.data)
+r = await call(promotor1, 'PATCH', `/admin/clients/${exemptClient.id}`, { geofenceExempt: true })
+check('promotor não dispensa a cerca', r.status === 403, r.data)
+r = await call(supervisor, 'PATCH', `/admin/clients/${exemptClient.id}`, { geofenceExempt: true })
+check('supervisor dispensa a cerca do cliente (guarda quem e quando)', r.status === 200 && r.data.geofenceExempt === true && r.data.geofenceExemptBy === 'Renata Moura' && !!r.data.geofenceExemptAt, r.data)
+r = await call(admin, 'GET', '/admin/clients?geofenceExempt=true')
+check('filtro dos clientes sem cerca', r.status === 200 && r.data.items.some((c: any) => c.id === exemptClient.id && c.geofenceExemptBy === 'Renata Moura'), r.data.total)
+r = await call(promotor1, 'POST', '/promotor/requests', { type: 'CHECKIN_FORA_CERCA', visitId: exemptVisit.id, reason: 'GPS ruim na loja', ...exemptFar })
+check('liberação de cerca desnecessária recusada', r.status === 409, r.data)
+r = await call(promotor1, 'POST', `/promotor/visits/${exemptVisit.id}/checkin`, checkinForm(exemptFar))
+check(
+  'check-in de longe no cliente sem cerca',
+  r.status === 200 && r.data.status === 'EM_ATENDIMENTO' && r.data.checkinWithoutGeofence === true && r.data.client.geofenceExempt === true,
+  r.data,
+)
+r = await call(admin, 'GET', `/admin/reports/visits?promotorId=${promotor1Id}&from=${today}&to=${today}`)
+check(
+  'relatório marca o check-in sem cerca',
+  r.status === 200 && r.data.rows.some((x: any) => x.id === exemptVisit.id && x.checkinWithoutGeofence) && r.data.summary[0]?.checkinsWithoutGeofence >= 1,
+  r.data.summary,
+)
+r = await call(admin, 'PATCH', `/admin/clients/${exemptClient.id}`, { geofenceExempt: false })
+check('administrador volta a exigir a cerca', r.status === 200 && r.data.geofenceExempt === false && r.data.geofenceExemptBy === 'Administrador', r.data)
+
+console.log('Fotos recusadas e contestações')
+const vendedorUserId = (await call(vendedor, 'GET', '/auth/me')).data.id
+r = await call(admin, 'GET', `/admin/photos?promotorId=${promotorId}&status=todas&pageSize=200`)
+// Fotos de Salvador (o vendedor1 audita) sem reprovação e sem conferência, para o teste começar do zero
+const clean = (r.data.items as any[]).filter((p) => p.client.city === 'Salvador' && p.audits.every((a: any) => a.status === 'APROVADA' && !a.review))
+check('fotos para o teste de contestação', clean.length >= 4, clean.length)
+const [photoA, photoB, photoV, photoOk] = clean
+for (const p of [photoA, photoB]) await call(admin, 'POST', `/admin/photos/${p.id}/audit`, { status: 'REPROVADA', justification: 'Gôndola desorganizada' })
+r = await call(vendedor, 'POST', `/audit/photos/${photoV.id}`, { status: 'REPROVADA', justification: 'Foto tirada muito de perto' })
+check('vendedor reprova foto do promotor', r.status === 200 && r.data.myAudit.status === 'REPROVADA', r.data)
+r = await call(promotor, 'GET', '/promotor/rejected')
+const rejectedIds = new Set((r.data.items as any[]).map((p) => p.id))
+check(
+  'aba Recusadas mostra as reprovações com a justificativa',
+  r.status === 200 &&
+    [photoA.id, photoB.id, photoV.id].every((id) => rejectedIds.has(id)) &&
+    r.data.items.find((p: any) => p.id === photoV.id)?.rejections.some((x: any) => x.justification === 'Foto tirada muito de perto' && x.auditor.role === 'VENDEDOR') &&
+    r.data.remainingToday === 2 &&
+    !rejectedIds.has(photoOk.id),
+  { ids: [...rejectedIds].length, remaining: r.data.remainingToday },
+)
+r = await call(promotor, 'POST', `/promotor/photos/${photoA.id}/contest`, { reason: 'ok' })
+check('contestação sem explicação recusada', r.status === 400, r.data)
+r = await call(promotor, 'POST', `/promotor/photos/${photoOk.id}/contest`, { reason: 'Esta foto está ótima' })
+check('foto não reprovada não é contestada', r.status === 409 && r.data.code === 'FOTO_NAO_REPROVADA', r.data)
+r = await call(promotor2, 'POST', `/promotor/photos/${photoA.id}/contest`, { reason: 'Não é minha mas quero contestar' })
+check('outro promotor não contesta a foto', r.status === 404, r.data)
+r = await call(promotor, 'POST', `/promotor/photos/${photoA.id}/contest`, { reason: 'A gôndola estava arrumada, só a foto saiu torta' })
+check('promotor contesta (1 de 2 hoje)', r.status === 200 && r.data.item.contest?.status === 'PENDENTE' && r.data.item.canContest === false && r.data.remainingToday === 1, r.data)
+r = await call(promotor, 'POST', `/promotor/photos/${photoA.id}/contest`, { reason: 'De novo a mesma foto' })
+check('mesma foto não é contestada duas vezes', r.status === 409 && r.data.code === 'JA_CONTESTADA', r.data)
+r = await call(promotor, 'POST', `/promotor/photos/${photoV.id}/contest`, { reason: 'A foto mostra a gôndola inteira' })
+check('promotor contesta (2 de 2 hoje)', r.status === 200 && r.data.remainingToday === 0, r.data)
+r = await call(promotor, 'POST', `/promotor/photos/${photoB.id}/contest`, { reason: 'Terceira contestação do dia' })
+check('terceira contestação no mesmo dia recusada', r.status === 409 && r.data.code === 'LIMITE_CONTESTACOES', r.data)
+
+r = await call(supervisor, 'GET', '/supervisor/contests?state=pendentes')
+const contestA = (r.data.items as any[]).find((c) => c.photo.id === photoA.id)
+const contestV = (r.data.items as any[]).find((c) => c.photo.id === photoV.id)
+check('supervisor vê as contestações da equipe', r.status === 200 && !!contestA && !!contestV && contestA.reason.startsWith('A gôndola'), r.data.total)
+check('contador de contestações no app e no painel', (await call(supervisor, 'GET', '/supervisor/summary')).data.pendingContests >= 2 && (await call(supervisor, 'GET', '/admin/dashboard')).data.pendingContests >= 2)
+r = await call(supervisor, 'POST', `/supervisor/contests/${contestA.id}/decide`, { decision: 'NEGADA' })
+check('negar sem resposta recusado', r.status === 400, r.data)
+r = await call(supervisor, 'POST', `/supervisor/contests/${contestA.id}/decide`, { decision: 'NEGADA', response: 'A foto não mostra os preços; tire de mais longe.' })
+check('supervisor nega a contestação', r.status === 200 && r.data.status === 'NEGADA' && r.data.decidedBy?.name === 'Renata Moura', r.data)
+r = await call(supervisor, 'POST', `/supervisor/contests/${contestA.id}/decide`, { decision: 'ACEITA' })
+check('contestação decidida não muda', r.status === 409 && r.data.code === 'CONTESTACAO_DECIDIDA', r.data)
+r = await call(supervisor, 'POST', `/supervisor/contests/${contestV.id}/decide`, { decision: 'ACEITA' })
+const vendorAuditV = r.data.audits?.find((a: any) => a.auditor.id === vendedorUserId)
+check('supervisor aceita: reprovação do vendedor fica incorreta', r.status === 200 && r.data.status === 'ACEITA' && vendorAuditV?.review?.verdict === 'INCORRETA', r.data)
+r = await call(vendedor, 'POST', `/audit/photos/${photoV.id}`, { status: 'APROVADA' })
+check('vendedor não muda a auditoria depois da contestação aceita', r.status === 409 && r.data.code === 'AUDITORIA_CONFERIDA', r.data)
+r = await call(admin, 'GET', `/admin/audit-errors?vendedorId=${vendedorUserId}`)
+check('contestação aceita entra nas correções do vendedor', r.status === 200 && r.data.items.some((x: any) => x.auditId === vendorAuditV.id && /contestação/.test(x.supervisorComment ?? '')), r.data.stats)
+r = await call(promotor, 'GET', '/promotor/rejected')
+const seenA = r.data.items.find((p: any) => p.id === photoA.id)
+const seenV = r.data.items.find((p: any) => p.id === photoV.id)
+check(
+  'promotor vê o resultado das contestações',
+  seenA?.contest?.status === 'NEGADA' && seenA.contest.response?.startsWith('A foto não mostra') && seenA.rejections.length === 1 && seenV?.contest?.status === 'ACEITA' && seenV.rejections.length === 0,
+  { seenA, seenV },
+)
+// Aceitar a contestação de uma reprovação do administrador vira aprovação
+r = await call(admin, 'GET', `/admin/photos?promotorId=${promotor2Id}&status=todas&pageSize=200`)
+const photoP2 = (r.data.items as any[]).find((p) => p.audits.every((a: any) => a.status === 'APROVADA' && !a.review))
+await call(admin, 'POST', `/admin/photos/${photoP2.id}/audit`, { status: 'REPROVADA', justification: 'Produto fora do lugar' })
+r = await call(promotor2, 'POST', `/promotor/photos/${photoP2.id}/contest`, { reason: 'O produto estava no lugar certo' })
+check('outro promotor contesta a foto dele', r.status === 200, r.data)
+r = await call(admin, 'POST', `/supervisor/contests/${r.data.item.contest.id}/decide`, { decision: 'ACEITA', response: 'Conferi de novo, está certo.' })
+check(
+  'aceitar reprovação do administrador vira aprovação',
+  r.status === 200 && r.data.audits.some((a: any) => a.auditor.role === 'ADMIN' && a.status === 'APROVADA' && /contestação/.test(a.justification)),
+  r.data.audits,
+)
+
 console.log('Usuários de cada perfil e cidades atendidas')
 for (const role of ['PROMOTOR', 'VENDEDOR', 'SUPERVISOR', 'ADMIN']) {
   const login = `teste.${role.toLowerCase()}`

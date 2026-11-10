@@ -21,6 +21,7 @@ const between = (a: number, b: number) => a + Math.floor(rand() * (b - a + 1))
 
 async function clear() {
   await prisma.erpSync.deleteMany()
+  await prisma.photoContest.deleteMany()
   await prisma.auditReview.deleteMany()
   await prisma.photoAudit.deleteMany()
   await prisma.photo.deleteMany()
@@ -617,12 +618,39 @@ async function main() {
     }
   }
 
+  // Contestações dos promotores: fotos reprovadas pelo vendedor (e não conferidas como incorretas). Duas esperando o
+  // supervisor e uma negada, para ver as telas Recusadas (promotor) e Contestações (supervisor e painel)
+  const rejected = await prisma.photo.findMany({
+    where: { audits: { some: { status: 'REPROVADA', auditor: { role: 'VENDEDOR' }, OR: [{ review: null }, { review: { verdict: 'CORRETA' } }] } } },
+    include: { visit: true },
+    orderBy: { takenAt: 'desc' },
+    take: 3,
+  })
+  const contestReasons = ['A gôndola estava completa; a luz da loja deixou a foto escura.', 'Os produtos estão na frente, a foto mostra a prateleira inteira.', 'Repus o estoque antes da foto, está tudo no lugar.']
+  for (const [i, photo] of rejected.entries()) {
+    await prisma.photoContest.create({
+      data: {
+        photoId: photo.id,
+        promotorId: photo.visit.promotorId,
+        reason: contestReasons[i]!,
+        // No dia da foto (dias anteriores): não conta no limite de 2 contestações de hoje
+        createdAt: new Date(photo.takenAt.getTime() + 2 * 3_600_000),
+        ...(i === 2 ? { status: 'NEGADA', response: 'A foto não mostra os preços. Tire de mais longe, com a etiqueta aparecendo.', decidedById: supervisor.id, decidedAt: new Date() } : {}),
+      },
+    })
+  }
+
+  // Um cliente dispensado da cerca eletrônica (ex.: loja dentro de shopping, onde o GPS falha)
+  const exempt = await prisma.client.findFirst({ where: { latitude: { not: null }, city: 'Lauro de Freitas', routeItems: { none: {} } }, orderBy: { name: 'asc' } })
+  if (exempt) await prisma.client.update({ where: { id: exempt.id }, data: { geofenceExempt: true, geofenceExemptById: supervisor.id, geofenceExemptAt: new Date() } })
+
   const counts = {
     usuarios: await prisma.user.count(),
     clientes: await prisma.client.count(),
     visitas: await prisma.visit.count(),
     fotos: await prisma.photo.count(),
     auditorias: audits,
+    contestacoes: rejected.length,
     pings: await prisma.locationPing.count(),
   }
   console.log('[seed] concluído', counts)

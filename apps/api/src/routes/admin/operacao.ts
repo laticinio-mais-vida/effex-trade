@@ -8,6 +8,7 @@ import { parse, zDate, zId, zIdParam, zPage } from '../../lib/validate'
 import { ALERT_LUNCH, alertInclude, checkLunchAlerts, serializeAlert } from '../../services/alerts'
 import { auditErrorsData, auditErrorsPdf } from '../../services/audit-errors'
 import { requestInclude, serializeRequest } from '../../services/permissions'
+import { pendingContestsCount } from '../../services/contests'
 import { auditBodySchema, saveAudit } from '../../services/photo-audits'
 import { visitReport } from '../../services/reports'
 import { assertAdmin, inAreas, promotorScope } from '../../services/scope'
@@ -130,13 +131,14 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
     await checkLunchAlerts()
     const ids = await scopedPromotorIds(req.user)
     const alerts = await prisma.alert.findMany({ where: { acknowledgedAt: null, promotorId: { in: ids } }, include: alertInclude, orderBy: { createdAt: 'desc' } })
-    const [byStatus, pendingRequests, photosToday, photosUnreviewed, onlineNow] = await Promise.all([
+    const [byStatus, pendingRequests, photosToday, photosUnreviewed, onlineNow, pendingContests] = await Promise.all([
       prisma.visit.groupBy({ by: ['status'], where: { date: toDbDate(today), promotorId: { in: ids }, status: { not: 'CANCELADA' } }, _count: true }),
       prisma.permissionRequest.count({ where: { status: 'PENDENTE', date: toDbDate(today), promotorId: { in: ids } } }),
       prisma.photo.count({ where: { visit: { date: toDbDate(today), promotorId: { in: ids } } } }),
       // Fotos da semana que quem está no painel ainda não aprovou nem reprovou
       prisma.photo.count({ where: { audits: { none: { auditorId: req.user.sub } }, visit: { date: { gte: toDbDate(addDays(today, -7)) }, promotorId: { in: ids } } } }),
       prisma.locationPing.groupBy({ by: ['promotorId'], where: { promotorId: { in: ids }, recordedAt: { gte: new Date(Date.now() - 15 * 60_000) } } }),
+      pendingContestsCount(req.user),
     ])
     const count = (s: string) => byStatus.find((b) => b.status === s)?._count ?? 0
     return {
@@ -153,6 +155,8 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
       pendingRequests,
       photosToday,
       photosUnreviewed,
+      /** Contestações de fotos esperando decisão (promotores da equipe; administrador: todas) */
+      pendingContests,
       alerts: alerts.map(serializeAlert),
     }
   })

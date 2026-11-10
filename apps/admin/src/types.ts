@@ -45,6 +45,11 @@ export type Client = {
   active: boolean
   /** Código no ERP: com ele, nome, razão social, cidade, UF e situação vêm da sincronização (só leitura no painel) */
   erpId: number | null
+  /** Dispensado da cerca eletrônica: check-in e check-out de qualquer lugar */
+  geofenceExempt: boolean
+  /** Quando a dispensa foi ligada ou desligada pela última vez, e por quem */
+  geofenceExemptAt: string | null
+  geofenceExemptBy: string | null
 }
 export type LocatedClient = Client & { latitude: number; longitude: number }
 
@@ -102,6 +107,8 @@ export type Dashboard = {
   pendingRequests: number
   photosToday: number
   photosUnreviewed: number
+  /** Contestações de fotos esperando decisão */
+  pendingContests: number
   alerts: AlertItem[]
 }
 
@@ -160,6 +167,9 @@ export type ReportRow = {
   gpsPending: boolean
   checkinDistance: number | null
   geofenceWaived: boolean
+  /** Check-in fora do raio aceito porque o cliente está dispensado da cerca */
+  checkinWithoutGeofence: boolean
+  clientGeofenceExempt: boolean
   photosWaived: boolean
   autoClosed: boolean
   photoCount: number
@@ -190,6 +200,7 @@ export type ReportSummary = {
   /** Dias com deslocamento ainda sem o km percorrido calculado */
   gpsPendingDays: number
   geofenceWaivers: number
+  checkinsWithoutGeofence: number
   photoWaivers: number
   autoClosed: number
   ruptures: number
@@ -296,6 +307,32 @@ export type VendorAudit = {
   visit: { id: string; date: string }
   client: { id: string; name: string; city: string | null }
   promotor: Ref
+}
+
+export type ContestStatus = 'PENDENTE' | 'ACEITA' | 'NEGADA'
+
+/** Contestação do promotor sobre uma foto reprovada (GET /supervisor/contests) */
+export type Contest = {
+  id: string
+  status: ContestStatus
+  reason: string
+  response: string | null
+  createdAt: string
+  decidedAt: string | null
+  decidedBy: Ref | null
+  promotor: Ref
+  photo: {
+    id: string
+    type: PhotoType
+    url: string
+    takenAt: string
+    notes: string | null
+    meta: Record<string, unknown> | null
+    products?: ProductRef[]
+  }
+  visit: { id: string; date: string }
+  client: { id: string; name: string; city: string | null }
+  audits: PhotoAuditInfo[]
 }
 
 export type PermissionRequest = {

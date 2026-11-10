@@ -307,7 +307,7 @@ export default function VisitaScreen() {
         return Alert.alert('GPS impreciso', `Sinal de GPS impreciso (${Math.round(loc.accuracy)} m). Vá para um local aberto e tente de novo.`)
       }
       const distance = distanceMeters(loc.latitude, loc.longitude, visit!.client.latitude, visit!.client.longitude)
-      if (distance > radius && !visit!.geofenceWaived) {
+      if (distance > radius && !visit!.geofenceWaived && !visit!.client.geofenceExempt) {
         if (mode === 'reopen') {
           return Alert.alert('Fora da cerca eletrônica', `Você está a ${formatDistance(distance)} do cliente. Para reabrir o atendimento, esteja a até ${radius} m da loja.`)
         }
@@ -577,7 +577,7 @@ export default function VisitaScreen() {
         <Pressable onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${visit.client.latitude},${visit.client.longitude}`)}>
           <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>Abrir no mapa / como chegar</Text>
         </Pressable>
-        <Muted>Cerca eletrônica: {radius} m</Muted>
+        <Muted>{visit.client.geofenceExempt ? 'Cliente sem cerca eletrônica: a abertura e o check-out valem de qualquer lugar.' : `Cerca eletrônica: ${radius} m`}</Muted>
       </Card>
 
       {visit.scheduled && (visit.origin === 'PONTUAL' || visit.scheduled.note) ? (
@@ -729,7 +729,7 @@ export default function VisitaScreen() {
             n={checkoutStepNo}
             title="Encerrar atendimento"
             state={ready ? 'current' : 'todo'}
-            detail={rules.requireGeofenceOnCheckout ? 'O check-out também precisa ser feito na loja.' : undefined}
+            detail={rules.requireGeofenceOnCheckout && !visit.client.geofenceExempt ? 'O check-out também precisa ser feito na loja.' : undefined}
           >
             {pendingRequired.length > 0 ? (
               <Banner tone="warning" text={`Conclua antes: ${pendingRequired.map((t) => t.title).join('; ')}.`} />

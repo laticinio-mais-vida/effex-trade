@@ -123,6 +123,9 @@ model User {
   scheduledCreated  ScheduledVisit[]    @relation("ScheduledCreator")
   routeSkips        RouteSkip[]         @relation("RouteSkipPromotor")
   routeSkipsCreated RouteSkip[]         @relation("RouteSkipCreator")
+  contests          PhotoContest[]      @relation("ContestPromotor")
+  contestsDecided   PhotoContest[]      @relation("ContestDecider")
+  clientsGeofenceExempt Client[]        @relation("ClientGeofenceExempt")
 }
 
 /// Cidade (ou UF inteira, sem cidade) atendida por promotor, vendedor ou supervisor: só os clientes dela aparecem para ele
@@ -152,6 +155,12 @@ model Client {
   active    Boolean  @default(true)
   /// Código no ERP (CLIENTES.ID_CLIENTE). Com código, nome, razão social, cidade, UF e situação vêm do ERP (só leitura no painel)
   erpId     Int?     @unique
+  /// Dispensado da cerca eletrônica (painel: administrador, ou supervisor nas cidades dele): check-in, check-out e volta do
+  /// almoço nele valem de qualquer lugar. Guarda quem dispensou e quando; a sincronização com o ERP não mexe nisso
+  geofenceExempt     Boolean   @default(false)
+  geofenceExemptById String?
+  geofenceExemptBy   User?     @relation("ClientGeofenceExempt", fields: [geofenceExemptById], references: [id])
+  geofenceExemptAt   DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -310,6 +319,8 @@ model Visit {
   checkoutDistance Float?
 
   geofenceWaived Boolean @default(false) // liberado pelo supervisor para check-in fora da cerca
+  /// Check-in (ou reabertura) fora do raio aceito porque o cliente está dispensado da cerca eletrônica
+  checkinWithoutGeofence Boolean @default(false)
   photosWaived   Boolean @default(false) // liberado pelo supervisor sem fotos obrigatórias
   /// Liberado pelo supervisor da ordem do roteiro: pode ser atendido a qualquer momento e não trava os demais
   routeOrderWaived Boolean @default(false)
@@ -407,6 +418,7 @@ model Photo {
 
   audits   PhotoAudit[]
   products PhotoProduct[]
+  contest  PhotoContest?
 
   @@index([visitId])
 }
@@ -487,6 +499,33 @@ model AuditReview {
   comment      String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+}
+
+enum ContestStatus {
+  PENDENTE
+  ACEITA
+  NEGADA
+}
+
+/// Contestação do promotor sobre uma foto reprovada (uma por foto, até 2 por dia, com explicação obrigatória).
+/// O supervisor dele (ou o administrador) aceita, e a foto passa a valer como aprovada, ou nega com uma resposta.
+model PhotoContest {
+  id          String        @id @default(cuid())
+  photoId     String        @unique
+  photo       Photo         @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  promotorId  String
+  promotor    User          @relation("ContestPromotor", fields: [promotorId], references: [id])
+  reason      String
+  status      ContestStatus @default(PENDENTE)
+  response    String?
+  decidedById String?
+  decidedBy   User?         @relation("ContestDecider", fields: [decidedById], references: [id])
+  decidedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([promotorId, createdAt])
+  @@index([status])
 }
 
 /// Solicitação de liberação do promotor (ou liberação direta do supervisor)

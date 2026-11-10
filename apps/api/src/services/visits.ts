@@ -506,7 +506,9 @@ async function openVisit(promotorId: string, visitId: string, loc: LocationInput
   const radius = settings.geofenceRadiusMeters
   const point = clientPoint(visit.client)
   const distance = distanceMeters(loc.latitude, loc.longitude, point.latitude, point.longitude)
-  if (distance > radius && !visit.geofenceWaived) {
+  // Cliente dispensado da cerca (cadastro do cliente): abre de qualquer lugar, e a visita fica marcada no relatório
+  const withoutGeofence = distance > radius && !visit.geofenceWaived && visit.client.geofenceExempt
+  if (distance > radius && !visit.geofenceWaived && !visit.client.geofenceExempt) {
     throw ruleViolation(
       `Você está a ${formatDistance(distance)} do cliente. O check-in só é permitido a até ${radius} m. Se estiver no local, peça liberação ao supervisor.`,
       'FORA_DA_CERCA',
@@ -536,9 +538,17 @@ async function openVisit(promotorId: string, visitId: string, loc: LocationInput
                 checkinLng: loc.longitude,
                 checkinAccuracy: loc.accuracy,
                 checkinDistance: Math.round(distance),
+                checkinWithoutGeofence: withoutGeofence,
               }
             : // Reabertura: mantém o primeiro check-in; o check-out volta a ficar em aberto
-              { status: 'EM_ATENDIMENTO', checkoutAt: null, checkoutLat: null, checkoutLng: null, checkoutDistance: null },
+              {
+                status: 'EM_ATENDIMENTO',
+                checkoutAt: null,
+                checkoutLat: null,
+                checkoutLng: null,
+                checkoutDistance: null,
+                ...(withoutGeofence ? { checkinWithoutGeofence: true } : {}),
+              },
       })
       if (count === 0) throw conflict('O atendimento mudou enquanto você abria. Atualize a tela.', 'STATUS_INVALIDO')
       await tx.visitSession.create({
@@ -619,7 +629,7 @@ export async function checkout(promotorId: string, visitId: string, loc: Locatio
   const radius = settings.geofenceRadiusMeters
   const point = clientPoint(visit.client)
   const distance = loc ? distanceMeters(loc.latitude, loc.longitude, point.latitude, point.longitude) : null
-  if (settings.requireGeofenceOnCheckout && !visit.geofenceWaived) {
+  if (settings.requireGeofenceOnCheckout && !visit.geofenceWaived && !visit.client.geofenceExempt) {
     if (distance == null) throw ruleViolation('Ative o GPS: o check-out precisa confirmar que você está no cliente.', 'LOCALIZACAO_OBRIGATORIA')
     if (distance > radius) {
       throw ruleViolation(`Você está a ${formatDistance(distance)} do cliente. O check-out precisa ser feito no local.`, 'FORA_DA_CERCA', {
@@ -665,7 +675,9 @@ export async function justify(promotorId: string, visitId: string, input: { reas
       const point = clientPoint(c)
       return distanceMeters(here.latitude, here.longitude, point.latitude, point.longitude)
     }
-    const inside = (c: { name: string; latitude: number | null; longitude: number | null }) => distanceTo(c) <= settings.geofenceRadiusMeters
+    // Cliente dispensado da cerca conta como "na cerca" de qualquer lugar
+    const inside = (c: { name: string; latitude: number | null; longitude: number | null; geofenceExempt: boolean }) =>
+      c.geofenceExempt || distanceTo(c) <= settings.geofenceRadiusMeters
     let allowed = visit.geofenceWaived || inside(visit.client)
     if (!allowed) {
       const others = await prisma.visit.findMany({

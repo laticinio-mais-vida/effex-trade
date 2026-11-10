@@ -49,7 +49,7 @@ export function ReportsPage() {
     if (!data) return
     downloadCsv(
       `execucao-${range.from}-a-${range.to}.csv`,
-      ['Data', 'Promotor', 'Ordem', 'Origem', 'Estrutura', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', data.travelKmSource ? `Km pela rota (${distanceModeLabel[data.travelKmSource]})` : 'Km pela rota', 'Km percorrido (GPS)', 'Km GPS estimado', 'Distância no check-in (m)', 'Fotos', 'Rupturas', 'Contagem de estoque', 'Motivo', 'Justificativa', 'Liberações'],
+      ['Data', 'Promotor', 'Ordem', 'Origem', 'Estrutura', 'Cliente', 'Cidade', 'Status', 'Check-in', 'Check-out', 'Encerrado automaticamente', 'Aberturas', 'Tempo no cliente (min)', 'Deslocamento (min)', data.travelKmSource ? `Km pela rota (${distanceModeLabel[data.travelKmSource]})` : 'Km pela rota', 'Km percorrido (GPS)', 'Km GPS estimado', 'Distância no check-in (m)', 'Check-in sem cerca (cliente dispensado)', 'Fotos', 'Rupturas', 'Contagem de estoque', 'Motivo', 'Justificativa', 'Liberações'],
       data.rows.map((r) => [
         fmtDate(r.date),
         r.promotor.name,
@@ -69,6 +69,7 @@ export function ReportsPage() {
         r.gpsPending ? 'a calcular' : r.gpsKm,
         r.gpsPending ? '' : r.gpsEstimatedKm,
         r.checkinDistance,
+        r.checkinWithoutGeofence ? 'sim' : '',
         r.photoCount,
         r.ruptures.map((p) => p.name).join(', '),
         r.modules.includes('ESTOQUE') ? (r.stockConfirmedAt ? `confirmada ${fmtTime(r.stockConfirmedAt)}` : 'não confirmada') : '',
@@ -395,6 +396,14 @@ function Visits({ rows }: { rows: ReportRow[] }) {
                   <>
                     {' '}
                     <span className="chip">{originLabel[r.origin]}</span>
+                  </>
+                )}
+                {r.checkinWithoutGeofence && (
+                  <>
+                    {' '}
+                    <span className="chip warn" title="Check-in fora do raio aceito porque o cliente está dispensado da cerca eletrônica">
+                      Sem cerca
+                    </span>
                   </>
                 )}
                 {!isDefaultStructure(r.modules) && (

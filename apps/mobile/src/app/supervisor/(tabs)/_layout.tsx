@@ -1,4 +1,4 @@
-import { tabIcon } from '@/components/tabIcon'
+import { tabIcon, tabLabel } from '@/components/tabIcon'
 import { Tabs } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { fetchOpenAlerts, notifyNewAlerts } from '@/features/supervisor/alerts'
@@ -8,13 +8,13 @@ import { colors } from '@/lib/theme'
 import type { SupervisorSummary } from '@/lib/types'
 
 export default function SupervisorTabs() {
-  const [counts, setCounts] = useState({ requests: 0, alerts: 0, vendorAudits: 0, photos: 0 })
+  const [counts, setCounts] = useState({ requests: 0, alerts: 0, vendorAudits: 0, photos: 0, contests: 0 })
 
   const refresh = useCallback(() => {
     Promise.all([api<SupervisorSummary>('/supervisor/summary'), api<{ pending: number }>('/audit/summary')])
       .then(([s, a]) => {
         const alerts = s.openAlerts ?? 0
-        setCounts({ requests: s.pendingRequests, alerts, vendorAudits: s.pendingVendorAudits, photos: a.pending })
+        setCounts({ requests: s.pendingRequests, alerts, vendorAudits: s.pendingVendorAudits, photos: a.pending, contests: s.pendingContests ?? 0 })
         // Alerta novo (ex.: almoço acima do limite): avisa com diálogo e vibração, uma vez por alerta
         if (alerts > 0) fetchOpenAlerts().then(notifyNewAlerts).catch(() => {})
       })
@@ -36,6 +36,8 @@ export default function SupervisorTabs() {
         headerStyle: { backgroundColor: colors.surface },
         headerTitleStyle: { color: colors.text },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        // Seis abas: o rótulo diminui a letra até caber, em vez de cortar com reticências
+        tabBarLabel: tabLabel(),
       }}
     >
       <Tabs.Screen
@@ -50,7 +52,7 @@ export default function SupervisorTabs() {
         name="fotos"
         options={{
           title: 'Auditoria de fotos',
-          tabBarLabel: 'Fotos',
+          tabBarLabel: tabLabel('Fotos'),
           tabBarBadge: badge(counts.photos),
           tabBarIcon: tabIcon('images-outline'),
         }}
@@ -59,9 +61,17 @@ export default function SupervisorTabs() {
         name="vendedores"
         options={{
           title: 'Auditorias dos vendedores',
-          tabBarLabel: 'Vendedores',
+          tabBarLabel: tabLabel('Vendedores'),
           tabBarBadge: badge(counts.vendorAudits),
           tabBarIcon: tabIcon('checkmark-done-outline'),
+        }}
+      />
+      <Tabs.Screen
+        name="contestacoes"
+        options={{
+          title: 'Contestações',
+          tabBarBadge: badge(counts.contests),
+          tabBarIcon: tabIcon('chatbox-ellipses-outline'),
         }}
       />
       <Tabs.Screen name="equipe" options={{ title: 'Equipe', tabBarIcon: tabIcon('people-outline') }} />

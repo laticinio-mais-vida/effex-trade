@@ -55,6 +55,7 @@ export const permissionTypes: PermissionType[] = [
     async validate({ visit }) {
       if (visit!.status !== 'PENDENTE') throw conflict('A visita não está mais pendente.')
       if (visit!.geofenceWaived) throw conflict('Esta visita já está liberada da cerca eletrônica.')
+      if (visit!.client.geofenceExempt) throw conflict('Este cliente está dispensado da cerca eletrônica: o check-in já vale de qualquer lugar.')
       return undefined
     },
     async apply({ tx, visit }) {

@@ -20,7 +20,7 @@ export function serializePhoto(photo: Photo & { products?: { product: Product }[
   }
 }
 
-export function serializeClient(client: Client) {
+export function serializeClient(client: Client & { geofenceExemptBy?: { name: string } | null }) {
   return {
     id: client.id,
     /** Nome fantasia */
@@ -36,6 +36,11 @@ export function serializeClient(client: Client) {
     active: client.active,
     /** Código no ERP: com ele, nome, razão social, cidade, UF e situação vêm da sincronização */
     erpId: client.erpId,
+    /** Dispensado da cerca eletrônica: check-in e check-out de qualquer lugar */
+    geofenceExempt: client.geofenceExempt,
+    geofenceExemptAt: client.geofenceExemptAt,
+    /** Quem ligou ou desligou a dispensa (só quando a rota inclui) */
+    geofenceExemptBy: client.geofenceExemptBy?.name ?? null,
   }
 }
 
@@ -81,6 +86,8 @@ export function serializeVisit(visit: VisitWithRelations) {
     checkinDistance: visit.checkinDistance,
     checkoutAt: visit.checkoutAt,
     geofenceWaived: visit.geofenceWaived,
+    /** Check-in fora do raio aceito porque o cliente está dispensado da cerca */
+    checkinWithoutGeofence: visit.checkinWithoutGeofence,
     photosWaived: visit.photosWaived,
     routeOrderWaived: visit.routeOrderWaived,
     autoClosed: visit.autoClosed,

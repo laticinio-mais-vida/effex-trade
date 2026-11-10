@@ -4,6 +4,7 @@ import { api } from './api'
 import { useAuth } from './auth'
 import { roleLabel } from './format'
 import { AuditErrorsPage } from './pages/AuditErrors'
+import { ContestsPage } from './pages/Contests'
 import { ClientsPage } from './pages/Clients'
 import { DashboardPage } from './pages/Dashboard'
 import { LoginPage } from './pages/Login'
@@ -39,6 +40,7 @@ const groups = [
       { to: '/relatorios', label: 'Relatórios' },
       { to: '/fotos', label: 'Avaliar fotos' },
       { to: '/correcoes', label: 'Correções de auditoria' },
+      { to: '/contestacoes', label: 'Contestações', badge: 'contests' as const },
     ],
   },
   {
@@ -72,6 +74,11 @@ function Sidebar() {
               <NavLink key={l.to} to={l.to} end={l.to === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
                 {l.label}
                 {'badge' in l && l.badge === 'requests' && !!data?.pendingRequests && <span className="nav-count">{data.pendingRequests}</span>}
+                {'badge' in l && l.badge === 'contests' && !!data?.pendingContests && (
+                  <span className="nav-count" title="Contestações esperando decisão">
+                    {data.pendingContests}
+                  </span>
+                )}
                 {'badge' in l && l.badge === 'alerts' && !!data?.alerts.length && (
                   <span className="nav-count" title="Alertas para o supervisor">
                     {data.alerts.length}
@@ -112,6 +119,7 @@ export function App() {
           <Route path="/relatorios" element={<ReportsPage />} />
           <Route path="/fotos" element={<PhotosPage />} />
           <Route path="/correcoes" element={<AuditErrorsPage />} />
+          <Route path="/contestacoes" element={<ContestsPage />} />
           <Route path="/roteiros" element={<RoutesPage />} />
           <Route path="/clientes" element={<ClientsPage />} />
           <Route path="/produtos" element={<ProductsPage />} />

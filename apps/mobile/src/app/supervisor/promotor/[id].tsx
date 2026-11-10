@@ -16,7 +16,7 @@ import { useQuery } from '@/lib/useQuery'
 function applicableTypes(visit: Visit, types: PermissionTypeDef[], orderApplies: boolean) {
   return types.filter((t) => {
     if (!t.needsVisit) return false
-    if (t.type === 'CHECKIN_FORA_CERCA') return visit.status === 'PENDENTE' && !visit.geofenceWaived
+    if (t.type === 'CHECKIN_FORA_CERCA') return visit.status === 'PENDENTE' && !visit.geofenceWaived && !visit.client.geofenceExempt
     if (t.type === 'DISPENSA_FOTOS') return (visit.status === 'PENDENTE' || visit.status === 'EM_ATENDIMENTO') && !visit.photosWaived
     if (t.type === 'LIVRE_ORDEM_CLIENTE') {
       return orderApplies && visit.status === 'PENDENTE' && visit.origin !== 'EXTRA' && visit.origin !== 'PONTUAL' && !visit.routeOrderWaived

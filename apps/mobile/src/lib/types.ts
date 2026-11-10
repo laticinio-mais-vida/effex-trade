@@ -34,6 +34,8 @@ export interface Client {
   state: string | null
   latitude: number
   longitude: number
+  /** Dispensado da cerca eletrônica (cadastro do cliente): check-in e check-out de qualquer lugar. Opcional: API antiga não manda. */
+  geofenceExempt?: boolean
 }
 
 export interface Product {
@@ -125,6 +127,8 @@ export interface Visit {
   checkinDistance: number | null
   checkoutAt: string | null
   geofenceWaived: boolean
+  /** Check-in fora do raio aceito porque o cliente está dispensado da cerca. */
+  checkinWithoutGeofence?: boolean
   photosWaived: boolean
   /** Liberado pelo supervisor da ordem do roteiro: pode ser atendido a qualquer momento. */
   routeOrderWaived?: boolean
@@ -279,9 +283,54 @@ export interface SupervisorAlert {
   lunchEndedAt: string | null
 }
 
+export type ContestStatus = 'PENDENTE' | 'ACEITA' | 'NEGADA'
+
+/** Contestação do promotor sobre uma foto reprovada. */
+export interface ContestInfo {
+  id: string
+  status: ContestStatus
+  /** Explicação do promotor */
+  reason: string
+  /** Resposta do supervisor (obrigatória quando nega) */
+  response: string | null
+  createdAt: string
+  decidedAt: string | null
+  decidedBy: { id: string; name: string } | null
+}
+
+/** Foto reprovada na aba Recusadas do promotor (GET /promotor/rejected). */
+export interface RejectedPhoto extends Photo {
+  visit: { id: string; date: string }
+  client: { id: string; name: string; city: string | null }
+  /** Reprovações que valem (sem as do vendedor que o supervisor conferiu como incorretas) */
+  rejections: { id: string; auditor: { name: string; role: Role }; justification: string | null; at: string }[]
+  contest: ContestInfo | null
+  canContest: boolean
+}
+
+export interface RejectedList {
+  windowDays: number
+  limitPerDay: number
+  usedToday: number
+  remainingToday: number
+  items: RejectedPhoto[]
+}
+
+/** Contestação na aba Contestações do supervisor (GET /supervisor/contests). */
+export interface SupervisorContest extends ContestInfo {
+  promotor: { id: string; name: string }
+  photo: Photo
+  visit: { id: string; date: string }
+  client: { id: string; name: string; city: string | null }
+  /** Todas as auditorias da foto */
+  audits: Audit[]
+}
+
 export interface SupervisorSummary {
   pendingRequests: number
   pendingVendorAudits: number
+  /** Contestações de fotos esperando decisão (API antiga não manda) */
+  pendingContests?: number
   /** Alertas sem "ciente" */
   openAlerts?: number
 }

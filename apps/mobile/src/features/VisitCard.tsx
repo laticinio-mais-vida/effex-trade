@@ -42,6 +42,7 @@ export function VisitCard({ visit, isNext, onPress }: { visit: Visit; isNext?: b
             {origin ? <Badge label={origin} color={colors.info} bg={colors.infoSoft} /> : null}
             {!isDefaultStructure(visit.modules) ? <Badge label={structureLabel(visit.modules!)} color={colors.primary} bg={colors.primarySoft} /> : null}
             {visit.geofenceWaived ? <Badge label="Cerca liberada" color={colors.warning} bg={colors.warningSoft} /> : null}
+            {visit.client.geofenceExempt ? <Badge label="Sem cerca" color={colors.warning} bg={colors.warningSoft} /> : null}
             {visit.photosWaived ? <Badge label="Fotos dispensadas" color={colors.warning} bg={colors.warningSoft} /> : null}
             {visit.routeOrderWaived && visit.status === 'PENDENTE' ? <Badge label="Fora da ordem" color={colors.warning} bg={colors.warningSoft} /> : null}
             {reopened ? <Badge label="Reaberto" color={colors.info} bg={colors.infoSoft} /> : null}

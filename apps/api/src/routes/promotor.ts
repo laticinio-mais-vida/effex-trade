@@ -14,6 +14,7 @@ import {
   serializeRequest,
 } from '../services/permissions'
 import { clientSearch, located } from '../services/clients'
+import { contestBodySchema, createContest, listRejectedForPromotor } from '../services/contests'
 import { clientScope } from '../services/scope'
 import { serializeClient } from '../services/serializers'
 import {
@@ -199,6 +200,17 @@ export async function promotorRoutes(app: FastifyInstance) {
   app.delete('/photos/:id', async (req) => {
     await deletePhoto(req.user.sub, parse(zIdParam, req.params).id)
     return { ok: true }
+  })
+
+  // ---------------- Fotos recusadas e contestações ----------------
+  /** Fotos reprovadas dos últimos 14 dias, com as justificativas e a contestação de cada uma. */
+  app.get('/rejected', async (req) => listRejectedForPromotor(req.user.sub))
+
+  /** Contesta uma foto reprovada (explicação obrigatória, até 2 por dia). */
+  app.post('/photos/:id/contest', async (req) => {
+    const { id } = parse(zIdParam, req.params)
+    const body = parse(contestBodySchema, req.body)
+    return createContest(req.user.sub, id, body.reason)
   })
 
   app.get('/permission-types', async () => listPermissionTypes())

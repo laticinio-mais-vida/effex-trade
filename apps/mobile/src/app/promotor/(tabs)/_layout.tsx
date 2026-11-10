@@ -24,6 +24,7 @@ export default function PromotorTabs() {
           tabBarIcon: tabIcon('key-outline'),
         }}
       />
+      <Tabs.Screen name="recusadas" options={{ title: 'Recusadas', tabBarIcon: tabIcon('close-circle-outline') }} />
       <Tabs.Screen name="conta" options={{ title: 'Conta', tabBarIcon: tabIcon('person-circle-outline') }} />
     </Tabs>
   )

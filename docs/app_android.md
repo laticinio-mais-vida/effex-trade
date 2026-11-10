@@ -58,8 +58,8 @@ O app procura atualização ao abrir e ao voltar para ele (no máximo a cada 30 
 baixada entra:
 
 - na próxima vez que o app for aberto do zero;
-- ao voltar para o app depois de 15 minutos fora dele, se ele estiver numa tela de abas (Meu dia, Liberações, Conta,
-  Avaliação, Alertas, Fotos, Vendedores, Equipe). Nunca no meio de um atendimento, de um encerramento ou de um pedido;
+- ao voltar para o app depois de 15 minutos fora dele, se ele estiver numa tela de abas (Meu dia, Liberações, Recusadas,
+  Conta, Avaliação, Fotos, Vendedores, Contestações, Equipe). Nunca no meio de um atendimento, de um encerramento ou de um pedido;
 - na hora, pelo botão **Buscar atualização** da tela **Conta** (todos os perfis).
 
 A tela Conta mostra a versão do app (ex.: "App 0.1.0 (build 1)") e o código em uso: "o que veio no APK" ou a data da

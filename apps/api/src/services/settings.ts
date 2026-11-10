@@ -95,7 +95,7 @@ export const settingsMeta: Record<SettingKey, Meta> = {
     group: 'Check-in',
     label: 'Raio da cerca eletrônica',
     unit: 'm',
-    help: 'Distância máxima entre o promotor e o cliente para permitir o check-in. Pode ser sobrescrito por cliente.',
+    help: 'Distância máxima entre o promotor e o cliente para permitir o check-in. Cliente dispensado da cerca (no cadastro do cliente) abre de qualquer lugar.',
   },
   blockMockedLocation: { scope: 'promotor', group: 'Check-in', label: 'Bloquear GPS falso', help: 'Recusa check-in quando o aparelho informa localização simulada (Android).' },
   maxLocationAccuracyMeters: {

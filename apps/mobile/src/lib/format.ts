@@ -1,5 +1,5 @@
 import { colors } from './theme'
-import type { AuditStatus, PhotoType, RequestStatus, TaskRecurrence, Visit, VisitModule, VisitOrigin, VisitStatus } from './types'
+import type { AuditStatus, ContestStatus, PhotoType, RequestStatus, Role, TaskRecurrence, Visit, VisitModule, VisitOrigin, VisitStatus } from './types'
 
 export const photoTypeLabels: Record<PhotoType, string> = {
   FACHADA: 'Fachada',
@@ -51,6 +51,14 @@ export const auditStatusInfo: Record<AuditStatus, { label: string; color: string
   APROVADA: { label: 'Aprovada', color: colors.success, bg: colors.successSoft },
   REPROVADA: { label: 'Reprovada', color: colors.danger, bg: colors.dangerSoft },
 }
+
+export const contestStatusInfo: Record<ContestStatus, { label: string; color: string; bg: string }> = {
+  PENDENTE: { label: 'Contestação aguardando', color: colors.warning, bg: colors.warningSoft },
+  ACEITA: { label: 'Contestação aceita', color: colors.success, bg: colors.successSoft },
+  NEGADA: { label: 'Contestação negada', color: colors.danger, bg: colors.dangerSoft },
+}
+
+export const roleLabels: Record<Role, string> = { ADMIN: 'administrador', SUPERVISOR: 'supervisor', VENDEDOR: 'vendedor', PROMOTOR: 'promotor' }
 
 export function formatTime(iso: string | null | undefined) {
   if (!iso) return '--:--'
