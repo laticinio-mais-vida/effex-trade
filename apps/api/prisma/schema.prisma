@@ -267,8 +267,9 @@ model WorkDay {
   /// Como os pontos de GPS foram ligados: ruas (encaixe no servidor de rotas), linha_reta (sem servidor) ou misto
   gpsKmMode String?
 
-  visits Visit[]
-  alerts Alert[]
+  visits  Visit[]
+  alerts  Alert[]
+  reopens WorkDayReopen[]
 
   @@unique([promotorId, date])
 }
@@ -526,6 +527,22 @@ model PhotoContest {
 
   @@index([promotorId, createdAt])
   @@index([status])
+}
+
+/// Roteiro reaberto pelo promotor depois de encerrado, ao incluir um cliente (ou voltar a um do dia). O intervalo entre o
+/// ponto de fim anterior e a reabertura é pausa: não conta como trabalhado nem como deslocamento no relatório.
+model WorkDayReopen {
+  id         String   @id @default(cuid())
+  workDayId  String
+  workDay    WorkDay  @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  /// Ponto de fim antes da reabertura (última atividade) e quando o roteiro tinha sido encerrado
+  endedAt    DateTime?
+  closedAt   DateTime
+  reopenedAt DateTime @default(now())
+  /// Visita que o promotor incluiu (ou para a qual voltou) ao reabrir
+  visitId    String?
+
+  @@index([workDayId])
 }
 
 /// Solicitação de liberação do promotor (ou liberação direta do supervisor)

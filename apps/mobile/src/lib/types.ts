@@ -198,6 +198,8 @@ export interface Day {
     closedAt?: string | null
     lunchStartedAt?: string | null
     lunchEndedAt?: string | null
+    /** Última vez que o promotor reabriu o roteiro depois de encerrado (incluindo um cliente) */
+    reopenedAt?: string | null
     /** Supervisor liberou o dia inteiro da ordem do roteiro (rules.enforceRouteOrder já vem desligado). */
     routeOrderWaived?: boolean
   } | null

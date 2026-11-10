@@ -604,7 +604,14 @@ export default function VisitaScreen() {
 
       {visit.status === 'PENDENTE' ? (
         dayEnded ? (
-          <Banner tone="info" text="O roteiro de hoje já foi encerrado." />
+          <Banner
+            tone="info"
+            text={
+              day.isToday && day.rules.allowExtraVisits
+                ? 'O roteiro de hoje já foi encerrado. Para atender este cliente, toque em "Incluir cliente e reabrir o roteiro" em Meu dia e escolha ele.'
+                : 'O roteiro de hoje já foi encerrado.'
+            }
+          />
         ) : !day.isToday ? (
           <Banner tone="info" text="Esta visita não é de hoje." />
         ) : (

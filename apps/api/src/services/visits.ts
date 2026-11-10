@@ -66,13 +66,19 @@ const isClosed = (wd: { closedAt: Date | null; endedAt: Date | null }) => !!(wd.
  * O horário da foto é limitado ao recebimento, para não aceitar relógio adulterado.
  */
 async function lastActivityAt(tx: Tx | typeof prisma, workDayId: string) {
-  const visits = await tx.visit.findMany({
-    where: { workDayId },
-    select: { checkoutAt: true, justifiedAt: true, photos: { select: { takenAt: true, createdAt: true } } },
-  })
+  const [visits, reopens] = await Promise.all([
+    tx.visit.findMany({
+      where: { workDayId },
+      select: { checkoutAt: true, justifiedAt: true, photos: { select: { takenAt: true, createdAt: true } } },
+    }),
+    tx.workDayReopen.findMany({ where: { workDayId }, select: { closedAt: true } }),
+  ])
+  // Justificativas feitas na tela de encerramento têm o horário do encerramento e não são atividade em campo. Depois de
+  // reabrir o roteiro, os encerramentos anteriores ficam na reabertura e as justificativas deles não contam aqui.
+  const closings = new Set(reopens.map((r) => r.closedAt.getTime()))
   const times = visits.flatMap((v) => [
     v.checkoutAt?.getTime(),
-    v.justifiedAt?.getTime(),
+    v.justifiedAt && !closings.has(v.justifiedAt.getTime()) ? v.justifiedAt.getTime() : undefined,
     ...v.photos.map((ph) => Math.min(ph.takenAt.getTime(), ph.createdAt.getTime())),
   ])
   const valid = times.filter((t): t is number => t != null)
@@ -209,6 +215,7 @@ export async function getDayForPromotor(promotorId: string, date: string) {
   const visits = workDay
     ? await prisma.visit.findMany({ where: { workDayId: workDay.id, status: { not: 'CANCELADA' } }, include: visitInclude, orderBy: { position: 'asc' } })
     : []
+  const lastReopen = workDay ? await prisma.workDayReopen.findFirst({ where: { workDayId: workDay.id }, orderBy: { reopenedAt: 'desc' } }) : null
   const taskCtx = await loadTaskContext(promotorId, date, visits.map((v) => v.clientId))
   const reasons = await prisma.justificationReason.findMany({ where: { active: true }, orderBy: [{ position: 'asc' }, { label: 'asc' }] })
 
@@ -226,6 +233,8 @@ export async function getDayForPromotor(promotorId: string, date: string) {
           lunchStartedAt: workDay.lunchStartedAt,
           lunchEndedAt: workDay.lunchEndedAt,
           routeOrderWaived: workDay.routeOrderWaived,
+          /** Última vez que o promotor reabriu o roteiro depois de encerrado */
+          reopenedAt: lastReopen?.reopenedAt ?? null,
         }
       : null,
     rules: {
@@ -404,6 +413,26 @@ async function autoCloseVisit(tx: Tx, visit: Visit) {
   return checkoutAt
 }
 
+/**
+ * Reabre o roteiro encerrado de hoje (o promotor volta às atividades): o ponto de fim e o encerramento são apagados e
+ * ficam guardados na reabertura; o intervalo até aqui é pausa no relatório. O km percorrido (GPS) volta a ser calculado
+ * no novo encerramento.
+ */
+async function reopenDay(tx: Tx, workDay: { id: string; endedAt: Date | null; closedAt: Date | null }, visitId: string | null) {
+  const { count } = await tx.workDay.updateMany({
+    where: { id: workDay.id, OR: [{ closedAt: { not: null } }, { endedAt: { not: null } }] },
+    data: { endedAt: null, closedAt: null, endLat: null, endLng: null, gpsKmAt: null, gpsKmMode: null },
+  })
+  if (count === 0) return
+  await tx.workDayReopen.create({
+    data: { workDayId: workDay.id, endedAt: workDay.endedAt, closedAt: workDay.closedAt ?? workDay.endedAt ?? new Date(), visitId },
+  })
+}
+
+/**
+ * Inclui um cliente extra no dia. Com o roteiro já encerrado, reabre o roteiro (o promotor volta às atividades); se o
+ * cliente já estiver no dia (atendido ou pendente), reabre e devolve a visita dele, para ele ir até lá.
+ */
 export async function addExtraVisit(promotorId: string, clientId: string) {
   const settings = await getSettings(promotorId)
   if (!settings.allowExtraVisits) throw forbidden('A inclusão de clientes extras está desativada nas regras.', 'EXTRA_DESATIVADO')
@@ -414,8 +443,14 @@ export async function addExtraVisit(promotorId: string, clientId: string) {
 
   const date = todayIn()
   const workDay = await ensureWorkDay(promotorId, date)
-  if (isClosed(workDay)) throw conflict('O roteiro de hoje já foi encerrado.', 'ROTEIRO_ENCERRADO')
+  const closed = isClosed(workDay)
   const existing = await prisma.visit.findFirst({ where: { workDayId: workDay.id, clientId, status: { in: ['PENDENTE', 'EM_ATENDIMENTO', 'CONCLUIDA'] } } })
+  if (existing && closed) {
+    // Roteiro encerrado e o cliente já está no dia: reabre e leva à visita dele (reabrir o atendimento ou abrir)
+    await prisma.$transaction((tx) => reopenDay(tx, workDay, existing.id))
+    const visit = await prisma.visit.findUniqueOrThrow({ where: { id: existing.id }, include: visitInclude })
+    return { ...serializeFull(visit, settings, await visitTaskContext(promotorId, visit)), reopened: true }
+  }
   if (existing) {
     throw conflict(
       existing.status === 'CONCLUIDA'
@@ -429,11 +464,15 @@ export async function addExtraVisit(promotorId: string, clientId: string) {
   if (extras >= settings.maxExtraVisitsPerDay) throw ruleViolation(`Limite de ${settings.maxExtraVisitsPerDay} clientes extras por dia atingido.`, 'LIMITE_EXTRAS')
 
   const last = await prisma.visit.aggregate({ where: { workDayId: workDay.id }, _max: { position: true } })
-  const visit = await prisma.visit.create({
-    data: { workDayId: workDay.id, promotorId, clientId, date: toDbDate(date), position: (last._max.position ?? 0) + 1, origin: 'EXTRA' },
-    include: visitInclude,
+  const visit = await prisma.$transaction(async (tx) => {
+    const created = await tx.visit.create({
+      data: { workDayId: workDay.id, promotorId, clientId, date: toDbDate(date), position: (last._max.position ?? 0) + 1, origin: 'EXTRA' },
+      include: visitInclude,
+    })
+    if (closed) await reopenDay(tx, workDay, created.id)
+    return created
   })
-  return serializeFull(visit, settings, await visitTaskContext(promotorId, visit))
+  return { ...serializeFull(visit, settings, await visitTaskContext(promotorId, visit)), reopened: closed }
 }
 
 export async function removeExtraVisit(promotorId: string, visitId: string) {

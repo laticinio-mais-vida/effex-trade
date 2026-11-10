@@ -331,8 +331,18 @@ function Days({ data }: { data: Report }) {
                   <span className="muted">—</span>
                 )}
               </td>
-              <td className="num">{fmtTime(d.workEnd)}</td>
-              <td className="r">{fmtMinutes(d.workedMin)}</td>
+              <td className="num">
+                {fmtTime(d.workEnd)}
+                {d.reopens.map((r, i) => (
+                  <div key={i} className="small muted" title="O promotor encerrou o roteiro e reabriu para incluir um cliente: o intervalo é pausa">
+                    reaberto {fmtTime(r.endedAt)}–{fmtTime(r.reopenedAt)}
+                  </div>
+                ))}
+              </td>
+              <td className="r">
+                {fmtMinutes(d.workedMin)}
+                {d.pausedMin > 0 && <div className="small muted">pausa {fmtMinutes(d.pausedMin)}</div>}
+              </td>
               <td className="num" title={d.closedAt && fmtTimeOn(d.closedAt, d.date) !== fmtTime(d.closedAt) ? 'Encerrado pelo sistema na abertura do roteiro seguinte' : undefined}>
                 {fmtTimeOn(d.closedAt, d.date)}
               </td>

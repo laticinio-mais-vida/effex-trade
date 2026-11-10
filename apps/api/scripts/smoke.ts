@@ -7,7 +7,7 @@ import { gzipSync } from 'node:zlib'
 import { shelfPng } from '../prisma/seed-image'
 import { checkLunchAlerts } from '../src/services/alerts'
 import { computeDayGpsKm, computePendingGpsKm } from '../src/services/gps-km'
-import { travelLegs } from '../src/services/reports'
+import { pausedMinutesWithin, travelLegs } from '../src/services/reports'
 import { ensureWorkDay } from '../src/services/workdays'
 import { prisma } from '../src/db'
 import { env } from '../src/env'
@@ -241,8 +241,42 @@ check(
   Math.abs(new Date(r.data.endedAt).getTime() - new Date(extraDone.checkoutAt).getTime()) < 1000 && new Date(r.data.endedAt) <= new Date(r.data.closedAt),
   { endedAt: r.data.endedAt, lastCheckout: extraDone.checkoutAt, closedAt: r.data.closedAt },
 )
+const firstEnd = r.data.endedAt
+console.log('Incluir cliente depois de encerrar reabre o roteiro')
 r = await call(promotor, 'POST', '/promotor/visits', { clientId: first.client.id })
-check('depois de encerrado não aceita novos clientes', r.status === 409 && r.data.code === 'ROTEIRO_ENCERRADO', r.data)
+check('cliente já atendido: reabre o roteiro e leva à visita dele', r.status === 200 && r.data.id === first.id && r.data.reopened === true, r.data)
+let reopenedDay = (await call(promotor, 'GET', '/promotor/day')).data
+check('roteiro reaberto (sem fim, com a hora da reabertura)', !reopenedDay.workDay.closedAt && !reopenedDay.workDay.endedAt && !!reopenedDay.workDay.reopenedAt, reopenedDay.workDay)
+r = await call(promotor, 'POST', '/promotor/day/end', {})
+check('encerra de novo', r.status === 200 && !!r.data.closedAt && r.data.endedAt === firstEnd, r.data)
+reopenedDay = (await call(promotor, 'GET', '/promotor/day')).data
+const lateClient = (await call(promotor, 'GET', '/promotor/clients')).data.find((c: any) => !reopenedDay.visits.some((v: any) => v.client.id === c.id))
+r = await call(promotor, 'POST', '/promotor/visits', { clientId: lateClient.id })
+check('cliente novo depois de encerrar: incluído como extra e o roteiro reabre', r.status === 200 && r.data.origin === 'EXTRA' && r.data.reopened === true, r.data)
+const lateVisit = r.data
+r = await call(promotor, 'POST', '/promotor/day/end', {})
+check('o cliente incluído entra no encerramento (roteiro completo)', r.status === 422 && r.data.code === 'ROTEIRO_INCOMPLETO' && r.data.details.pending.some((p: any) => p.visitId === lateVisit.id), r.data)
+r = await call(promotor, 'POST', '/promotor/day/end', { justifications: [{ visitId: lateVisit.id, reasonId, text: 'Cliente fechou antes de eu chegar.' }] })
+check('encerra de novo com o cliente justificado', r.status === 200 && !!r.data.closedAt, r.data)
+r = await call(admin, 'GET', `/admin/reports/visits?promotorId=${promotorId}&from=${today}&to=${today}`)
+const reopenDay = r.data.days?.[0]
+check(
+  'relatório mostra as reaberturas; pausa depois do ponto de fim não desconta',
+  r.status === 200 &&
+    reopenDay?.reopens.length === 2 &&
+    reopenDay.pausedMin >= 0 &&
+    Math.abs(reopenDay.workedMin - ((new Date(reopenDay.workEnd).getTime() - new Date(reopenDay.workStart).getTime()) / 60000 - (reopenDay.lunchMin ?? 0) - reopenDay.pausedMin)) < 0.11,
+  reopenDay,
+)
+{
+  const at = (h: number, m = 0) => new Date(Date.UTC(2026, 10, 10, h, m))
+  const pauses = [
+    { from: at(15), to: at(16) },
+    { from: at(15), to: at(17) }, // reabriu, encerrou sem atividade e reabriu de novo: conta 15h-17h uma vez
+    { from: at(19), to: at(20) }, // depois do ponto de fim: não conta
+  ]
+  check('pausa das reaberturas: sobrepostas contam uma vez, depois do fim não conta', pausedMinutesWithin(pauses, at(8), at(18)) === 120, pausedMinutesWithin(pauses, at(8), at(18)))
+}
 
 console.log('Alteração de ordem e substituição (outro promotor)')
 const promotor2 = await login('promotor2')

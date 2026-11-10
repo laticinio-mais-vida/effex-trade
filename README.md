@@ -84,6 +84,7 @@ Ficam em `apps/api/src/services/settings.ts` e são ligadas e desligadas no pain
 | Regra | Como funciona |
 |---|---|
 | Roteiro completo | O promotor só encerra o roteiro com todas as lojas atendidas; para encerrar antes, justifica cada loja pendente na mesma tela. |
+| Reabrir o roteiro | Depois de encerrar, o promotor pode incluir um cliente (Meu dia, "Incluir cliente e reabrir o roteiro"): o roteiro reabre, o envio de localização volta a ligar e ele encerra de novo no fim, com as mesmas regras. Escolhendo um cliente que já está no dia (atendido ou pendente), o roteiro reabre e ele vai direto para esse cliente. O intervalo entre o ponto de fim anterior e a reabertura é pausa: não conta nas horas trabalhadas nem no deslocamento, e aparece em Jornadas no relatório ("reaberto 15:00–17:00"). Vale o limite de clientes extras por dia (`WorkDayReopen`, `addExtraVisit` em `src/services/visits.ts`). |
 | Cerca eletrônica | Abertura (check-in) e encerramento (check-out) só dentro do raio da loja. Não vale para o encerramento automático, quando o supervisor libera a visita, nem no cliente dispensado da cerca (cadastro do cliente). |
 | Abertura do roteiro | Não existe botão de iniciar: o roteiro começa no primeiro check-in. O primeiro cliente do dia não tem tempo de deslocamento. |
 | Abertura do atendimento | Exige a foto da fachada, tirada na hora do check-in. |

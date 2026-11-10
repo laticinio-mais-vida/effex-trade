@@ -110,6 +110,7 @@ export default function MeuDia() {
               Almoço: {formatTime(wd.lunchStartedAt)}–{formatTime(wd.lunchEndedAt)}
             </Text>
           ) : null}
+          {wd?.reopenedAt && !ended ? <Muted>Roteiro reaberto às {formatTime(wd.reopenedAt)}. No fim, encerre de novo.</Muted> : null}
           {ended ? (
             <>
               <Text style={styles.text}>
@@ -121,7 +122,15 @@ export default function MeuDia() {
         </View>
 
         {ended ? (
-          <Banner tone="success" text="Roteiro de hoje encerrado." />
+          <>
+            <Banner tone="success" text="Roteiro de hoje encerrado." />
+            {day.isToday && day.rules.allowExtraVisits ? (
+              <View style={{ gap: space.xs }}>
+                <Muted>Precisa atender mais um cliente hoje? Incluir um cliente reabre o roteiro: o envio de localização volta a ligar e, no fim, você encerra de novo.</Muted>
+                <Button title="+ Incluir cliente e reabrir o roteiro" variant="secondary" small onPress={() => router.push('/promotor/adicionar')} />
+              </View>
+            ) : null}
+          </>
         ) : !day.isToday ? null : (
           <View style={{ gap: space.sm }}>
             {started ? <Muted>{trackingText[tracking.mode]}</Muted> : null}

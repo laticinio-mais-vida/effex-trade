@@ -6,7 +6,7 @@ const reportInclude = {
   client: true,
   promotor: { select: { id: true, name: true } },
   justificationReason: true,
-  workDay: { include: { alerts: { where: { type: 'ALMOCO_LONGO' }, select: { id: true } } } },
+  workDay: { include: { alerts: { where: { type: 'ALMOCO_LONGO' }, select: { id: true } }, reopens: { orderBy: { reopenedAt: 'asc' } } } },
   _count: { select: { photos: true } },
   requests: { where: { status: 'APROVADA' }, select: { type: true } },
   ruptures: { include: { product: { select: { id: true, code: true, name: true } } } },
@@ -14,6 +14,36 @@ const reportInclude = {
 } satisfies Prisma.VisitInclude
 
 type ReportVisit = Prisma.VisitGetPayload<{ include: typeof reportInclude }>
+
+type Pause = { from: Date; to: Date }
+
+/** Pausas do dia: do ponto de fim (ou do encerramento) até cada reabertura do roteiro pelo promotor. */
+function pausesOf(wd: ReportVisit['workDay']): Pause[] {
+  return wd.reopens.map((r) => ({ from: r.endedAt ?? r.closedAt, to: r.reopenedAt })).filter((p) => p.from < p.to)
+}
+
+/**
+ * Minutos de pausa dentro do intervalo (as pausas depois do ponto de fim não contam). Pausas sobrepostas contam uma vez:
+ * reabrir, encerrar sem nenhuma atividade e reabrir de novo gera duas pausas que começam no mesmo ponto de fim.
+ */
+export function pausedMinutesWithin(pauses: Pause[], start: Date, end: Date) {
+  const clipped = pauses
+    .map((p) => ({ from: p.from > start ? p.from : start, to: p.to < end ? p.to : end }))
+    .filter((p) => p.to > p.from)
+    .sort((a, b) => a.from.getTime() - b.from.getTime())
+  let total = 0
+  let current: { from: Date; to: Date } | null = null
+  for (const p of clipped) {
+    if (current && p.from <= current.to) {
+      if (p.to > current.to) current.to = p.to
+      continue
+    }
+    if (current) total += minutesBetween(current.from, current.to)
+    current = { ...p }
+  }
+  if (current) total += minutesBetween(current.from, current.to)
+  return total
+}
 
 const round = (n: number) => Math.round(n * 10) / 10
 /** Ponto do cliente; sem localização, o trecho fica sem quilometragem. */
@@ -89,7 +119,10 @@ export async function visitReport(filter: { from: string; to: string; promotorId
     lunchOverdue: boolean
     /** Supervisor liberou o dia inteiro da ordem do roteiro */
     routeOrderWaived: boolean
-    /** Fim - início - almoço */
+    /** Reaberturas do roteiro pelo promotor depois de encerrado (o intervalo é pausa) */
+    reopens: { endedAt: Date; reopenedAt: Date }[]
+    pausedMin: number
+    /** Fim - início - almoço - pausas (reaberturas) */
     workedMin: number | null
     total: number
     done: number
@@ -119,6 +152,8 @@ export async function visitReport(filter: { from: string; to: string; promotorId
     const first = dayVisits[0]!
     const wd = first.workDay
     const lunchMin = wd.lunchStartedAt && wd.lunchEndedAt ? minutesBetween(wd.lunchStartedAt, wd.lunchEndedAt) : null
+    const pauses = pausesOf(wd)
+    const pausedMin = wd.startedAt && wd.endedAt ? pausedMinutesWithin(pauses, wd.startedAt, wd.endedAt) : 0
     const gpsKm = sumOrNull(dayRows.map((r) => r.gpsKm))
     const gpsEstimatedKm = sumOrNull(dayRows.map((r) => r.gpsEstimatedKm))
     if (wd.gpsKmMode && gpsKm != null) gpsModes.push(wd.gpsKmMode as DistanceMode)
@@ -133,7 +168,9 @@ export async function visitReport(filter: { from: string; to: string; promotorId
       lunchMin,
       lunchOverdue: wd.alerts.length > 0,
       routeOrderWaived: wd.routeOrderWaived,
-      workedMin: wd.startedAt && wd.endedAt ? round(minutesBetween(wd.startedAt, wd.endedAt) - (lunchMin ?? 0)) : null,
+      reopens: pauses.map((p) => ({ endedAt: p.from, reopenedAt: p.to })),
+      pausedMin: round(pausedMin),
+      workedMin: wd.startedAt && wd.endedAt ? round(minutesBetween(wd.startedAt, wd.endedAt) - (lunchMin ?? 0) - pausedMin) : null,
       total: dayRows.length,
       done: dayRows.filter((r) => r.status === 'CONCLUIDA').length,
       justified: dayRows.filter((r) => r.status === 'JUSTIFICADA').length,
@@ -157,7 +194,8 @@ type Travel = { travelMin: number; travelKm: number | null; afterLunch: boolean;
 /**
  * Deslocamento até cada abertura de atendimento (um cliente reaberto no dia tem mais de uma; o
  * deslocamento dele é a soma). Se o almoço caiu no meio, o deslocamento vai só até a abertura do
- * almoço (a volta do almoço é a própria abertura do próximo cliente). O km percorrido (GPS) do trecho
+ * almoço (a volta do almoço é a própria abertura do próximo cliente). Se o roteiro foi encerrado e reaberto no meio,
+ * o deslocamento começa na reabertura (a pausa não conta). O km percorrido (GPS) do trecho
  * vem gravado na abertura que fecha o trecho, depois que o dia é calculado.
  */
 async function computeTravel(dayVisits: ReportVisit[]) {
@@ -166,9 +204,13 @@ async function computeTravel(dayVisits: ReportVisit[]) {
   const sessions = dayVisits.flatMap((v) => v.sessions.map((s) => ({ ...s, visit: v })))
   const lunchStart = dayVisits[0]?.workDay.lunchStartedAt ?? null
   const gpsDone = !!dayVisits[0]?.workDay.gpsKmAt
+  const pauses = dayVisits[0] ? pausesOf(dayVisits[0].workDay) : []
 
-  for (const { from, to, start } of travelLegs(sessions)) {
+  for (const { from, to, start: legStart } of travelLegs(sessions)) {
     const v = to.visit
+    // Reabertura no meio do trecho: o deslocamento conta a partir dela
+    let start = legStart
+    for (const p of pauses) if (p.to > start && p.from < to.checkinAt && p.to <= to.checkinAt) start = p.to
     const afterLunch = !!lunchStart && lunchStart >= start && lunchStart <= to.checkinAt
     const prev = result.get(v.id)
     const gps = gpsDone && to.gpsMeters != null

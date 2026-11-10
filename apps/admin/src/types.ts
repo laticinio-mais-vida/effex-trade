@@ -218,6 +218,9 @@ export type ReportDay = {
   lunchMin: number | null
   lunchOverdue: boolean
   routeOrderWaived: boolean
+  /** Reaberturas do roteiro pelo promotor depois de encerrado (do ponto de fim anterior até a reabertura é pausa) */
+  reopens: { endedAt: string; reopenedAt: string }[]
+  pausedMin: number
   workedMin: number | null
   total: number
   done: number
