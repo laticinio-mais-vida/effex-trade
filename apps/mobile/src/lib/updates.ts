@@ -55,7 +55,7 @@ export function downloadUpdate(): Promise<boolean> {
 
 /** Reinicia o app com a atualização baixada. */
 export function applyUpdate() {
-  return Updates.reloadAsync({ reloadScreenOptions: { backgroundColor: colors.bg, fade: true, spinner: { enabled: true, color: colors.primary } } })
+  return Updates.reloadAsync({ reloadScreenOptions: { backgroundColor: colors.fundo, fade: true, spinner: { enabled: true, color: colors.marinho } } })
 }
 
 /** No layout raiz: baixa ao voltar para o app e só reinicia sozinho depois de um tempo fora, numa tela segura. */

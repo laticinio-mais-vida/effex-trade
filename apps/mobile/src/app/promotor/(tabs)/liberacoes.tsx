@@ -1,7 +1,7 @@
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { Alert } from 'react-native'
-import { Button, EmptyState, ErrorView, LoadingView, Muted, Screen } from '@/components/ui'
+import { EmptyState, ErrorView, LoadingView, Muted, Screen, TextAction } from '@/components/ui'
 import { useDay } from '@/features/promotor/DayContext'
 import { RequestCard } from '@/features/RequestCard'
 import { api, errorMessage } from '@/lib/api'
@@ -43,7 +43,7 @@ export default function MinhasLiberacoes() {
           request={r}
           actions={
             r.status === 'PENDENTE' ? (
-              <Button title="Cancelar pedido" variant="ghost" small loading={cancelling === r.id} onPress={() => cancel(r.id)} />
+              <TextAction title={cancelling === r.id ? 'Cancelando...' : 'Cancelar pedido'} disabled={cancelling === r.id} onPress={() => cancel(r.id)} />
             ) : null
           }
         />

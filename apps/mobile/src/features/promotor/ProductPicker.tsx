@@ -1,10 +1,10 @@
 import { Image } from 'expo-image'
 import { useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, FlatList, Modal, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Banner, Button, Muted, styles } from '@/components/ui'
+import { Banner, Button, CheckOption, Muted, styles, TextAction } from '@/components/ui'
 import { api, errorMessage } from '@/lib/api'
-import { colors, radius, space } from '@/lib/theme'
+import { borders, colors, elevated, radius, sizes, space } from '@/lib/theme'
 import type { ProductOption } from '@/lib/types'
 
 /**
@@ -89,23 +89,23 @@ export function ProductPicker({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: insets.top }}>
+      <View style={{ flex: 1, backgroundColor: colors.fundo, paddingTop: insets.top }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: space.lg, paddingBottom: space.sm }}>
           <Text style={styles.sectionTitle}>{title}</Text>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>Cancelar</Text>
-          </Pressable>
+          <TextAction title="Cancelar" onPress={onClose} />
         </View>
         <View style={{ paddingHorizontal: space.lg, gap: space.sm }}>
           <View style={{ flexDirection: 'row', gap: space.md, alignItems: 'center' }}>
-            {previewUri ? <Image source={{ uri: previewUri }} style={{ width: 64, height: 64, borderRadius: radius.sm }} contentFit="cover" /> : null}
+            {previewUri ? (
+              <Image source={{ uri: previewUri }} style={{ width: sizes.miniatura, height: sizes.miniatura, borderRadius: radius.sm }} contentFit="cover" />
+            ) : null}
             <Muted style={{ flex: 1 }}>Marque todos os produtos que aparecem nesta foto. A lista mostra só os produtos que este cliente compra.</Muted>
           </View>
           <TextInput
             value={search}
             onChangeText={setSearch}
             placeholder="Buscar produto por nome, código ou marca"
-            placeholderTextColor={colors.faint}
+            placeholderTextColor={colors.bordaCampo}
             style={styles.input}
             autoCorrect={false}
           />
@@ -122,41 +122,26 @@ export function ProductPicker({
           }
           ListEmptyComponent={
             loading ? (
-              <ActivityIndicator color={colors.primary} style={{ marginTop: space.xl }} />
+              <ActivityIndicator color={colors.marinho} style={{ marginTop: space.xl }} />
             ) : (
               <Muted style={{ textAlign: 'center', marginTop: space.xl }}>Nenhum produto encontrado.</Muted>
             )
           }
-          renderItem={({ item }) => {
-            const on = selected.has(item.id)
-            return (
-              <Pressable onPress={() => toggle(item.id)} style={[styles.option, { flexDirection: 'row', alignItems: 'center', gap: space.md }, on && styles.optionActive]}>
-                <View
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 6,
-                    borderWidth: 2,
-                    borderColor: on ? colors.primary : colors.faint,
-                    backgroundColor: on ? colors.primary : 'transparent',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {on ? <Text style={{ color: '#fff', fontWeight: '800' }}>✓</Text> : null}
-                </View>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={styles.optionText}>{item.name}</Text>
-                  <Muted>
-                    {item.code}
-                    {item.brand ? ` · ${item.brand}` : ''}
-                  </Muted>
-                </View>
-              </Pressable>
-            )
-          }}
+          renderItem={({ item }) => (
+            <CheckOption label={item.name} detail={`${item.code}${item.brand ? ` · ${item.brand}` : ''}`} checked={selected.has(item.id)} onPress={() => toggle(item.id)} />
+          )}
         />
-        <View style={{ padding: space.lg, paddingBottom: insets.bottom + space.lg, borderTopWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, gap: space.sm }}>
+        <View
+          style={{
+            padding: space.lg,
+            paddingBottom: insets.bottom + space.lg,
+            borderTopWidth: borders.fina,
+            borderColor: colors.divisoria,
+            backgroundColor: colors.superficie,
+            gap: space.sm,
+            ...elevated,
+          }}
+        >
           <Muted>
             {selected.size === 0 ? 'Nenhum produto marcado' : `${selected.size} produto(s) marcado(s)`}
             {required && selected.size === 0 ? ': marque ao menos um.' : ''}
@@ -164,6 +149,7 @@ export function ProductPicker({
           <Button
             title={confirmLabel}
             disabled={required && selected.size === 0}
+            missing="Marque ao menos um produto"
             loading={busy}
             onPress={async () => {
               setBusy(true)

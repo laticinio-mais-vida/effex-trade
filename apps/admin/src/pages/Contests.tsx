@@ -42,7 +42,7 @@ export function ContestsPage() {
       <PageHead
         title="Contestações"
         description="Fotos reprovadas que os promotores contestaram pelo app."
-        help="Fotos reprovadas que os promotores contestaram pelo app (até 2 por dia, com explicação). Aceitar: a foto passa a valer como aprovada; a reprovação do vendedor fica conferida como incorreta (entra no PDF de correções dele) e a do supervisor ou do administrador vira aprovação. Negar: a reprovação continua e o promotor vê a sua resposta. É a mesma lista da aba Contestações do app do supervisor."
+        help="Fotos reprovadas que os promotores contestaram pelo app (até 2 por dia, com explicação). Aceitar: a foto passa a valer como aprovada; a reprovação do vendedor fica conferida como incorreta (entra no PDF de correções dele) e a do supervisor ou do administrador vira aprovação. Negar: a reprovação continua e o promotor vê a sua resposta. É a mesma lista do app do supervisor (Fotos > Contestações)."
       />
       <div className="toolbar">
         <PromotorSelect value={promotorId} onChange={resetPage(setPromotorId)} />

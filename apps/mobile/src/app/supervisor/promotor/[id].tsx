@@ -205,7 +205,7 @@ export default function PromotorDia() {
           pending.length >= 2 ? (
             <Button
               title="Alterar ordem"
-              variant="ghost"
+              variant="text"
               small
               onPress={() => {
                 setOrder(original)
@@ -311,7 +311,7 @@ export default function PromotorDia() {
           <Card>
             <Text style={styles.optionText}>{client.name}</Text>
             {client.city ? <Muted>{placeOf(client)}</Muted> : null}
-            <Button title="Trocar cliente" variant="ghost" small onPress={() => setClient(null)} />
+            <Button title="Trocar cliente" variant="text" small onPress={() => setClient(null)} />
           </Card>
         ) : (
           <ClientSearch
@@ -397,7 +397,7 @@ function UpcomingCard({ item, today, onRemove }: { item: ScheduledVisit; today: 
       {item.activity ? <Muted>Atividade: {item.activity.title}</Muted> : null}
       {item.note ? <Muted>Recado: {item.note}</Muted> : null}
       <View style={{ alignItems: 'flex-start' }}>
-        <Button title="Remover" variant="ghost" small onPress={onRemove} />
+        <Button title="Remover" variant="text" small onPress={onRemove} />
       </View>
     </Card>
   )

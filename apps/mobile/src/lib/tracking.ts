@@ -4,6 +4,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants'
 import * as Location from 'expo-location'
 import * as TaskManager from 'expo-task-manager'
 import { api, getToken } from './api'
+import { colors } from './theme'
 import { distanceMeters } from './location'
 
 /**
@@ -184,7 +185,7 @@ export async function startTracking(intervalMinutes: number, moving: MovingRules
       foregroundService: {
         notificationTitle: 'EFFEX Trade - jornada em andamento',
         notificationBody: 'Sua localização está sendo enviada ao supervisor.',
-        notificationColor: '#0B6E4F',
+        notificationColor: colors.marinho,
       },
     })
     return { mode: 'background' }

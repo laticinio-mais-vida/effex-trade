@@ -37,7 +37,7 @@ export function PhotosPage() {
     <div>
       <PageHead
         title="Avaliar fotos"
-        description="Aprove ou reprove as fotos dos atendimentos; a reprovação exige justificativa. É a mesma auditoria do app do supervisor (aba Auditoria de fotos): o que você decide aqui aparece lá, e vice-versa. As decisões dos vendedores aparecem junto da foto."
+        description="Aprove ou reprove as fotos dos atendimentos; a reprovação exige justificativa. É a mesma auditoria do app do supervisor (Fotos > Avaliar): o que você decide aqui aparece lá, e vice-versa. As decisões dos vendedores aparecem junto da foto."
       />
       <div className="toolbar">
         <DateRange from={range.from} to={range.to} onChange={resetPage(setRange)} />

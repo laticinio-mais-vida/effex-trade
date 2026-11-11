@@ -44,44 +44,6 @@ export const colors = {
   pinoJustificado: '#F2B705',
   /** Véu atrás de folhas e janelas */
   veu: 'rgba(6, 29, 57, 0.5)',
-
-  // Nomes antigos, só durante a transição: apontam para os valores novos. Cada etapa troca os da sua tela.
-  /** @deprecated use marinho */
-  primary: marinho,
-  /** @deprecated use marinho */
-  primaryDark: marinho,
-  /** @deprecated use neutroSuave */
-  primarySoft: '#EEF0F3',
-  /** @deprecated use fundo */
-  bg: '#FEF7EB',
-  /** @deprecated use superficie */
-  surface: '#FFFFFF',
-  /** @deprecated use divisoria */
-  border: '#E6DFD1',
-  /** @deprecated use texto */
-  text: marinho,
-  /** @deprecated use textoSecundario */
-  muted: '#475467',
-  /** @deprecated use bordaCampo */
-  faint: '#8A93A3',
-  /** @deprecated use naoFeito */
-  danger: '#B42318',
-  /** @deprecated use naoFeitoSuave */
-  dangerSoft: '#FDE7E4',
-  /** @deprecated use justificado (só para Justificado) */
-  warning: '#8F5106',
-  /** @deprecated use justificadoSuave (só para Justificado) */
-  warningSoft: '#FBE3B8',
-  /** @deprecated use emAtendimento */
-  info: '#1D4ED8',
-  /** @deprecated use emAtendimentoSuave */
-  infoSoft: '#E0EAFF',
-  /** @deprecated use feito */
-  success: '#146C34',
-  /** @deprecated use feitoSuave */
-  successSoft: '#E3F4E8',
-  /** @deprecated use neutroSuave */
-  neutralSoft: '#EEF0F3',
 }
 
 /** Tons de status: cada um com a cor forte (texto, borda) e a suave (fundo). */
@@ -141,8 +103,6 @@ export const radius = {
   md: 10,
   /** Topo das folhas que sobem de baixo */
   folha: 16,
-  /** @deprecated use md */
-  lg: 10,
 }
 
 export const borders = {

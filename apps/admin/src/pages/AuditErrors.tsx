@@ -72,7 +72,7 @@ export function AuditErrorsPage() {
       <PageHead
         title="Auditorias dos vendedores"
         description="Confira se o vendedor aprovou e reprovou certo cada foto."
-        help="Confira as aprovações e reprovações que o vendedor fez nas fotos: marque cada uma como correta ou incorreta (a incorreta exige justificativa). As incorretas viram as correções do vendedor, que vão no PDF. É a mesma conferência do app do supervisor (aba Auditorias dos vendedores)."
+        help="Confira as aprovações e reprovações que o vendedor fez nas fotos: marque cada uma como correta ou incorreta (a incorreta exige justificativa). As incorretas viram as correções do vendedor, que vão no PDF. É a mesma conferência do app do supervisor (Fotos > Vendedores)."
         actions={
           <button className="btn primary" onClick={download} disabled={!vendedorId || downloading}>
             {downloading ? 'Gerando PDF…' : 'Baixar PDF para o vendedor'}

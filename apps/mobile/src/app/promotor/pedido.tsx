@@ -6,6 +6,7 @@ import { ClientSearch } from '@/features/ClientSearch'
 import { permissionLabels, useDay } from '@/features/promotor/DayContext'
 import { api, errorMessage } from '@/lib/api'
 import { getQuickLocation } from '@/lib/location'
+import { type as typeScale } from '@/lib/theme'
 import type { Client } from '@/lib/types'
 
 const descriptions: Record<string, string> = {
@@ -71,7 +72,7 @@ export default function PedidoLiberacao() {
         {!choosingScope && descriptions[type] ? <Muted>{descriptions[type]}</Muted> : null}
         {visit ? (
           <Text style={styles.text}>
-            Cliente: <Text style={{ fontWeight: '700' }}>{visit.client.name}</Text>
+            Cliente: <Text style={typeScale.textoForte}>{visit.client.name}</Text>
           </Text>
         ) : null}
       </Card>

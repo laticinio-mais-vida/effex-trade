@@ -3,15 +3,14 @@ import { useFocusEffect } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { Keyboard, Text, View } from 'react-native'
 import { Badge, Banner, Button, Card, EmptyState, ErrorView, Field, LoadingView, Muted, Row, Screen, styles } from '@/components/ui'
-import { PhotoViewer, useViewerTyping } from '@/features/PhotoViewer'
+import { PhotoViewer, useViewerTyping, ViewerFooter, ViewerInfo } from '@/features/PhotoViewer'
 import { api, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
-import { contestStatusInfo, formatDate, formatDateTime, formatTime, photoTypeLabels, roleLabels } from '@/lib/format'
-import { colors, radius, space } from '@/lib/theme'
+import { contestStatusInfo, formatDate, formatDateTime, formatTime, MIN_JUSTIFICATION, photoTypeLabels, roleLabels } from '@/lib/format'
+import { colors, radius, sizes, space } from '@/lib/theme'
 import type { ContestInfo, RejectedList, RejectedPhoto } from '@/lib/types'
 import { useQuery } from '@/lib/useQuery'
 
-const MIN_REASON = 5
 
 /** Aba Recusadas do promotor: fotos reprovadas dos últimos 14 dias, com as justificativas, e a contestação. */
 export function RejectedScreen() {
@@ -51,7 +50,7 @@ export function RejectedScreen() {
           <RejectedRow key={p.id} photo={p} onPress={() => setSelected(p.id)} />
         ))}
       </Screen>
-      <PhotoViewer url={current?.url ?? null} visible={!!current} onClose={() => setSelected(null)}>
+      <PhotoViewer url={current?.url ?? null} visible={!!current} onClose={() => setSelected(null)} slots>
         {current ? <ContestPanel key={current.id} photo={current} remaining={remaining} onContested={onContested} /> : null}
       </PhotoViewer>
     </View>
@@ -62,9 +61,13 @@ function RejectedRow({ photo, onPress }: { photo: RejectedPhoto; onPress: () => 
   const first = photo.rejections[0]
   return (
     <Card onPress={onPress} style={{ flexDirection: 'row', gap: space.md, padding: space.md }}>
-      <Image source={{ uri: resolveUrl(photo.url) }} style={{ width: 84, height: 84, borderRadius: radius.sm, backgroundColor: colors.neutralSoft }} contentFit="cover" />
-      <View style={{ flex: 1, gap: 3 }}>
-        <Text style={[styles.text, { fontWeight: '700' }]} numberOfLines={1}>
+      <Image
+        source={{ uri: resolveUrl(photo.url) }}
+        style={{ width: sizes.miniatura, height: sizes.miniatura, borderRadius: radius.sm, backgroundColor: colors.neutroSuave }}
+        contentFit="cover"
+      />
+      <View style={{ flex: 1, gap: space.xs }}>
+        <Text style={styles.sectionTitle} numberOfLines={1}>
           {photo.client.name}
         </Text>
         <Muted>
@@ -77,7 +80,7 @@ function RejectedRow({ photo, onPress }: { photo: RejectedPhoto; onPress: () => 
         ) : null}
         <Row>
           {photo.contest ? <ContestBadge contest={photo.contest} /> : null}
-          {photo.canContest ? <Badge label="Pode contestar" color={colors.info} bg={colors.infoSoft} /> : null}
+          {photo.canContest ? <Badge label="Pode contestar" outline /> : null}
         </Row>
       </View>
     </Card>
@@ -86,7 +89,7 @@ function RejectedRow({ photo, onPress }: { photo: RejectedPhoto; onPress: () => 
 
 function ContestBadge({ contest }: { contest: ContestInfo }) {
   const info = contestStatusInfo[contest.status]
-  return <Badge label={info.label} color={info.color} bg={info.bg} />
+  return <Badge label={info.label} tone={info.tone} />
 }
 
 function ContestResult({ contest }: { contest: ContestInfo }) {
@@ -150,44 +153,50 @@ function ContestPanel({
         multiline
         autoFocus
         placeholder="Ex.: a gôndola estava completa; a luz da loja deixou a foto escura"
-        hint={`Mínimo de ${MIN_REASON} caracteres. O supervisor lê antes de decidir.`}
-        style={{ minHeight: 80 }}
+        hint={`Mínimo de ${MIN_JUSTIFICATION} caracteres. O supervisor lê antes de decidir.`}
       />
-      <Row>
+      <Row style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
         <Button title="Voltar" variant="secondary" onPress={stop} style={{ flex: 1 }} />
-        <Button title="Enviar contestação" onPress={submit} loading={busy} disabled={reason.trim().length < MIN_REASON} style={{ flex: 1 }} />
+        <Button
+          title="Enviar contestação"
+          onPress={submit}
+          loading={busy}
+          disabled={reason.trim().length < MIN_JUSTIFICATION}
+          missing={`Escreva pelo menos ${MIN_JUSTIFICATION} caracteres`}
+          style={{ flex: 1 }}
+        />
       </Row>
-      {error ? <Banner tone="danger" text={error} /> : null}
     </>
   )
 
   return (
     <>
-      {writing ? form : null}
-      <Text style={styles.sectionTitle}>{photo.client.name}</Text>
-      <Muted>
-        {photoTypeLabels[photo.type]} · {formatDate(photo.visit.date)} às {formatTime(photo.takenAt)}
-      </Muted>
-      {photo.rejections.map((r) => (
-        <Card key={r.id} style={{ padding: space.md }}>
-          <Row>
-            <Text style={[styles.text, { fontWeight: '700' }]}>
+      <ViewerInfo>
+        {writing ? form : null}
+        {error ? <Banner tone="danger" text={error} /> : null}
+        <Text style={styles.sectionTitle}>{photo.client.name}</Text>
+        <Muted>
+          {photoTypeLabels[photo.type]} · {formatDate(photo.visit.date)} às {formatTime(photo.takenAt)}
+        </Muted>
+        {photo.rejections.map((r) => (
+          <Card key={r.id} style={{ padding: space.md }}>
+            <Text style={styles.optionText}>
               Reprovada por {r.auditor.name} ({roleLabels[r.auditor.role]})
             </Text>
-          </Row>
-          {r.justification ? <Text style={styles.text}>"{r.justification}"</Text> : null}
-          <Muted>{formatDateTime(r.at)}</Muted>
-        </Card>
-      ))}
-      {photo.contest ? <ContestResult contest={photo.contest} /> : null}
-      {!writing && photo.canContest ? (
-        remaining > 0 ? (
-          <Button title="Contestar esta foto" variant="secondary" onPress={() => setWriting(true)} />
-        ) : (
+            {r.justification ? <Text style={styles.text}>"{r.justification}"</Text> : null}
+            <Muted>{formatDateTime(r.at)}</Muted>
+          </Card>
+        ))}
+        {photo.contest ? <ContestResult contest={photo.contest} /> : null}
+        {!writing && photo.canContest && remaining <= 0 ? (
           <Banner tone="info" text="Você já usou as contestações de hoje. Amanhã pode contestar esta foto, se ela ainda estiver nos últimos 14 dias." />
-        )
+        ) : null}
+      </ViewerInfo>
+      {!writing && photo.canContest && remaining > 0 ? (
+        <ViewerFooter>
+          <Button title="Contestar esta foto" variant="secondary" onPress={() => setWriting(true)} />
+        </ViewerFooter>
       ) : null}
-      {!writing && error ? <Banner tone="danger" text={error} /> : null}
     </>
   )
 }

@@ -1,6 +1,6 @@
 import { DefaultTheme, type Theme } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { borders, colors, fonts, type } from '@/lib/theme'
+import { borders, colors, fonts, space, type } from '@/lib/theme'
 
 /** Tema da navegação: cores e Public Sans no cabeçalho e nas abas (o React Navigation lê daqui). */
 export const navigationTheme: Theme = {
@@ -42,6 +42,8 @@ export const stackOptions = {
  * e embaixo. A altura padrão do React Navigation (49) corta o rótulo nesse tamanho.
  */
 const TAB_BAR_HEIGHT = 56
+/** Letra do contador da aba: menor que o rótulo, para "99+" caber na largura do ícone */
+const BADGE_FONT = 11
 
 /** Barra de abas: fundo branco com borda superior; ativa em marinho, inativas em cinza; contador em pílula marinho. */
 export function useTabsOptions() {
@@ -61,6 +63,6 @@ export function useTabsOptions() {
     },
     tabBarLabelStyle: { ...type.selo },
     // Letra menor que o rótulo para "99+" caber na largura do ícone
-    tabBarBadgeStyle: { backgroundColor: colors.marinho, color: colors.branco, fontFamily: fonts.semibold, fontSize: 11, paddingHorizontal: 3 },
+    tabBarBadgeStyle: { backgroundColor: colors.marinho, color: colors.branco, fontFamily: fonts.semibold, fontSize: BADGE_FONT, paddingHorizontal: space.xs - 1 },
   } as const
 }

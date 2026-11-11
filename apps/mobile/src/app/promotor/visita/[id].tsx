@@ -1,9 +1,11 @@
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { File as FsFile } from 'expo-file-system'
 import * as ImagePicker from 'expo-image-picker'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Alert, Linking, Pressable, Text, View } from 'react-native'
-import { Badge, Banner, Button, Card, ErrorView, Field, LoadingView, Muted, PhotoThumb, Row, Screen, SectionTitle, Sheet, styles } from '@/components/ui'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ActivityIndicator, Alert, Keyboard, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Badge, Banner, Button, Card, ErrorView, Field, LoadingView, Muted, NumberCircle, PhotoThumb, Row, Screen, SectionTitle, Sheet, styles, TextAction } from '@/components/ui'
 import { dayClosed, onLunch, permissionLabels, useDay } from '@/features/promotor/DayContext'
 import { PhotoInfoSheet, type PhotoExtra } from '@/features/promotor/PhotoInfoSheet'
 import { ProductPicker } from '@/features/promotor/ProductPicker'
@@ -28,9 +30,10 @@ import {
   visitStatusInfo,
 } from '@/lib/format'
 import { distanceMeters, getPreciseLocation, getQuickLocation, LocationError, type CurrentLocation } from '@/lib/location'
-import { colors, space } from '@/lib/theme'
+import { borders, colors, elevated, sizes, space, type } from '@/lib/theme'
 import type { CheckinResult, Photo, PhotoType, Visit, VisitStep, VisitTask } from '@/lib/types'
 import { useQuery } from '@/lib/useQuery'
+import { stepLine, visitSteps, type StepKey } from '@/lib/visitSteps'
 
 type Action = 'checkin' | 'reopen' | 'checkout' | 'justify' | 'remove' | 'stock'
 type OpenMode = 'checkin' | 'reopen'
@@ -80,17 +83,58 @@ function formatMeta(meta: Record<string, unknown>) {
     .join(' · ')
 }
 
-/** Um passo da sequência do atendimento. */
-function Step({ n, title, state, detail, children }: { n: number; title: string; state: 'done' | 'current' | 'todo'; detail?: string; children?: ReactNode }) {
-  const tone = state === 'done' ? colors.success : state === 'current' ? colors.primary : colors.faint
+
+/**
+ * Passo do atendimento. Concluído: uma linha só ("Fachada · 20:57"), que abre a foto ao tocar. Atual: cartão em
+ * destaque, sem botão próprio (o botão fica na barra fixa). Pendente: número e título; com a sequência obrigatória
+ * desligada, mantém o próprio botão (children).
+ */
+function Step({
+  n,
+  title,
+  state,
+  detail,
+  onPressDone,
+  doneAction,
+  children,
+}: {
+  n: number
+  title: string
+  state: 'done' | 'current' | 'todo'
+  detail?: string
+  onPressDone?: () => void
+  doneAction?: ReactNode
+  children?: ReactNode
+}) {
+  if (state === 'done') {
+    // A linha abre a foto; a ação ao lado ("+ outra") é um botão à parte, não dentro dela
+    return (
+      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.xs }}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onPressDone}
+          disabled={!onPressDone}
+          style={({ pressed }) => [{ flex: 1, minHeight: sizes.toque, flexDirection: 'row', alignItems: 'center', gap: space.md }, pressed && styles.pressed]}
+        >
+          <View style={localStyles.doneCircle}>
+            <Ionicons name="checkmark" size={sizes.iconeComTexto} color={colors.feito} />
+          </View>
+          <Text style={[styles.text, { flex: 1 }]} numberOfLines={2}>
+            {title}
+            {detail ? <Text style={styles.muted}> · {detail}</Text> : null}
+          </Text>
+        </Pressable>
+        {doneAction}
+      </Card>
+    )
+  }
+  const current = state === 'current'
   return (
-    <Card style={state === 'current' ? { borderColor: colors.primary, borderWidth: 2 } : undefined}>
-      <Row style={{ flexWrap: 'nowrap' }}>
-        <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: state === 'todo' ? colors.neutralSoft : tone }}>
-          <Text style={{ color: state === 'todo' ? colors.muted : '#fff', fontWeight: '800' }}>{state === 'done' ? '✓' : n}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.text, { fontWeight: '700', color: state === 'todo' ? colors.muted : colors.text }]}>{title}</Text>
+    <Card variant={current ? 'proximo' : 'normal'}>
+      <Row style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+        <NumberCircle n={n} tone={current ? 'marinho' : 'neutro'} />
+        <View style={{ flex: 1, gap: space.xs / 2 }}>
+          <Text style={current ? styles.sectionTitle : [type.textoForte, { color: colors.textoSecundario }]}>{title}</Text>
           {detail ? <Muted>{detail}</Muted> : null}
         </View>
       </Row>
@@ -100,7 +144,8 @@ function Step({ n, title, state, detail, children }: { n: number; title: string;
 }
 
 export default function VisitaScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  // abrir=1: veio do botão "Abrir atendimento" do Meu dia; abre direto (cerca e foto da fachada)
+  const { id, abrir } = useLocalSearchParams<{ id: string; abrir?: string }>()
   const router = useRouter()
   const { day, reload: reloadDay } = useDay()
   const query = useQuery(() => api<Visit>(`/promotor/visits/${id}`), [id])
@@ -117,11 +162,30 @@ export default function VisitaScreen() {
   const [highlightTasks, setHighlightTasks] = useState<Set<string>>(new Set())
   const [notes, setNotes] = useState('')
   const [, setTick] = useState(0)
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
+  const insets = useSafeAreaInsets()
+  const openNow = useRef<(() => void) | null>(null)
+  const autoOpened = useRef(false)
 
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 30_000)
     return () => clearInterval(t)
   }, [])
+  // A barra fixa some quando o teclado abre (observações do atendimento)
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true))
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false))
+    return () => {
+      show.remove()
+      hide.remove()
+    }
+  }, [])
+  useEffect(() => {
+    if (abrir === '1' && query.data?.status === 'PENDENTE' && !autoOpened.current && openNow.current) {
+      autoOpened.current = true
+      openNow.current()
+    }
+  }, [abrir, query.data?.status, day])
 
   if (query.loading && !visit) return <LoadingView />
   if (query.error && !visit) return <ErrorView message={query.error} onRetry={query.refresh} />
@@ -170,7 +234,6 @@ export default function VisitaScreen() {
   const canBefore = !enforced || afterPhotos.length === 0
   const canAfter = !enforced || beforePhotos.length > 0
   const canRupture = !enforced || (afterPhotos.length > 0 && afterWithoutProducts === 0)
-  const stateOf = (step: VisitStep, done: boolean): 'done' | 'current' | 'todo' => (done ? 'done' : enforced && next === step ? 'current' : 'todo')
   // Atividade de foto não trava quando o supervisor dispensou as fotos (pode ser concluída sem foto)
   const needsPhoto = (t: VisitTask) => t.requiresPhoto && !visit.photosWaived
   const pendingRequired = tasks.filter((t) => t.required && !t.done && !(t.requiresPhoto && visit.photosWaived))
@@ -493,9 +556,36 @@ export default function VisitaScreen() {
   }
 
   const inProgress = visit.status === 'EM_ATENDIMENTO'
-  // Numeração dos passos conforme as etapas da estrutura (1 = fachada)
-  const stockStepNo = hasPhotoStep ? 5 : 2
-  const checkoutStepNo = stockStepNo + (hasStock ? 1 : 0)
+  openNow.current = () => void checkin('checkin')
+
+  // Passos e passo atual (mesmo cálculo do cartão "Agora" do Meu dia)
+  const { steps, current, ...stepInfo } = visitSteps(visit, rules)
+  const requiredTasks = stepInfo.requiredTasks
+  const firstTask = pendingRequired[0]
+  const firstNoProducts = afterPhotos.find((ph) => !ph.products?.length)
+
+  // Botão da barra fixa: sempre o próximo passo
+  const barAction: { title: string; onPress: () => void; disabled?: boolean; loading?: boolean } = (() => {
+    switch (current) {
+      case 'ANTES':
+        return { title: uploading === 'ANTES' ? 'Enviando...' : 'Tirar foto de antes', onPress: () => void capture('ANTES'), disabled: !!uploading || !canBefore }
+      case 'DEPOIS':
+        return firstNoProducts
+          ? { title: 'Marcar produtos na foto de depois', onPress: () => setEditingPhoto(firstNoProducts), disabled: !!uploading }
+          : { title: uploading === 'DEPOIS' ? 'Enviando...' : 'Tirar foto de depois', onPress: captureAfter, disabled: !!uploading || !canAfter }
+      case 'RUPTURA':
+        return { title: 'Conferir e confirmar ruptura', onPress: () => setRuptureOpen(true), disabled: !!uploading || !canRupture }
+      case 'ESTOQUE':
+        return { title: 'Confirmar que fiz a contagem', onPress: confirmStock, loading: busy === 'stock' }
+      case 'TAREFA':
+        return firstTask && needsPhoto(firstTask)
+          ? { title: uploading === 'ATIVIDADE_EXTRA' ? 'Enviando...' : 'Fotografar atividade', onPress: () => void capture('ATIVIDADE_EXTRA', { taskId: firstTask.id }), disabled: !!uploading }
+          : { title: 'Concluir atividade', onPress: () => firstTask && setCompletingTask(firstTask) }
+      default:
+        return { title: 'Fazer check-out', onPress: checkout, loading: busy === 'checkout', disabled: !!uploading }
+    }
+  })()
+  const stepText = stepLine(stepInfo)
 
   const tasksBlock =
     tasks.length > 0 ? (
@@ -505,18 +595,15 @@ export default function VisitaScreen() {
         {tasks.map((t) => {
           const highlighted = highlightTasks.has(t.id) && !t.done
           return (
-            <Card key={t.id} style={highlighted ? { borderColor: colors.danger, borderWidth: 2 } : undefined}>
-              <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-                <Text style={[styles.text, { fontWeight: '700', flex: 1 }]}>
-                  {t.done ? '✓ ' : ''}
-                  {t.title}
-                </Text>
-                <Badge label={t.done ? 'Feita' : 'Pendente'} color={t.done ? colors.success : colors.warning} bg={t.done ? colors.successSoft : colors.warningSoft} />
+            <Card key={t.id} style={highlighted ? { borderColor: colors.naoFeito, borderWidth: borders.campo } : undefined}>
+              <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+                <Text style={[styles.optionText, { flex: 1 }]}>{t.title}</Text>
+                <Badge label={t.done ? 'Feita' : 'Pendente'} tone={t.done ? 'feito' : 'neutro'} />
               </Row>
               <Row>
-                {t.required ? <Badge label="Obrigatória" color={colors.danger} bg={colors.dangerSoft} /> : null}
-                <Badge label={t.requiresPhoto ? 'Exige foto' : 'Sem foto'} color={colors.info} bg={colors.infoSoft} />
-                {t.recurrence && recurrenceLabels[t.recurrence] ? <Badge label={recurrenceLabels[t.recurrence]!} color={colors.muted} bg={colors.neutralSoft} /> : null}
+                {t.required ? <Badge label="Obrigatória" outline /> : null}
+                <Badge label={t.requiresPhoto ? 'Exige foto' : 'Sem foto'} tone="neutro" />
+                {t.recurrence && recurrenceLabels[t.recurrence] ? <Badge label={recurrenceLabels[t.recurrence]!} tone="neutro" /> : null}
               </Row>
               {t.description ? <Muted>{t.description}</Muted> : null}
               {t.done ? (
@@ -529,13 +616,12 @@ export default function VisitaScreen() {
                 needsPhoto(t) ? (
                   <Button
                     title={t.done ? 'Fotografar de novo' : 'Fotografar atividade'}
-                    small
-                    variant={t.done ? 'secondary' : 'primary'}
+                    variant="secondary"
                     disabled={!!uploading}
                     onPress={() => void capture('ATIVIDADE_EXTRA', { taskId: t.id })}
                   />
                 ) : !t.done ? (
-                  <Button title="Concluir atividade" small variant="primary" onPress={() => setCompletingTask(t)} />
+                  <Button title="Concluir atividade" variant="secondary" onPress={() => setCompletingTask(t)} />
                 ) : null
               ) : null}
             </Card>
@@ -548,37 +634,68 @@ export default function VisitaScreen() {
   const thumbs = (list: Photo[]) =>
     list.length > 0 ? (
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-        {list.map((p) => (
+        {list.map((ph) => (
           <PhotoThumb
-            key={p.id}
-            url={p.url}
-            size={84}
-            label={p.type === 'DEPOIS' ? (p.products?.length ? `${p.products.length} produto(s)` : 'Sem produtos') : photoTypeLabels[p.type]}
-            onPress={() => setViewing(p)}
+            key={ph.id}
+            url={ph.url}
+            size={sizes.miniatura}
+            label={ph.type === 'DEPOIS' ? (ph.products?.length ? `${ph.products.length} produto(s)` : 'Sem produtos') : photoTypeLabels[ph.type]}
+            onPress={() => setViewing(ph)}
           />
         ))}
       </View>
     ) : null
+  const stateOf = (key: StepKey, done: boolean): 'done' | 'current' | 'todo' => (done ? 'done' : key === current ? 'current' : 'todo')
+  const ownButton = (key: StepKey) => !enforced && key !== current
+  const stepState = (key: StepKey) => stateOf(key, steps.find((st) => st.key === key)?.done ?? false)
+  const numberOf = (key: StepKey) => steps.findIndex((st) => st.key === key) + 1
+  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${visit.client.latitude},${visit.client.longitude}`
+  const addMore = (label: string, onPress: () => void, disabled?: boolean) => <TextAction title={label} onPress={onPress} disabled={disabled || !!uploading} />
+
+  const bar =
+    inProgress && !keyboardOpen ? (
+      <View style={[localStyles.bar, { paddingBottom: insets.bottom + space.md }]}>
+        <Text style={[type.textoForte, styles.number]}>{stepText}</Text>
+        <Button title={barAction.title} onPress={barAction.onPress} disabled={barAction.disabled} loading={barAction.loading} />
+      </View>
+    ) : null
 
   return (
-    <Screen refreshing={query.refreshing} onRefresh={query.refresh}>
-      <Card>
-        <Row>
-          <Badge label={status.label} color={status.color} bg={status.bg} />
-          {originLabels[visit.origin] ? <Badge label={originLabels[visit.origin]!} color={colors.info} bg={colors.infoSoft} /> : null}
-          {reopened ? <Badge label="Reaberto" color={colors.info} bg={colors.infoSoft} /> : null}
-          {visit.autoClosed ? <Badge label="Encerrado automaticamente" color={colors.warning} bg={colors.warningSoft} /> : null}
-          {!isDefaultStructure(modules) ? <Badge label={structureLabel(modules)} color={colors.primary} bg={colors.primarySoft} /> : null}
-          <Muted>#{visit.position} do roteiro</Muted>
-        </Row>
-        <Text style={styles.title}>{visit.client.name}</Text>
-        {visit.client.legalName && visit.client.legalName !== visit.client.name ? <Muted>{visit.client.legalName}</Muted> : null}
-        {visit.client.city ? <Muted>{placeOf(visit.client)}</Muted> : null}
-        <Pressable onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${visit.client.latitude},${visit.client.longitude}`)}>
-          <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>Abrir no mapa / como chegar</Text>
-        </Pressable>
-        <Muted>{visit.client.geofenceExempt ? 'Cliente sem cerca eletrônica: a abertura e o check-out valem de qualquer lugar.' : `Cerca eletrônica: ${radius} m`}</Muted>
-      </Card>
+    <Screen refreshing={query.refreshing} onRefresh={query.refresh} footer={bar}>
+      {inProgress ? (
+        // O que importa agora: o passo atual e quanto falta, o tempo no cliente, e o cliente numa faixa compacta
+        <Card variant="emAtendimento">
+          <Text style={[type.textoForte, styles.number, { color: colors.marinho }]}>{stepText}</Text>
+          <Text style={[styles.text, styles.number]}>
+            {reopened ? 'Reaberto' : 'Em atendimento'} há {formatMinutes(minutesSince(openSince))} (desde {formatTime(openSince)})
+          </Text>
+          {rules.minVisitMinutes > 0 ? <Muted>Tempo mínimo no cliente: {rules.minVisitMinutes} min</Muted> : null}
+          {reopened ? <Muted>Aberturas de hoje: {formatSessions(visit)}. O que já foi feito continua valendo.</Muted> : null}
+          <View style={localStyles.clientStrip}>
+            <Text style={styles.sectionTitle} numberOfLines={1}>
+              {visit.client.name}
+            </Text>
+            {visit.client.city ? <Muted numberOfLines={1}>{placeOf(visit.client)}</Muted> : null}
+            <TextAction title="Abrir no mapa / como chegar" onPress={() => void Linking.openURL(mapUrl)} style={{ alignSelf: 'flex-start' }} />
+          </View>
+        </Card>
+      ) : (
+        <Card>
+          <Row>
+            <Badge label={status.label} tone={status.tone} />
+            {originLabels[visit.origin] ? <Badge label={originLabels[visit.origin]!} tone="neutro" /> : null}
+            {reopened ? <Badge label="Reaberto" tone="neutro" /> : null}
+            {visit.autoClosed ? <Badge label="Encerrado automaticamente" tone="neutro" /> : null}
+            {!isDefaultStructure(modules) ? <Badge label={structureLabel(modules)} tone="neutro" /> : null}
+            <Muted>#{visit.position} do roteiro</Muted>
+          </Row>
+          <Text style={styles.sectionTitle}>{visit.client.name}</Text>
+          {visit.client.legalName && visit.client.legalName !== visit.client.name ? <Muted>{visit.client.legalName}</Muted> : null}
+          {visit.client.city ? <Muted>{placeOf(visit.client)}</Muted> : null}
+          <TextAction title="Abrir no mapa / como chegar" onPress={() => void Linking.openURL(mapUrl)} style={{ alignSelf: 'flex-start' }} />
+          <Muted>{visit.client.geofenceExempt ? 'Cliente sem cerca eletrônica: a abertura e o check-out valem de qualquer lugar.' : `Cerca eletrônica: ${radius} m`}</Muted>
+        </Card>
+      )}
 
       {visit.scheduled && (visit.origin === 'PONTUAL' || visit.scheduled.note) ? (
         <Banner
@@ -592,7 +709,7 @@ export default function VisitaScreen() {
       ) : null}
 
       {pendingRequests.map((r) => (
-        <Banner key={r.id} tone="warning" text={`Aguardando supervisor: ${permissionLabels[r.type] ?? r.type}`} />
+        <Banner key={r.id} tone="info" text={`Aguardando supervisor: ${permissionLabels[r.type] ?? r.type}`} />
       ))}
       {visit.geofenceWaived && visit.status !== 'CONCLUIDA' ? <Banner tone="success" text="Supervisor liberou este cliente fora da cerca eletrônica." /> : null}
       {visit.photosWaived ? (
@@ -642,76 +759,67 @@ export default function VisitaScreen() {
 
       {inProgress ? (
         <>
-          <Card style={{ backgroundColor: colors.infoSoft, borderColor: colors.info }}>
-            <Text style={[styles.text, { fontWeight: '700', color: colors.info }]}>
-              {reopened ? 'Reaberto' : 'Em atendimento'} desde {formatTime(openSince)} ({formatMinutes(minutesSince(openSince))})
-            </Text>
-            {reopened ? <Muted>Aberturas de hoje: {formatSessions(visit)}. O que já foi feito continua valendo.</Muted> : null}
-            {visit.checkinDistance != null && !reopened ? <Muted>Check-in a {formatDistance(visit.checkinDistance)} do cliente</Muted> : null}
-            {rules.minVisitMinutes > 0 ? <Muted>Tempo mínimo no cliente: {rules.minVisitMinutes} min</Muted> : null}
-            {enforced ? <Muted>Siga os passos abaixo nesta ordem.</Muted> : null}
-          </Card>
-
-          <Step n={1} title="Fachada da loja" state={facadePhotos.length > 0 || !needsFacade ? 'done' : 'todo'} detail={facadePhotos.length > 0 ? `Tirada às ${formatTime(facadePhotos[0]!.takenAt)}` : 'Não exigida'}>
-            {thumbs(facadePhotos)}
-          </Step>
+          <Step
+            n={numberOf('FACHADA')}
+            title="Fachada"
+            state={stepState('FACHADA')}
+            detail={facadePhotos.length > 0 ? formatTime(facadePhotos[0]!.takenAt) : 'não exigida'}
+            onPressDone={facadePhotos[0] ? () => setViewing(facadePhotos[0]!) : undefined}
+          />
 
           {hasPhotoStep ? (
             <>
               <Step
-                n={2}
+                n={numberOf('ANTES')}
                 title="Foto de antes"
-                state={stateOf('ANTES', beforePhotos.length > 0)}
-                detail={beforePhotos.length > 0 ? `${beforePhotos.length} foto(s)` : 'Como a gôndola estava ao chegar'}
+                state={stepState('ANTES')}
+                detail={beforePhotos.length > 0 ? `${beforePhotos.length} foto(s) · ${formatTime(beforePhotos[0]!.takenAt)}` : 'Como a gôndola estava ao chegar'}
+                onPressDone={beforePhotos[0] ? () => setViewing(beforePhotos[0]!) : undefined}
+                doneAction={canBefore ? addMore('+ outra', () => void capture('ANTES')) : undefined}
               >
                 {thumbs(beforePhotos)}
-                <Button
-                  title={uploading === 'ANTES' ? 'Enviando...' : beforePhotos.length > 0 ? '+ Outra foto de antes' : 'Tirar foto de antes'}
-                  small
-                  variant={enforced && next === 'ANTES' ? 'primary' : 'secondary'}
-                  disabled={!!uploading || !canBefore}
-                  onPress={() => void capture('ANTES')}
-                />
+                {ownButton('ANTES') ? (
+                  <Button title={uploading === 'ANTES' ? 'Enviando...' : 'Tirar foto de antes'} variant="secondary" disabled={!!uploading || !canBefore} onPress={() => void capture('ANTES')} />
+                ) : null}
                 {!canBefore ? <Muted>Já existem fotos de depois: a foto de antes vem antes delas.</Muted> : null}
               </Step>
 
               <Step
-                n={3}
+                n={numberOf('DEPOIS')}
                 title="Fotos de depois, marcando os produtos"
-                state={stateOf('DEPOIS', afterPhotos.length > 0 && afterWithoutProducts === 0)}
-                detail={afterPhotos.length > 0 ? `${afterPhotos.length} foto(s), ${markedProducts} produto(s) marcados` : 'Como a gôndola ficou, com os produtos identificados'}
+                state={stepState('DEPOIS')}
+                detail={
+                  afterPhotos.length > 0
+                    ? `${afterPhotos.length} foto(s), ${markedProducts} produto(s) marcados`
+                    : 'Como a gôndola ficou, com os produtos identificados'
+                }
+                onPressDone={afterPhotos[0] ? () => setViewing(afterPhotos[0]!) : undefined}
+                doneAction={addMore('+ outra', captureAfter, !canAfter)}
               >
                 {thumbs(afterPhotos)}
                 {afterWithoutProducts > 0 ? <Banner tone="warning" text={`${afterWithoutProducts} foto(s) de depois sem produtos marcados. Toque na foto e use "Editar produtos".`} /> : null}
-                <Button
-                  title={uploading === 'DEPOIS' ? 'Enviando...' : afterPhotos.length > 0 ? '+ Outra foto de depois' : 'Tirar foto de depois'}
-                  small
-                  variant={enforced && next === 'DEPOIS' ? 'primary' : 'secondary'}
-                  disabled={!!uploading || !canAfter}
-                  onPress={() => void captureAfter()}
-                />
+                {ownButton('DEPOIS') ? (
+                  <Button title={uploading === 'DEPOIS' ? 'Enviando...' : 'Tirar foto de depois'} variant="secondary" disabled={!!uploading || !canAfter} onPress={captureAfter} />
+                ) : null}
                 {!canAfter ? <Muted>Tire a foto de antes primeiro.</Muted> : null}
               </Step>
 
               <Step
-                n={4}
-                title="Confirmar ruptura"
-                state={stateOf('RUPTURA', !!progress?.ruptureConfirmed)}
+                n={numberOf('RUPTURA')}
+                title="Ruptura"
+                state={stepState('RUPTURA')}
                 detail={
                   progress?.ruptureConfirmed
                     ? visit.ruptures?.length
-                      ? `Confirmada: ${visit.ruptures.map((p) => p.name).join(', ')}`
-                      : 'Confirmada: nenhuma ruptura'
+                      ? `confirmada: ${visit.ruptures.map((pr) => pr.name).join(', ')}`
+                      : 'confirmada: nenhuma'
                     : 'Produtos que o cliente compra e não aparecem nas fotos de depois'
                 }
+                onPressDone={() => setRuptureOpen(true)}
               >
-                <Button
-                  title={progress?.ruptureConfirmed ? 'Rever ruptura' : 'Conferir e confirmar ruptura'}
-                  small
-                  variant={enforced && next === 'RUPTURA' ? 'primary' : 'secondary'}
-                  disabled={!!uploading || !canRupture}
-                  onPress={() => setRuptureOpen(true)}
-                />
+                {ownButton('RUPTURA') ? (
+                  <Button title="Conferir e confirmar ruptura" variant="secondary" disabled={!!uploading || !canRupture} onPress={() => setRuptureOpen(true)} />
+                ) : null}
                 {!canRupture ? <Muted>Antes, tire as fotos de depois e marque os produtos em todas elas.</Muted> : null}
               </Step>
             </>
@@ -719,45 +827,40 @@ export default function VisitaScreen() {
 
           {hasStock ? (
             <Step
-              n={stockStepNo}
+              n={numberOf('ESTOQUE')}
               title="Contagem de estoque"
-              state={progress?.stockConfirmed ? 'done' : next === 'ESTOQUE' ? 'current' : 'todo'}
-              detail={progress?.stockConfirmed && visit.stockConfirmedAt ? `Confirmada às ${formatTime(visit.stockConfirmedAt)}` : 'Faça a contagem do estoque da loja e confirme aqui'}
+              state={stepState('ESTOQUE')}
+              detail={progress?.stockConfirmed && visit.stockConfirmedAt ? `confirmada às ${formatTime(visit.stockConfirmedAt)}` : 'Faça a contagem do estoque da loja e confirme aqui'}
             >
-              {!progress?.stockConfirmed ? (
-                <Button title="Confirmar que fiz a contagem" small variant={next === 'ESTOQUE' ? 'primary' : 'secondary'} loading={busy === 'stock'} onPress={confirmStock} />
-              ) : null}
+              {ownButton('ESTOQUE') ? <Button title="Confirmar que fiz a contagem" variant="secondary" loading={busy === 'stock'} onPress={confirmStock} /> : null}
             </Step>
           ) : null}
 
-          {hasActivities ? tasksBlock : null}
+          {requiredTasks.length > 0 ? (
+            <Step
+              n={numberOf('TAREFA')}
+              title="Atividades obrigatórias"
+              state={stepState('TAREFA')}
+              detail={pendingRequired.length > 0 ? `${pendingRequired.length} pendente(s): ${pendingRequired.map((t) => t.title).join('; ')}` : 'feitas'}
+            />
+          ) : null}
 
           <Step
-            n={checkoutStepNo}
+            n={numberOf('CHECKOUT')}
             title="Encerrar atendimento"
-            state={ready ? 'current' : 'todo'}
+            state={stepState('CHECKOUT')}
             detail={rules.requireGeofenceOnCheckout && !visit.client.geofenceExempt ? 'O check-out também precisa ser feito na loja.' : undefined}
           >
-            {pendingRequired.length > 0 ? (
-              <Banner tone="warning" text={`Conclua antes: ${pendingRequired.map((t) => t.title).join('; ')}.`} />
-            ) : null}
             <Field label="Observações do atendimento" value={notes} onChangeText={setNotes} multiline placeholder="Opcional" />
-            <Button
-              title="Fazer check-out"
-              variant={ready ? 'success' : 'secondary'}
-              onPress={checkout}
-              loading={busy === 'checkout'}
-              disabled={!!uploading}
-            />
-            {enforced && progress && progress.missing.some((m) => PHOTO_STEPS.includes(m)) ? (
-              <Button title="Não consigo fazer as fotos: pedir dispensa" variant="ghost" small onPress={() => goRequest('DISPENSA_FOTOS')} />
-            ) : null}
+            {ownButton('CHECKOUT') ? <Button title="Fazer check-out" variant="secondary" onPress={checkout} loading={busy === 'checkout'} disabled={!!uploading} /> : null}
           </Step>
+
+          {hasActivities ? tasksBlock : null}
 
           <SectionTitle>Outras fotos</SectionTitle>
           <Muted>Podem ser tiradas a qualquer momento do atendimento.</Muted>
           {thumbs(otherPhotos)}
-          <Row>
+          <Row style={{ flexWrap: 'nowrap' }}>
             <Button title={uploading === 'VENCIMENTO' ? 'Enviando...' : '+ Vencimento'} small variant="secondary" disabled={!!uploading} onPress={() => setInfoFor('VENCIMENTO')} style={{ flex: 1 }} />
             {hasActivities ? (
               <Button
@@ -772,9 +875,12 @@ export default function VisitaScreen() {
           </Row>
           {uploading ? (
             <Row>
-              <ActivityIndicator color={colors.primary} />
+              <ActivityIndicator color={colors.marinho} />
               <Muted>Enviando foto...</Muted>
             </Row>
+          ) : null}
+          {enforced && progress && progress.missing.some((m) => PHOTO_STEPS.includes(m)) ? (
+            <TextAction title="Não consigo fazer as fotos: pedir dispensa" onPress={() => goRequest('DISPENSA_FOTOS')} />
           ) : null}
         </>
       ) : null}
@@ -790,7 +896,7 @@ export default function VisitaScreen() {
 
       {visit.status === 'CONCLUIDA' ? (
         <Card>
-          <Text style={[styles.text, { fontWeight: '700' }]}>
+          <Text style={[styles.optionText, styles.number]}>
             {reopened ? 'Atendido em ' : 'Atendido '}
             {formatSessions(visit)} ({formatMinutes(visitMinutes(visit))} no cliente)
           </Text>
@@ -800,7 +906,7 @@ export default function VisitaScreen() {
           {hasStock ? <Muted>{visit.stockConfirmedAt ? `Contagem de estoque confirmada às ${formatTime(visit.stockConfirmedAt)}.` : 'Contagem de estoque não confirmada.'}</Muted> : null}
           {visit.ruptureConfirmedAt ? (
             visit.ruptures?.length ? (
-              <Text style={styles.text}>Rupturas confirmadas: {visit.ruptures.map((p) => p.name).join(', ')}</Text>
+              <Text style={styles.text}>Rupturas confirmadas: {visit.ruptures.map((pr) => pr.name).join(', ')}</Text>
             ) : (
               <Muted>Sem ruptura.</Muted>
             )
@@ -824,16 +930,16 @@ export default function VisitaScreen() {
 
       {visit.status === 'JUSTIFICADA' && visit.justification ? (
         <Card>
-          <Text style={[styles.text, { fontWeight: '700' }]}>Justificado: {visit.justification.reason}</Text>
+          <Text style={styles.optionText}>Justificado: {visit.justification.reason}</Text>
           <Muted>{visit.justification.text}</Muted>
         </Card>
       ) : null}
 
       {canJustify ? (
-        <View style={{ gap: space.sm, marginTop: space.md }}>
-          <Button title="Justificar não atendimento" variant="ghost" onPress={() => setJustifyOpen(true)} />
-          {visit.status === 'PENDENTE' ? <Button title="Pedir troca deste cliente" variant="ghost" onPress={() => goRequest('SUBSTITUIR_CLIENTE')} /> : null}
-          {visit.status === 'PENDENTE' && visit.origin === 'EXTRA' ? <Button title="Remover cliente extra" variant="ghost" onPress={removeExtra} loading={busy === 'remove'} /> : null}
+        <View style={{ marginTop: space.md }}>
+          <TextAction title="Justificar não atendimento" onPress={() => setJustifyOpen(true)} />
+          {visit.status === 'PENDENTE' ? <TextAction title="Pedir troca deste cliente" onPress={() => goRequest('SUBSTITUIR_CLIENTE')} /> : null}
+          {visit.status === 'PENDENTE' && visit.origin === 'EXTRA' ? <TextAction title="Remover cliente extra" onPress={removeExtra} disabled={busy === 'remove'} /> : null}
         </View>
       ) : null}
 
@@ -941,7 +1047,7 @@ export default function VisitaScreen() {
             {inProgress && viewing.type !== 'FACHADA' ? (
               <Button
                 title="Apagar foto"
-                variant="danger"
+                variant="exit"
                 onPress={() =>
                   Alert.alert('Apagar esta foto?', viewing.type === 'DEPOIS' ? 'A confirmação de ruptura precisará ser feita de novo.' : undefined, [
                     { text: 'Cancelar', style: 'cancel' },
@@ -968,7 +1074,7 @@ function CompleteTaskSheet({ task, onClose, onSubmit }: { task: VisitTask | null
     <Sheet visible={!!task} title="Concluir atividade" onClose={onClose}>
       {task ? (
         <>
-          <Text style={[styles.text, { fontWeight: '700' }]}>{task.title}</Text>
+          <Text style={styles.optionText}>{task.title}</Text>
           {task.description ? <Muted>{task.description}</Muted> : null}
           <Field label="Observação / resposta" value={text} onChangeText={setText} multiline placeholder="Opcional" />
           <Button
@@ -1023,8 +1129,9 @@ function JustifySheet({
       <Field label="Explique o que aconteceu" value={text} onChangeText={setText} multiline hint={`${text.trim().length}/${minLength} caracteres no mínimo`} />
       <Button
         title="Registrar justificativa"
-        variant="danger"
+        variant="reject"
         disabled={!ok}
+        missing={!reasonId ? 'Escolha o motivo' : `Explique com pelo menos ${minLength} caracteres`}
         loading={busy}
         onPress={async () => {
           setBusy(true)
@@ -1038,3 +1145,25 @@ function JustifySheet({
     </Sheet>
   )
 }
+
+const localStyles = StyleSheet.create({
+  doneCircle: {
+    width: space.xxl,
+    height: space.xxl,
+    borderRadius: space.xxl / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.feitoSuave,
+  },
+  clientStrip: { gap: space.xs / 2, paddingTop: space.sm, borderTopWidth: borders.fina, borderTopColor: colors.divisoria },
+  // Barra fixa do passo atual
+  bar: {
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    backgroundColor: colors.superficie,
+    borderTopWidth: borders.fina,
+    borderTopColor: colors.divisoria,
+    ...elevated,
+  },
+})

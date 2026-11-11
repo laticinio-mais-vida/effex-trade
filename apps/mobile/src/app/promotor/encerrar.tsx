@@ -5,7 +5,7 @@ import { Banner, Button, Card, Field, LoadingView, Muted, Row, Screen, styles } 
 import { dayClosed, useDay } from '@/features/promotor/DayContext'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { getQuickLocation } from '@/lib/location'
-import { colors, space } from '@/lib/theme'
+import { borders, colors, elevated, space } from '@/lib/theme'
 import { flushQueue, stopTracking } from '@/lib/tracking'
 
 type Entry = { reasonId: string | null; text: string }
@@ -14,8 +14,14 @@ function ReasonOptions({ reasons, value, onChange }: { reasons: { id: string; la
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.xs }}>
       {reasons.map((r) => (
-        <Pressable key={r.id} onPress={() => onChange(r.id)} style={[styles.option, { paddingVertical: 8 }, value === r.id && styles.optionActive]}>
-          <Text style={[styles.text, { fontWeight: '600' }, value === r.id && { color: colors.primary }]}>{r.label}</Text>
+        <Pressable
+          key={r.id}
+          accessibilityRole="radio"
+          accessibilityState={{ selected: value === r.id }}
+          onPress={() => onChange(r.id)}
+          style={[styles.option, value === r.id && styles.optionActive]}
+        >
+          <Text style={styles.optionText}>{r.label}</Text>
         </Pressable>
       ))}
     </View>
@@ -103,16 +109,22 @@ export default function EncerrarRoteiro() {
   return (
     <Screen
       footer={
-        <View style={{ padding: space.lg, borderTopWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }}>
-          <Button title={pending.length > 0 ? 'Justificar e encerrar roteiro' : 'Encerrar roteiro'} onPress={submit} loading={busy} disabled={!!inProgress || !ready} />
+        <View style={{ padding: space.lg, borderTopWidth: borders.fina, borderColor: colors.divisoria, backgroundColor: colors.superficie, ...elevated }}>
+          <Button
+            title={pending.length > 0 ? 'Justificar e encerrar roteiro' : 'Encerrar roteiro'}
+            onPress={submit}
+            loading={busy}
+            disabled={!!inProgress || !ready}
+            missing={inProgress ? 'Faça o check-out do atendimento aberto' : 'Escolha o motivo e explique cada cliente sem atendimento'}
+          />
         </View>
       }
     >
       {inProgress ? (
-        <Card style={{ borderColor: colors.info, backgroundColor: colors.infoSoft }}>
-          <Text style={[styles.text, { fontWeight: '700' }]}>Atendimento em andamento em {inProgress.client.name}</Text>
+        <Card variant="emAtendimento">
+          <Text style={styles.optionText}>Atendimento em andamento em {inProgress.client.name}</Text>
           <Muted>Faça o check-out desse cliente antes de encerrar o roteiro.</Muted>
-          <Button title="Ir para o atendimento" small onPress={() => router.replace(`/promotor/visita/${inProgress.id}`)} />
+          <Button title="Ir para o atendimento" onPress={() => router.replace(`/promotor/visita/${inProgress.id}`)} />
         </Card>
       ) : null}
 
@@ -134,8 +146,8 @@ export default function EncerrarRoteiro() {
           {pending.length > 1 ? (
             <Card>
               <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-                <Text style={[styles.text, { fontWeight: '700', flex: 1 }]}>Usar o mesmo motivo e texto para todos</Text>
-                <Switch value={same} onValueChange={setSame} trackColor={{ true: colors.primary }} />
+                <Text style={[styles.optionText, { flex: 1 }]}>Usar o mesmo motivo e texto para todos</Text>
+                <Switch value={same} onValueChange={setSame} trackColor={{ true: colors.marinho }} />
               </Row>
             </Card>
           ) : null}
@@ -158,8 +170,8 @@ export default function EncerrarRoteiro() {
               const entry = entries[v.id] ?? { reasonId: null, text: '' }
               const set = (patch: Partial<Entry>) => setEntries((prev) => ({ ...prev, [v.id]: { ...entry, ...patch } }))
               return (
-                <Card key={v.id} style={errors[v.id] ? { borderColor: colors.danger } : undefined}>
-                  <Text style={[styles.text, { fontWeight: '700' }]}>
+                <Card key={v.id} style={errors[v.id] ? { borderColor: colors.naoFeito, borderWidth: borders.campo } : undefined}>
+                  <Text style={styles.optionText}>
                     {v.position}. {v.client.name}
                   </Text>
                   <ReasonOptions reasons={day.reasons} value={entry.reasonId} onChange={(reasonId) => set({ reasonId })} />

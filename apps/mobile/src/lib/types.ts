@@ -318,7 +318,7 @@ export interface RejectedList {
   items: RejectedPhoto[]
 }
 
-/** Contestação na aba Contestações do supervisor (GET /supervisor/contests). */
+/** Contestação em Fotos > Contestações do supervisor (GET /supervisor/contests). */
 export interface SupervisorContest extends ContestInfo {
   promotor: { id: string; name: string }
   photo: Photo

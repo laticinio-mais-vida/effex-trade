@@ -52,7 +52,7 @@ export function RuptureSheet({ visible, visitId, onClose, onConfirmed }: { visib
   return (
     <Sheet visible={visible} title="Confirmar ruptura" onClose={onClose}>
       {error ? <Banner tone="danger" text={error} /> : null}
-      {!info && !error ? <ActivityIndicator color={colors.primary} /> : null}
+      {!info && !error ? <ActivityIndicator color={colors.marinho} /> : null}
       {info ? (
         <>
           {info.confirmedAt ? <Banner tone="success" text={`Ruptura confirmada às ${formatTime(info.confirmedAt)}.`} /> : null}
@@ -67,7 +67,7 @@ export function RuptureSheet({ visible, visitId, onClose, onConfirmed }: { visib
               </Text>
               <View style={{ gap: space.xs }}>
                 {missing.map((p) => (
-                  <View key={p.id} style={[styles.option, { borderColor: colors.danger, backgroundColor: colors.dangerSoft }]}>
+                  <View key={p.id} style={[styles.option, { borderColor: colors.naoFeito, backgroundColor: colors.naoFeitoSuave }]}>
                     <Text style={styles.optionText}>{p.name}</Text>
                     <Muted>{p.code}</Muted>
                   </View>
