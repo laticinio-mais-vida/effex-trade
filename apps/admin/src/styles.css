@@ -183,13 +183,11 @@ a {
   width: 100%;
   height: auto;
 }
-/* O logo do cliente tem fundo branco: vai numa placa branca */
+/* Logo do cliente (fundo transparente), direto sobre o marinho */
 .client-logo {
   display: flex;
   justify-content: center;
-  padding: var(--esp-2) var(--esp-3);
-  border-radius: var(--raio);
-  background: var(--superficie);
+  padding: var(--esp-1) var(--esp-3);
 }
 .client-logo img {
   display: block;
