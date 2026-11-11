@@ -7,6 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#FEF7EB",
     "runtimeVersion": {
       "policy": "fingerprint"
     },
@@ -27,10 +28,8 @@
     "android": {
       "package": "com.effex.trade",
       "adaptiveIcon": {
-        "backgroundColor": "#0B6E4F",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#061D39",
+        "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "versionCode": 1
@@ -41,6 +40,15 @@
     "plugins": [
       "expo-router",
       "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#061D39"
+        }
+      ],
       [
         "expo-secure-store",
         {}
