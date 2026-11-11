@@ -213,6 +213,23 @@ export function Badge({
   )
 }
 
+/** Andamento do dia: feito, justificado e em atendimento sobre o fundo cinza (o resto é o que falta). */
+export function ProgressBar({ done, justified, inProgress, total }: { done: number; justified: number; inProgress: number; total: number }) {
+  const rest = Math.max(0, total - done - justified - inProgress)
+  return (
+    <View
+      style={styles.progress}
+      accessibilityRole="progressbar"
+      accessibilityLabel={`${done} feitos, ${justified} justificados, ${inProgress} em atendimento de ${total}`}
+    >
+      <View style={{ flex: done, backgroundColor: colors.feito }} />
+      <View style={{ flex: justified, backgroundColor: colors.justificado }} />
+      <View style={{ flex: inProgress, backgroundColor: colors.emAtendimento }} />
+      <View style={{ flex: rest }} />
+    </View>
+  )
+}
+
 /** Número em círculo (ordem no roteiro): marinho no próximo cliente, azul suave no atendimento aberto. */
 export function NumberCircle({ n, tone = 'neutro' }: { n: number; tone?: 'marinho' | Tone }) {
   const t = tone === 'marinho' ? { forte: colors.branco, suave: colors.marinho } : tones[tone]
@@ -566,6 +583,7 @@ export const styles = StyleSheet.create({
   badge: { paddingHorizontal: space.sm, paddingVertical: space.xs / 2, borderRadius: radius.sm, alignSelf: 'flex-start' },
   badgeOutline: { borderWidth: borders.fina, borderColor: colors.marinho },
   badgeText: { ...type.selo },
+  progress: { flexDirection: 'row', height: space.sm, borderRadius: space.sm / 2, overflow: 'hidden', backgroundColor: colors.neutroSuave },
   numberCircle: { width: space.xxl, height: space.xxl, borderRadius: space.xxl / 2, alignItems: 'center', justifyContent: 'center' },
   numberCircleText: { ...type.textoForte, ...tabular },
   label: { ...type.rotulo },

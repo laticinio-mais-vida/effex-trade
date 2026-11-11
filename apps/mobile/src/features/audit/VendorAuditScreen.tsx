@@ -2,14 +2,14 @@ import { Image } from 'expo-image'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Keyboard, RefreshControl, Text, View } from 'react-native'
-import { Badge, Banner, Button, Card, EmptyState, Field, Muted, PickerSheet, Row, Segmented, styles } from '@/components/ui'
+import { Badge, Banner, Button, Card, DecisionPair, EmptyState, Field, Muted, PickerSheet, Row, Segmented, styles } from '@/components/ui'
 import { FilterChip } from '@/features/audit/FilterChip'
-import { PhotoViewer, useViewerTyping } from '@/features/PhotoViewer'
+import { PhotoViewer, useViewerTyping, ViewerFooter, ViewerInfo } from '@/features/PhotoViewer'
 import { api, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
 import { emitBadgesChanged } from '@/lib/events'
-import { auditStatusInfo, formatDate, formatDateTime, formatTime, photoTypeLabels } from '@/lib/format'
-import { colors, radius, space } from '@/lib/theme'
+import { auditStatusInfo, formatDate, formatDateTime, formatTime, MIN_JUSTIFICATION, photoTypeLabels, reviewPendingInfo, reviewVerdictInfo } from '@/lib/format'
+import { colors, radius, sizes, space } from '@/lib/theme'
 import type { Paged, Team, VendorAudit } from '@/lib/types'
 
 type State = 'pendentes' | 'conferidas' | 'todas'
@@ -74,16 +74,20 @@ export function VendorAuditScreen() {
 
   const current = items.find((a) => a.id === selected) ?? null
 
+  // Depois de conferir, a próxima abre sozinha (em qualquer filtro)
   function onReviewed(updated: VendorAudit) {
     emitBadgesChanged()
+    const index = items.findIndex((a) => a.id === updated.id)
     if (state === 'pendentes') {
-      const index = items.findIndex((a) => a.id === updated.id)
       const rest = items.filter((a) => a.id !== updated.id)
       setItems(rest)
       setTotal((t) => Math.max(0, t - 1))
       setSelected(rest[index]?.id ?? rest[index - 1]?.id ?? null)
+      if (!rest[index] && rest.length < total - 1) void load(page + 1, 'more')
     } else {
       setItems((prev) => prev.map((a) => (a.id === updated.id ? updated : a)))
+      setSelected(items[index + 1]?.id ?? null)
+      if (!items[index + 1] && items.length < total) void load(page + 1, 'more')
     }
   }
 
@@ -107,22 +111,22 @@ export function VendorAuditScreen() {
   )
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: colors.fundo }}>
       <FlatList
         data={items}
         keyExtractor={(a) => a.id}
-        contentContainerStyle={{ padding: space.lg, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl + space.sm }}
         ListHeaderComponent={header}
         ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(1, 'refresh')} colors={[colors.primary]} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(1, 'refresh')} colors={[colors.marinho]} />}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
           if (!loadingMore && !loading && items.length < total) void load(page + 1, 'more')
         }}
         ListEmptyComponent={
-          loading ? <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} /> : <EmptyState title={state === 'pendentes' ? 'Tudo conferido' : 'Nenhuma auditoria encontrada'} />
+          loading ? <ActivityIndicator color={colors.marinho} style={{ marginTop: space.xxl + space.sm }} /> : <EmptyState title={state === 'pendentes' ? 'Tudo conferido' : 'Nenhuma auditoria encontrada'} />
         }
-        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginTop: space.md }} /> : undefined}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.marinho} style={{ marginTop: space.md }} /> : undefined}
         renderItem={({ item }) => <AuditRow audit={item} onPress={() => setSelected(item.id)} />}
       />
 
@@ -138,7 +142,7 @@ export function VendorAuditScreen() {
         onClose={() => setPicker(false)}
       />
 
-      <PhotoViewer url={current?.photo.url ?? null} visible={!!current} onClose={() => setSelected(null)}>
+      <PhotoViewer url={current?.photo.url ?? null} visible={!!current} onClose={() => setSelected(null)} slots>
         {current ? <ReviewPanel key={current.id} audit={current} onReviewed={onReviewed} /> : null}
       </PhotoViewer>
     </View>
@@ -149,29 +153,27 @@ function AuditRow({ audit, onPress }: { audit: VendorAudit; onPress: () => void 
   const info = auditStatusInfo[audit.status]
   return (
     <Card onPress={onPress} style={{ flexDirection: 'row', gap: space.md, padding: space.md }}>
-      <Image source={{ uri: resolveUrl(audit.photo.url) }} style={{ width: 84, height: 84, borderRadius: radius.sm, backgroundColor: colors.neutralSoft }} contentFit="cover" />
-      <View style={{ flex: 1, gap: 3 }}>
-        <Text style={[styles.text, { fontWeight: '700' }]} numberOfLines={1}>
+      <Image
+        source={{ uri: resolveUrl(audit.photo.url) }}
+        style={{ width: sizes.miniatura, height: sizes.miniatura, borderRadius: radius.sm, backgroundColor: colors.neutroSuave }}
+        contentFit="cover"
+      />
+      <View style={{ flex: 1, gap: space.xs }}>
+        <Text style={styles.sectionTitle} numberOfLines={1}>
           {audit.vendedor.name}
         </Text>
         <Muted numberOfLines={1}>
           {audit.client.name} · {photoTypeLabels[audit.photo.type]}
         </Muted>
         <Row>
-          <Badge label={info.label} color={info.color} bg={info.bg} />
+          <Badge label={`Vendedor: ${info.label}`} tone={info.tone} />
           {audit.review ? (
-            <Badge
-              label={audit.review.verdict === 'CORRETA' ? 'Correta' : 'Incorreta'}
-              color={audit.review.verdict === 'CORRETA' ? colors.success : colors.danger}
-              bg={colors.neutralSoft}
-            />
-          ) : null}
+            <Badge label={reviewVerdictInfo[audit.review.verdict].label} tone={reviewVerdictInfo[audit.review.verdict].tone} />
+          ) : (
+            <Badge label={reviewPendingInfo.label} tone={reviewPendingInfo.tone} />
+          )}
         </Row>
-        {audit.justification ? (
-          <Muted numberOfLines={1} style={{ fontStyle: 'italic' }}>
-            "{audit.justification}"
-          </Muted>
-        ) : null}
+        {audit.justification ? <Muted numberOfLines={1}>"{audit.justification}"</Muted> : null}
       </View>
     </Card>
   )
@@ -209,7 +211,8 @@ function ReviewPanel({ audit, onReviewed }: { audit: VendorAudit; onReviewed: (a
     setMarking(false)
   }
 
-  const decision = marking ? (
+  // Escrevendo a explicação: caixa e botões no alto da folha. Senão, decisão no rodapé fixo.
+  const markForm = (
     <>
       <Field
         label={`O que o vendedor errou? (a foto deveria ser ${correct})`}
@@ -217,46 +220,56 @@ function ReviewPanel({ audit, onReviewed }: { audit: VendorAudit; onReviewed: (a
         onChangeText={setComment}
         multiline
         autoFocus
-        hint="Mínimo de 5 caracteres. Vai no PDF de correções para o vendedor."
-        style={{ minHeight: 80 }}
+        hint={`Mínimo de ${MIN_JUSTIFICATION} caracteres. Vai no PDF de correções para o vendedor.`}
       />
-      <Row>
+      <Row style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
         <Button title="Voltar" variant="secondary" onPress={stopMarking} style={{ flex: 1 }} />
-        <Button title="Marcar incorreta" variant="danger" onPress={() => submit('INCORRETA')} loading={busy === 'INCORRETA'} disabled={comment.trim().length < 5} style={{ flex: 1 }} />
+        <Button
+          title="Marcar incorreta"
+          variant="reject"
+          onPress={() => submit('INCORRETA')}
+          loading={busy === 'INCORRETA'}
+          disabled={comment.trim().length < MIN_JUSTIFICATION}
+          missing={`Escreva pelo menos ${MIN_JUSTIFICATION} caracteres`}
+          style={{ flex: 1 }}
+        />
       </Row>
     </>
-  ) : (
-    <Row>
-      <Button title="Incorreta" variant="danger" onPress={() => setMarking(true)} style={{ flex: 1 }} />
-      <Button title="Correta" variant="success" onPress={() => submit('CORRETA')} loading={busy === 'CORRETA'} style={{ flex: 1 }} />
-    </Row>
   )
 
   return (
     <>
-      {marking ? decision : null}
-      {marking && error ? <Banner tone="danger" text={error} /> : null}
-      <Text style={styles.sectionTitle}>{audit.client.name}</Text>
-      <Muted>
-        {photoTypeLabels[audit.photo.type]} · visita {formatDate(audit.visit.date)} às {formatTime(audit.photo.takenAt)} · {audit.promotor.name}
-      </Muted>
-      {audit.photo.products?.length ? <Muted>Produtos marcados pelo promotor: {audit.photo.products.map((p) => p.name).join(', ')}</Muted> : null}
-      <Card style={{ padding: space.md }}>
-        <Row>
-          <Text style={[styles.text, { fontWeight: '700' }]}>{audit.vendedor.name}</Text>
-          <Badge label={info.label} color={info.color} bg={info.bg} />
-        </Row>
-        {audit.justification ? <Text style={styles.text}>"{audit.justification}"</Text> : null}
-        <Muted>Auditada em {formatDateTime(audit.createdAt)}</Muted>
-      </Card>
-      {audit.review ? (
-        <Banner
-          tone={audit.review.verdict === 'CORRETA' ? 'success' : 'danger'}
-          text={`Você marcou como ${audit.review.verdict === 'CORRETA' ? 'correta' : 'incorreta'}${audit.review.comment ? `: ${audit.review.comment}` : ''}. Pode alterar abaixo.`}
-        />
-      ) : null}
-      {marking ? null : decision}
-      {!marking && error ? <Banner tone="danger" text={error} /> : null}
+      <ViewerInfo>
+        {marking ? markForm : null}
+        {error ? <Banner tone="danger" text={error} /> : null}
+        <Text style={styles.sectionTitle}>{audit.client.name}</Text>
+        <Muted>
+          {photoTypeLabels[audit.photo.type]} · visita {formatDate(audit.visit.date)} às {formatTime(audit.photo.takenAt)} · {audit.promotor.name}
+        </Muted>
+        {audit.photo.products?.length ? <Muted>Produtos marcados pelo promotor: {audit.photo.products.map((p) => p.name).join(', ')}</Muted> : null}
+        <Card style={{ padding: space.md }}>
+          <Row>
+            <Text style={styles.optionText}>{audit.vendedor.name}</Text>
+            <Badge label={info.label} tone={info.tone} />
+          </Row>
+          {audit.justification ? <Text style={styles.text}>"{audit.justification}"</Text> : null}
+          <Muted>Auditada em {formatDateTime(audit.createdAt)}</Muted>
+        </Card>
+        {audit.review ? (
+          <Banner
+            tone={audit.review.verdict === 'CORRETA' ? 'success' : 'danger'}
+            text={`Você marcou como ${audit.review.verdict === 'CORRETA' ? 'correta' : 'incorreta'}${audit.review.comment ? `: ${audit.review.comment}` : ''}. Pode alterar abaixo.`}
+          />
+        ) : null}
+      </ViewerInfo>
+      {marking ? null : (
+        <ViewerFooter>
+          <DecisionPair
+            negative={{ title: 'Incorreta', onPress: () => setMarking(true), disabled: !!busy }}
+            positive={{ title: 'Correta', onPress: () => submit('CORRETA'), loading: busy === 'CORRETA' }}
+          />
+        </ViewerFooter>
+      )}
     </>
   )
 }

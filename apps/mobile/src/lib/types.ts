@@ -338,7 +338,18 @@ export interface SupervisorSummary {
 }
 
 export interface Team {
-  promotores: { id: string; name: string; today: { total: number; done: number; justified: number; pending: number; inProgress: number } }[]
+  promotores: {
+    id: string
+    name: string
+    today: { total: number; done: number; justified: number; pending: number; inProgress: number }
+    /** Atendimento aberto agora */
+    currentVisit?: { clientName: string; since: string | null } | null
+    lunch?: { start: string; end: string | null; overdue: boolean } | null
+    workStart?: string | null
+    dayClosed?: boolean
+    /** Última localização recebida hoje */
+    lastPingAt?: string | null
+  }[]
   vendedores: { id: string; name: string; pendingReviews: number }[]
 }
 

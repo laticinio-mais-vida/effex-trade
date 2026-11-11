@@ -104,15 +104,34 @@ export async function supervisorRoutes(app: FastifyInstance) {
         orderBy: { name: 'asc' },
       }),
     ])
-    const visits = await prisma.visit.groupBy({
-      by: ['promotorId', 'status'],
-      where: { date: toDbDate(today), promotorId: { in: promotores.map((p) => p.id) }, status: { not: 'CANCELADA' } },
-      _count: true,
-    })
+    const ids = promotores.map((p) => p.id)
+    const { start, end } = localDayRange(today)
+    const [visits, current, workDays, lunchLimits, lastPings] = await Promise.all([
+      prisma.visit.groupBy({
+        by: ['promotorId', 'status'],
+        where: { date: toDbDate(today), promotorId: { in: ids }, status: { not: 'CANCELADA' } },
+        _count: true,
+      }),
+      prisma.visit.findMany({
+        where: { date: toDbDate(today), promotorId: { in: ids }, status: 'EM_ATENDIMENTO' },
+        select: { promotorId: true, checkinAt: true, client: { select: { name: true } } },
+      }),
+      prisma.workDay.findMany({ where: { date: toDbDate(today), promotorId: { in: ids } } }),
+      Promise.all(ids.map(async (id) => (await getSettings(id)).lunchAlertMinutes)),
+      Promise.all(
+        ids.map((id) =>
+          prisma.locationPing.findFirst({ where: { promotorId: id, recordedAt: { gte: start, lt: end } }, orderBy: { recordedAt: 'desc' }, select: { recordedAt: true } }),
+        ),
+      ),
+    ])
     return {
-      promotores: promotores.map((p) => {
+      // Onde cada promotor está agora (mesmo cálculo do mapa do painel): atendimento aberto, almoço e último sinal
+      promotores: promotores.map((p, i) => {
         const mine = visits.filter((v) => v.promotorId === p.id)
         const count = (s: string) => mine.find((v) => v.status === s)?._count ?? 0
+        const open = current.find((v) => v.promotorId === p.id)
+        const wd = workDays.find((w) => w.promotorId === p.id)
+        const lunchLimit = lunchLimits[i]!
         return {
           ...p,
           today: {
@@ -122,6 +141,17 @@ export async function supervisorRoutes(app: FastifyInstance) {
             pending: count('PENDENTE'),
             inProgress: count('EM_ATENDIMENTO'),
           },
+          currentVisit: open ? { clientName: open.client.name, since: open.checkinAt } : null,
+          lunch: wd?.lunchStartedAt
+            ? {
+                start: wd.lunchStartedAt,
+                end: wd.lunchEndedAt,
+                overdue: lunchLimit > 0 && ((wd.lunchEndedAt ?? new Date()).getTime() - wd.lunchStartedAt.getTime()) / 60_000 >= lunchLimit,
+              }
+            : null,
+          workStart: wd?.startedAt ?? null,
+          dayClosed: !!wd?.closedAt,
+          lastPingAt: lastPings[i]?.recordedAt ?? null,
         }
       }),
       vendedores: vendedores.map((v) => ({ id: v.id, name: v.name, pendingReviews: v._count.photoAudits })),

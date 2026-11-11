@@ -1,14 +1,14 @@
 import { useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native'
-import { Banner, Button, Card, EmptyState, ErrorView, Field, LoadingView, Muted, Row, Screen, SectionTitle, Segmented, Sheet, styles } from '@/components/ui'
+import { Banner, Button, Card, CheckOption, EmptyState, ErrorView, Field, LoadingView, Muted, Row, Screen, SectionTitle, Segmented, Sheet, styles } from '@/components/ui'
 import { ClientSearch } from '@/features/ClientSearch'
 import { ReorderList } from '@/features/ReorderList'
 import { VisitCard } from '@/features/VisitCard'
 import { api, errorMessage } from '@/lib/api'
 import { emitBadgesChanged } from '@/lib/events'
 import { addDays, DEFAULT_MODULES, formatLongDate, formatShortDay, formatTime, isDefaultStructure, MODULE_ORDER, moduleLabels, placeOf, structureLabel } from '@/lib/format'
-import { colors, radius, space } from '@/lib/theme'
+import { borders, colors, radius, sizes, space, type as typeScale } from '@/lib/theme'
 import type { Client, PermissionTypeDef, ScheduledVisit, SupervisorDay, Visit, VisitModule } from '@/lib/types'
 import { useQuery } from '@/lib/useQuery'
 
@@ -178,7 +178,7 @@ export default function PromotorDia() {
   return (
     <Screen refreshing={query.refreshing} onRefresh={query.refresh}>
       <Card>
-        <Text style={styles.title}>{day.promotor.name}</Text>
+        <Text style={styles.sectionTitle}>{day.promotor.name}</Text>
         <Muted>{formatLongDate(day.date)}</Muted>
         <Muted>
           {day.workDay?.startedAt ? `Jornada iniciada às ${formatTime(day.workDay.startedAt)}` : 'Jornada não iniciada'}
@@ -222,7 +222,7 @@ export default function PromotorDia() {
       <Muted>Toque num cliente para conceder uma liberação.</Muted>
       {day.visits.length === 0 ? <EmptyState title="Sem clientes neste dia" /> : null}
       {day.visits.map((v) => (
-        <VisitCard key={v.id} visit={v} onPress={() => openVisit(v)} />
+        <VisitCard key={v.id} visit={v} dayOpen={dayOpen} onPress={() => openVisit(v)} />
       ))}
 
       {upcoming.length > 0 ? (
@@ -309,7 +309,7 @@ export default function PromotorDia() {
         <Text style={styles.label}>Cliente</Text>
         {client ? (
           <Card>
-            <Text style={[styles.text, { fontWeight: '700' }]}>{client.name}</Text>
+            <Text style={styles.optionText}>{client.name}</Text>
             {client.city ? <Muted>{placeOf(client)}</Muted> : null}
             <Button title="Trocar cliente" variant="ghost" small onPress={() => setClient(null)} />
           </Card>
@@ -323,24 +323,9 @@ export default function PromotorDia() {
         {client ? (
           <>
             <Text style={styles.label}>Estrutura do atendimento</Text>
-            {MODULE_ORDER.map((m) => {
-              const on = modules.includes(m)
-              return (
-                <Pressable
-                  key={m}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: on, disabled: on && modules.length === 1 }}
-                  onPress={() => toggleModule(m)}
-                  style={[styles.option, on && styles.optionActive]}
-                >
-                  <Text style={[styles.optionText, on && { color: colors.primary }]}>
-                    {on ? '☑ ' : '☐ '}
-                    {moduleLabels[m]}
-                  </Text>
-                  <Muted>{moduleHelp[m]}</Muted>
-                </Pressable>
-              )
-            })}
+            {MODULE_ORDER.map((m) => (
+              <CheckOption key={m} label={moduleLabels[m]} detail={moduleHelp[m]} checked={modules.includes(m)} onPress={() => toggleModule(m)} />
+            ))}
             {modules.includes('ATIVIDADES') ? (
               <>
                 <Field
@@ -383,15 +368,16 @@ function DateChip({ label, active, onPress }: { label: string; active: boolean; 
       accessibilityState={{ selected: active }}
       onPress={onPress}
       style={{
+        minHeight: sizes.toque,
+        justifyContent: 'center',
         paddingHorizontal: space.md,
-        paddingVertical: 8,
         borderRadius: radius.md,
-        borderWidth: 1.5,
-        borderColor: active ? colors.primary : colors.border,
-        backgroundColor: active ? colors.primarySoft : colors.surface,
+        borderWidth: borders.campo,
+        borderColor: active ? colors.marinho : colors.bordaCampo,
+        backgroundColor: colors.superficie,
       }}
     >
-      <Text style={{ fontSize: 14, fontWeight: '700', color: active ? colors.primary : colors.text }}>{label}</Text>
+      <Text style={[typeScale.rotulo, { color: active ? colors.marinho : colors.textoSecundario }]}>{label}</Text>
     </Pressable>
   )
 }
@@ -400,10 +386,10 @@ function UpcomingCard({ item, today, onRemove }: { item: ScheduledVisit; today: 
   return (
     <Card>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Text style={[styles.text, { fontWeight: '700', color: colors.primary }]}>{formatShortDay(item.date, today)}</Text>
+        <Text style={styles.optionText}>{formatShortDay(item.date, today)}</Text>
         <Muted>por {item.createdBy.name}</Muted>
       </Row>
-      <Text style={[styles.sectionTitle, { fontSize: 16 }]} numberOfLines={2}>
+      <Text style={styles.sectionTitle} numberOfLines={2}>
         {item.client.name}
       </Text>
       {item.client.city ? <Muted numberOfLines={1}>{placeOf(item.client)}</Muted> : null}

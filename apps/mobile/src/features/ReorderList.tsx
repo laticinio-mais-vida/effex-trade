@@ -1,10 +1,11 @@
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { Pressable, Text, View } from 'react-native'
 import { Card, styles } from '@/components/ui'
-import { colors, radius, space } from '@/lib/theme'
+import { borders, colors, radius, sizes, space, tabular, type } from '@/lib/theme'
 
 type Item = { id: string; title: string; subtitle?: string | null }
 
-/** Lista com botões subir/descer para propor uma nova ordem. */
+/** Lista com botões subir/descer para propor uma nova ordem. Cliente que mudou de lugar fica com borda marinho. */
 export function ReorderList({ items, order, onChange, original }: { items: Item[]; order: string[]; onChange: (order: string[]) => void; original: string[] }) {
   const byId = new Map(items.map((i) => [i.id, i]))
   const move = (index: number, delta: number) => {
@@ -21,10 +22,13 @@ export function ReorderList({ items, order, onChange, original }: { items: Item[
         if (!item) return null
         const moved = original[index] !== id
         return (
-          <Card key={id} style={[{ flexDirection: 'row', alignItems: 'center', paddingVertical: space.md }, moved && { borderColor: colors.primary }]}>
-            <Text style={{ width: 28, fontWeight: '800', color: moved ? colors.primary : colors.muted, fontSize: 16 }}>{index + 1}</Text>
+          <Card
+            key={id}
+            style={[{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.md }, moved && { borderColor: colors.marinho, borderWidth: borders.campo }]}
+          >
+            <Text style={[type.textoForte, tabular, { minWidth: space.xl, color: moved ? colors.marinho : colors.textoSecundario }]}>{index + 1}</Text>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.text, { fontWeight: '600' }]} numberOfLines={2}>
+              <Text style={styles.optionText} numberOfLines={2}>
                 {item.title}
               </Text>
               {item.subtitle ? (
@@ -33,9 +37,9 @@ export function ReorderList({ items, order, onChange, original }: { items: Item[
                 </Text>
               ) : null}
             </View>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              <ArrowButton label="▲" disabled={index === 0} onPress={() => move(index, -1)} />
-              <ArrowButton label="▼" disabled={index === order.length - 1} onPress={() => move(index, 1)} />
+            <View style={{ flexDirection: 'row', gap: space.xs }}>
+              <ArrowButton icon="chevron-up" label="Subir" disabled={index === 0} onPress={() => move(index, -1)} />
+              <ArrowButton icon="chevron-down" label="Descer" disabled={index === order.length - 1} onPress={() => move(index, 1)} />
             </View>
           </Card>
         )
@@ -44,21 +48,26 @@ export function ReorderList({ items, order, onChange, original }: { items: Item[
   )
 }
 
-function ArrowButton({ label, onPress, disabled }: { label: string; onPress: () => void; disabled?: boolean }) {
+function ArrowButton({ icon, label, onPress, disabled }: { icon: 'chevron-up' | 'chevron-down'; label: string; onPress: () => void; disabled?: boolean }) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
       onPress={disabled ? undefined : onPress}
-      hitSlop={6}
-      style={{
-        width: 42,
-        height: 42,
+      style={({ pressed }) => ({
+        width: sizes.toque,
+        height: sizes.toque,
         borderRadius: radius.md,
-        backgroundColor: disabled ? colors.neutralSoft : colors.primarySoft,
+        borderWidth: disabled ? 0 : borders.campo,
+        borderColor: colors.marinho,
+        backgroundColor: disabled ? colors.desabilitadoFundo : colors.superficie,
         alignItems: 'center',
         justifyContent: 'center',
-      }}
+        opacity: pressed ? 0.85 : 1,
+      })}
     >
-      <Text style={{ color: disabled ? colors.faint : colors.primary, fontSize: 16 }}>{label}</Text>
+      <Ionicons name={icon} size={sizes.icone} color={disabled ? colors.desabilitadoTexto : colors.marinho} />
     </Pressable>
   )
 }

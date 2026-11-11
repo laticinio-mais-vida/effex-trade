@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Keyboard, RefreshControl, Text, View } from 'react-native'
 import { Badge, Banner, Button, Card, CheckOption, DecisionPair, EmptyState, Field, Muted, MultiPickerSheet, Row, Segmented, Sheet, styles } from '@/components/ui'
 import { FilterChip } from '@/features/audit/FilterChip'
-import { PhotoViewer, useViewerTyping } from '@/features/PhotoViewer'
+import { PhotoViewer, useViewerTyping, ViewerFooter, ViewerInfo } from '@/features/PhotoViewer'
 import { api, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
 import { emitBadgesChanged } from '@/lib/events'
@@ -251,7 +251,7 @@ export function PhotoAuditScreen() {
         onClose={() => setPicker(null)}
       />
 
-      <PhotoViewer url={current?.url ?? null} visible={!!current} onClose={() => setSelected(null)}>
+      <PhotoViewer url={current?.url ?? null} visible={!!current} onClose={() => setSelected(null)} slots>
         {current ? <AuditPanel key={current.id} photo={current} onAudited={onAudited} /> : null}
       </PhotoViewer>
     </View>
@@ -414,9 +414,8 @@ function AuditPanel({ photo, onAudited }: { photo: AuditPhoto; onAudited: (p: Au
     setRejecting(false)
   }
 
-  const decision = locked ? (
-    <Banner tone="info" text="Sua auditoria já foi conferida pelo supervisor e não pode mais ser alterada." />
-  ) : rejecting ? (
+  // Escrevendo a justificativa: caixa e botões no alto da folha. Senão, decisão no rodapé fixo.
+  const rejectForm = (
     <>
       <Field
         label="Por que a foto está reprovada?"
@@ -440,30 +439,34 @@ function AuditPanel({ photo, onAudited }: { photo: AuditPhoto; onAudited: (p: Au
         />
       </Row>
     </>
-  ) : (
-    <DecisionPair
-      negative={{ title: 'Reprovar', onPress: () => setRejecting(true), disabled: !!busy }}
-      positive={{ title: 'Aprovar', onPress: () => submit('APROVADA'), loading: busy === 'APROVADA' }}
-    />
   )
 
   return (
     <>
-      {rejecting ? decision : null}
-      {rejecting && error ? <Banner tone="danger" text={error} /> : null}
-      <Text style={styles.sectionTitle}>{photo.client.name}</Text>
-      <Muted>
-        {photoTypeLabels[photo.type]} · {formatDate(photo.visit.date)} às {formatTime(photo.takenAt)} · {photo.promotor.name}
-      </Muted>
-      {meta ? <Muted>{meta}</Muted> : null}
-      {photo.notes ? <Text style={styles.text}>{photo.notes}</Text> : null}
-      {photo.products?.length ? <Muted>Produtos marcados pelo promotor: {photo.products.map((p) => p.name).join(', ')}</Muted> : null}
-      {photo.otherAudits.map((a) => (
-        <AuditLine key={a.id} audit={a} title={`${a.auditor.name} (${roleLabels[a.auditor.role] ?? a.auditor.role})`} />
-      ))}
-      {photo.myAudit ? <AuditLine audit={photo.myAudit} title="Sua auditoria" /> : null}
-      {rejecting ? null : decision}
-      {!rejecting && error ? <Banner tone="danger" text={error} /> : null}
+      <ViewerInfo>
+        {rejecting ? rejectForm : null}
+        {error ? <Banner tone="danger" text={error} /> : null}
+        <Text style={styles.sectionTitle}>{photo.client.name}</Text>
+        <Muted>
+          {photoTypeLabels[photo.type]} · {formatDate(photo.visit.date)} às {formatTime(photo.takenAt)} · {photo.promotor.name}
+        </Muted>
+        {meta ? <Muted>{meta}</Muted> : null}
+        {photo.notes ? <Text style={styles.text}>{photo.notes}</Text> : null}
+        {photo.products?.length ? <Muted>Produtos marcados pelo promotor: {photo.products.map((p) => p.name).join(', ')}</Muted> : null}
+        {photo.otherAudits.map((a) => (
+          <AuditLine key={a.id} audit={a} title={`${a.auditor.name} (${roleLabels[a.auditor.role] ?? a.auditor.role})`} />
+        ))}
+        {photo.myAudit ? <AuditLine audit={photo.myAudit} title="Sua auditoria" /> : null}
+        {locked ? <Banner tone="info" text="Sua auditoria já foi conferida pelo supervisor e não pode mais ser alterada." /> : null}
+      </ViewerInfo>
+      {locked || rejecting ? null : (
+        <ViewerFooter>
+          <DecisionPair
+            negative={{ title: 'Reprovar', onPress: () => setRejecting(true), disabled: !!busy }}
+            positive={{ title: 'Aprovar', onPress: () => submit('APROVADA'), loading: busy === 'APROVADA' }}
+          />
+        </ViewerFooter>
+      )}
     </>
   )
 }

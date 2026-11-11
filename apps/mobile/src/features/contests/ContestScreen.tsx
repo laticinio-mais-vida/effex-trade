@@ -2,18 +2,17 @@ import { Image } from 'expo-image'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, FlatList, Keyboard, RefreshControl, Text, View } from 'react-native'
-import { Badge, Banner, Button, Card, EmptyState, Field, Muted, Row, Segmented, styles } from '@/components/ui'
-import { PhotoViewer, useViewerTyping } from '@/features/PhotoViewer'
+import { Badge, Banner, Button, Card, DecisionPair, EmptyState, Field, Muted, Row, Segmented, styles } from '@/components/ui'
+import { PhotoViewer, useViewerTyping, ViewerFooter, ViewerInfo } from '@/features/PhotoViewer'
 import { api, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
 import { emitBadgesChanged } from '@/lib/events'
-import { auditStatusInfo, contestStatusInfo, formatDate, formatDateTime, formatTime, photoTypeLabels, roleLabels } from '@/lib/format'
-import { colors, radius, space } from '@/lib/theme'
+import { auditStatusInfo, contestStatusInfo, formatDate, formatDateTime, formatTime, MIN_JUSTIFICATION, photoTypeLabels, roleLabels } from '@/lib/format'
+import { borders, colors, radius, sizes, space } from '@/lib/theme'
 import type { Paged, SupervisorContest } from '@/lib/types'
 
 type State = 'pendentes' | 'decididas' | 'todas'
 const PAGE_SIZE = 20
-const MIN_RESPONSE = 5
 
 /** Supervisor decide as contestações dos promotores da equipe sobre fotos reprovadas. */
 export function ContestScreen() {
@@ -70,16 +69,20 @@ export function ContestScreen() {
 
   const current = items.find((c) => c.id === selected) ?? null
 
+  // Depois de decidir, a próxima contestação abre sozinha (em qualquer filtro)
   function onDecided(updated: SupervisorContest) {
     emitBadgesChanged()
+    const index = items.findIndex((c) => c.id === updated.id)
     if (state === 'pendentes') {
-      const index = items.findIndex((c) => c.id === updated.id)
       const rest = items.filter((c) => c.id !== updated.id)
       setItems(rest)
       setTotal((t) => Math.max(0, t - 1))
       setSelected(rest[index]?.id ?? rest[index - 1]?.id ?? null)
+      if (!rest[index] && rest.length < total - 1) void load(page + 1, 'more')
     } else {
       setItems((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+      setSelected(items[index + 1]?.id ?? null)
+      if (!items[index + 1] && items.length < total) void load(page + 1, 'more')
     }
   }
 
@@ -102,30 +105,30 @@ export function ContestScreen() {
   )
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: colors.fundo }}>
       <FlatList
         data={items}
         keyExtractor={(c) => c.id}
-        contentContainerStyle={{ padding: space.lg, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl + space.sm }}
         ListHeaderComponent={header}
         ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(1, 'refresh')} colors={[colors.primary]} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(1, 'refresh')} colors={[colors.marinho]} />}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
           if (!loadingMore && !loading && items.length < total) void load(page + 1, 'more')
         }}
         ListEmptyComponent={
           loading ? (
-            <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+            <ActivityIndicator color={colors.marinho} style={{ marginTop: space.xxl + space.sm }} />
           ) : (
             <EmptyState title={state === 'pendentes' ? 'Nenhuma contestação esperando' : 'Nenhuma contestação'} />
           )
         }
-        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginTop: space.md }} /> : undefined}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.marinho} style={{ marginTop: space.md }} /> : undefined}
         renderItem={({ item }) => <ContestRow contest={item} onPress={() => setSelected(item.id)} />}
       />
 
-      <PhotoViewer url={current?.photo.url ?? null} visible={!!current} onClose={() => setSelected(null)}>
+      <PhotoViewer url={current?.photo.url ?? null} visible={!!current} onClose={() => setSelected(null)} slots>
         {current ? <DecidePanel key={current.id} contest={current} onDecided={onDecided} /> : null}
       </PhotoViewer>
     </View>
@@ -136,9 +139,13 @@ function ContestRow({ contest, onPress }: { contest: SupervisorContest; onPress:
   const info = contestStatusInfo[contest.status]
   return (
     <Card onPress={onPress} style={{ flexDirection: 'row', gap: space.md, padding: space.md }}>
-      <Image source={{ uri: resolveUrl(contest.photo.url) }} style={{ width: 84, height: 84, borderRadius: radius.sm, backgroundColor: colors.neutralSoft }} contentFit="cover" />
-      <View style={{ flex: 1, gap: 3 }}>
-        <Text style={[styles.text, { fontWeight: '700' }]} numberOfLines={1}>
+      <Image
+        source={{ uri: resolveUrl(contest.photo.url) }}
+        style={{ width: sizes.miniatura, height: sizes.miniatura, borderRadius: radius.sm, backgroundColor: colors.neutroSuave }}
+        contentFit="cover"
+      />
+      <View style={{ flex: 1, gap: space.xs }}>
+        <Text style={styles.sectionTitle} numberOfLines={1}>
           {contest.promotor.name}
         </Text>
         <Muted numberOfLines={1}>
@@ -148,7 +155,7 @@ function ContestRow({ contest, onPress }: { contest: SupervisorContest; onPress:
           "{contest.reason}"
         </Text>
         <Row>
-          <Badge label={contest.status === 'PENDENTE' ? 'Aguardando decisão' : info.label} color={info.color} bg={info.bg} />
+          <Badge label={contest.status === 'PENDENTE' ? 'Aguardando decisão' : info.label} tone={info.tone} />
         </Row>
       </View>
     </Card>
@@ -203,62 +210,72 @@ function DecidePanel({ contest, onDecided }: { contest: SupervisorContest; onDec
         multiline
         autoFocus
         placeholder="Ex.: a foto não mostra os preços; tire de mais longe"
-        hint={`Mínimo de ${MIN_RESPONSE} caracteres. O promotor vê esta resposta.`}
-        style={{ minHeight: 80 }}
+        hint={`Mínimo de ${MIN_JUSTIFICATION} caracteres. O promotor vê esta resposta.`}
       />
-      <Row>
+      <Row style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
         <Button title="Voltar" variant="secondary" onPress={stop} style={{ flex: 1 }} />
-        <Button title="Negar" variant="danger" onPress={() => decide('NEGADA')} loading={busy === 'NEGADA'} disabled={response.trim().length < MIN_RESPONSE} style={{ flex: 1 }} />
+        <Button
+          title="Negar"
+          variant="reject"
+          onPress={() => decide('NEGADA')}
+          loading={busy === 'NEGADA'}
+          disabled={response.trim().length < MIN_JUSTIFICATION}
+          missing={`Escreva pelo menos ${MIN_JUSTIFICATION} caracteres`}
+          style={{ flex: 1 }}
+        />
       </Row>
-      {error ? <Banner tone="danger" text={error} /> : null}
     </>
   )
 
   return (
     <>
-      {denying ? denyForm : null}
-      <Text style={styles.sectionTitle}>{contest.client.name}</Text>
-      <Muted>
-        {photoTypeLabels[contest.photo.type]} · {formatDate(contest.visit.date)} às {formatTime(contest.photo.takenAt)} · {contest.promotor.name}
-      </Muted>
-      {contest.audits.map((a) => {
-        const info = auditStatusInfo[a.status]
-        return (
-          <Card key={a.id} style={{ padding: space.md }}>
-            <Row>
-              <Text style={[styles.text, { fontWeight: '700' }]}>
-                {a.auditor.name} ({roleLabels[a.auditor.role]})
-              </Text>
-              <Badge label={info.label} color={info.color} bg={info.bg} />
-            </Row>
-            {a.justification ? <Text style={styles.text}>"{a.justification}"</Text> : null}
-            {a.review ? (
-              <Muted>
-                Conferida por {a.review.supervisor.name}: {a.review.verdict === 'CORRETA' ? 'correta' : 'incorreta'}
-                {a.review.comment ? ` - ${a.review.comment}` : ''}
-              </Muted>
-            ) : null}
-          </Card>
-        )
-      })}
-      <Card style={{ padding: space.md, borderColor: colors.warning }}>
-        <Text style={[styles.text, { fontWeight: '700' }]}>Contestação de {contest.promotor.name}</Text>
-        <Text style={styles.text}>"{contest.reason}"</Text>
-        <Muted>Enviada em {formatDateTime(contest.createdAt)}</Muted>
-      </Card>
-      {!pending ? (
-        <Banner
-          tone={contest.status === 'ACEITA' ? 'success' : 'danger'}
-          text={`${contest.status === 'ACEITA' ? 'Aceita' : 'Negada'} por ${contest.decidedBy?.name ?? '—'} em ${formatDateTime(contest.decidedAt)}.${contest.response ? `\n${contest.response}` : ''}`}
-        />
-      ) : null}
+      <ViewerInfo>
+        {denying ? denyForm : null}
+        {error ? <Banner tone="danger" text={error} /> : null}
+        <Text style={styles.sectionTitle}>{contest.client.name}</Text>
+        <Muted>
+          {photoTypeLabels[contest.photo.type]} · {formatDate(contest.visit.date)} às {formatTime(contest.photo.takenAt)} · {contest.promotor.name}
+        </Muted>
+        {contest.audits.map((a) => {
+          const info = auditStatusInfo[a.status]
+          return (
+            <Card key={a.id} style={{ padding: space.md }}>
+              <Row>
+                <Text style={styles.optionText}>
+                  {a.auditor.name} ({roleLabels[a.auditor.role]})
+                </Text>
+                <Badge label={info.label} tone={info.tone} />
+              </Row>
+              {a.justification ? <Text style={styles.text}>"{a.justification}"</Text> : null}
+              {a.review ? (
+                <Muted>
+                  Conferida por {a.review.supervisor.name}: {a.review.verdict === 'CORRETA' ? 'correta' : 'incorreta'}
+                  {a.review.comment ? ` - ${a.review.comment}` : ''}
+                </Muted>
+              ) : null}
+            </Card>
+          )
+        })}
+        <Card style={{ padding: space.md, borderColor: colors.marinho, borderWidth: borders.campo }}>
+          <Text style={styles.optionText}>Contestação de {contest.promotor.name}</Text>
+          <Text style={styles.text}>"{contest.reason}"</Text>
+          <Muted>Enviada em {formatDateTime(contest.createdAt)}</Muted>
+        </Card>
+        {!pending ? (
+          <Banner
+            tone={contest.status === 'ACEITA' ? 'success' : 'danger'}
+            text={`${contest.status === 'ACEITA' ? 'Aceita' : 'Negada'} por ${contest.decidedBy?.name ?? '—'} em ${formatDateTime(contest.decidedAt)}.${contest.response ? `\n${contest.response}` : ''}`}
+          />
+        ) : null}
+      </ViewerInfo>
       {pending && !denying ? (
-        <Row>
-          <Button title="Negar" variant="danger" onPress={() => setDenying(true)} style={{ flex: 1 }} />
-          <Button title="Aceitar" variant="success" onPress={confirmAccept} loading={busy === 'ACEITA'} style={{ flex: 1 }} />
-        </Row>
+        <ViewerFooter>
+          <DecisionPair
+            negative={{ title: 'Negar', onPress: () => setDenying(true), disabled: !!busy }}
+            positive={{ title: 'Aceitar', onPress: confirmAccept, loading: busy === 'ACEITA' }}
+          />
+        </ViewerFooter>
       ) : null}
-      {!denying && error ? <Banner tone="danger" text={error} /> : null}
     </>
   )
 }

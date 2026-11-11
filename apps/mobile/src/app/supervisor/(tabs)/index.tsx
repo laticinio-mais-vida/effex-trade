@@ -1,7 +1,7 @@
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { Alert } from 'react-native'
-import { Button, EmptyState, ErrorView, LoadingView, Muted, PromptSheet, Row, Screen, SectionTitle } from '@/components/ui'
+import { DecisionPair, EmptyState, ErrorView, LoadingView, Muted, PromptSheet, Screen, SectionTitle } from '@/components/ui'
 import { RequestCard } from '@/features/RequestCard'
 import { AlertCard, fetchOpenAlerts, notifyNewAlerts, useMinuteTick } from '@/features/supervisor/alerts'
 import { api, errorMessage } from '@/lib/api'
@@ -88,10 +88,10 @@ export default function Liberacoes() {
           request={r}
           showPromotor
           actions={
-            <Row>
-              <Button title="Negar" variant="secondary" small onPress={() => setDeciding({ request: r, approve: false })} style={{ flex: 1 }} />
-              <Button title="Aprovar" variant="success" small onPress={() => setDeciding({ request: r, approve: true })} style={{ flex: 1 }} />
-            </Row>
+            <DecisionPair
+              negative={{ title: 'Negar', onPress: () => setDeciding({ request: r, approve: false }) }}
+              positive={{ title: 'Aprovar', onPress: () => setDeciding({ request: r, approve: true }) }}
+            />
           }
         />
       ))}
@@ -113,7 +113,7 @@ export default function Liberacoes() {
         placeholder={deciding?.approve ? 'Observação para o promotor (opcional)' : 'Explique ao promotor o motivo'}
         minLength={deciding?.approve ? 0 : 3}
         confirmLabel={deciding?.approve ? 'Aprovar' : 'Negar'}
-        confirmVariant={deciding?.approve ? 'success' : 'danger'}
+        confirmVariant={deciding?.approve ? 'approve' : 'reject'}
         onClose={() => setDeciding(null)}
         onConfirm={(note) => (deciding ? decide(deciding.request, deciding.approve, note) : undefined)}
       />

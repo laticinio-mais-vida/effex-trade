@@ -3,7 +3,7 @@ import { Alert, Linking, Text, Vibration } from 'react-native'
 import { Badge, Button, Card, Muted, Row, styles } from '@/components/ui'
 import { api } from '@/lib/api'
 import { formatMinutes, formatTime, minutesSince } from '@/lib/format'
-import { colors } from '@/lib/theme'
+import { borders, colors, type } from '@/lib/theme'
 import type { SupervisorAlert } from '@/lib/types'
 
 /** Alertas já avisados nesta sessão do app (não repete o aviso do mesmo alerta). */
@@ -34,7 +34,6 @@ export function useMinuteTick() {
 export function AlertCard({ alert, onAcknowledged }: { alert: SupervisorAlert; onAcknowledged: () => void }) {
   const [busy, setBusy] = useState(false)
   const ongoing = !alert.resolvedAt && !alert.lunchEndedAt
-  const tone = ongoing ? colors.danger : colors.warning
 
   async function acknowledge() {
     setBusy(true)
@@ -49,14 +48,14 @@ export function AlertCard({ alert, onAcknowledged }: { alert: SupervisorAlert; o
   }
 
   return (
-    <Card style={{ borderColor: tone, backgroundColor: ongoing ? colors.dangerSoft : colors.warningSoft }}>
+    <Card style={ongoing ? { borderColor: colors.naoFeito, borderWidth: borders.campo } : undefined}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Text style={[styles.text, { fontWeight: '700', flex: 1 }]}>{alert.promotor.name}</Text>
-        <Badge label="Almoço acima do limite" color={tone} bg={colors.surface} />
+        <Text style={[styles.sectionTitle, { flex: 1 }]}>{alert.promotor.name}</Text>
+        <Badge label="Almoço acima do limite" tone="naoFeito" />
       </Row>
       <Text style={styles.text}>{alert.message}</Text>
       {ongoing && alert.lunchStartedAt ? (
-        <Text style={[styles.text, { fontWeight: '700', color: tone }]}>
+        <Text style={[type.textoForte, { color: colors.naoFeito }]}>
           Em almoço há {formatMinutes(minutesSince(alert.lunchStartedAt))} (desde {formatTime(alert.lunchStartedAt)})
         </Text>
       ) : (

@@ -1,5 +1,5 @@
 import { useTabsOptions } from '@/components/navigation'
-import { tabBadge, tabIcon, tabLabel } from '@/components/tabIcon'
+import { tabBadge, tabIcon } from '@/components/tabIcon'
 import { Tabs } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { fetchOpenAlerts, notifyNewAlerts } from '@/features/supervisor/alerts'
@@ -29,13 +29,7 @@ export default function SupervisorTabs() {
   }, [refresh])
 
   return (
-    <Tabs
-      screenOptions={{
-        ...tabsOptions,
-        // Seis abas: o rótulo diminui a letra até caber, em vez de cortar com reticências
-        tabBarLabel: tabLabel(),
-      }}
-    >
+    <Tabs screenOptions={tabsOptions}>
       <Tabs.Screen
         name="index"
         options={{
@@ -44,30 +38,13 @@ export default function SupervisorTabs() {
           tabBarIcon: tabIcon('key-outline'),
         }}
       />
+      {/* Fotos reúne Avaliar, Vendedores e Contestações (seletor no topo): o contador soma as três */}
       <Tabs.Screen
         name="fotos"
         options={{
-          title: 'Auditoria de fotos',
-          tabBarLabel: tabLabel('Fotos'),
-          tabBarBadge: tabBadge(counts.photos),
+          title: 'Fotos',
+          tabBarBadge: tabBadge(counts.photos + counts.vendorAudits + counts.contests),
           tabBarIcon: tabIcon('images-outline'),
-        }}
-      />
-      <Tabs.Screen
-        name="vendedores"
-        options={{
-          title: 'Auditorias dos vendedores',
-          tabBarLabel: tabLabel('Vendedores'),
-          tabBarBadge: tabBadge(counts.vendorAudits),
-          tabBarIcon: tabIcon('checkmark-done-outline'),
-        }}
-      />
-      <Tabs.Screen
-        name="contestacoes"
-        options={{
-          title: 'Contestações',
-          tabBarBadge: tabBadge(counts.contests),
-          tabBarIcon: tabIcon('chatbox-ellipses-outline'),
         }}
       />
       <Tabs.Screen name="equipe" options={{ title: 'Equipe', tabBarIcon: tabIcon('people-outline') }} />

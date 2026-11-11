@@ -1,6 +1,24 @@
 import { tones, type Tone } from './theme'
 import type { AuditStatus, ContestStatus, PhotoType, RequestStatus, Role, TaskRecurrence, Visit, VisitModule, VisitOrigin, VisitStatus } from './types'
 
+/** Sem localização nova há mais que isto, o promotor conta como "sem sinal" (igual ao painel). */
+export const SIGNAL_STALE_MIN = 15
+
+/** Sem sinal: nunca mandou localização hoje ou a última é mais velha que SIGNAL_STALE_MIN. */
+export function isSignalStale(recordedAt: string | null | undefined) {
+  return !recordedAt || Date.now() - new Date(recordedAt).getTime() > SIGNAL_STALE_MIN * 60_000
+}
+
+/** "agora", "há 6 min", "há 1h 20min". */
+export function sinceLabel(iso: string | null | undefined) {
+  if (!iso) return ''
+  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min} min`
+  const h = Math.floor(min / 60)
+  return `há ${h}h${min % 60 ? ` ${min % 60}min` : ''}`
+}
+
 /** Mínimo de caracteres das justificativas (reprovar foto, conferência incorreta, negar contestação), igual ao painel. */
 export const MIN_JUSTIFICATION = 5
 

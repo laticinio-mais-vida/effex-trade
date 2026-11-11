@@ -27,8 +27,6 @@ const SAFE_ROUTES = new Set([
   '/vendedor/conta',
   '/supervisor',
   '/supervisor/fotos',
-  '/supervisor/vendedores',
-  '/supervisor/contestacoes',
   '/supervisor/equipe',
   '/supervisor/conta',
 ])

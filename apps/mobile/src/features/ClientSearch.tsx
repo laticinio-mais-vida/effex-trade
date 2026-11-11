@@ -3,7 +3,7 @@ import { ActivityIndicator, Text, View } from 'react-native'
 import { Card, Field, Muted, styles } from '@/components/ui'
 import { errorMessage } from '@/lib/api'
 import { placeOf } from '@/lib/format'
-import { colors } from '@/lib/theme'
+import { borders, colors, space, type } from '@/lib/theme'
 import type { Client } from '@/lib/types'
 
 /** Busca de clientes com atraso de digitação. */
@@ -47,18 +47,18 @@ export function ClientSearch({
   }, [search])
 
   return (
-    <View style={{ gap: 10 }}>
+    <View style={{ gap: space.sm }}>
       <Field value={search} onChangeText={setSearch} placeholder="Nome ou cidade do cliente" autoCorrect={false} />
-      {loading ? <ActivityIndicator color={colors.primary} /> : null}
+      {loading ? <ActivityIndicator color={colors.marinho} /> : null}
       {error ? <Text style={styles.errorSmall}>{error}</Text> : null}
       {!loading && results.length === 0 && !error ? <Muted>Nenhum cliente encontrado.</Muted> : null}
       {results.map((c) => {
         const extra = note?.(c)
         return (
-          <Card key={c.id} onPress={() => onSelect(c)} style={selectedId === c.id && { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.primarySoft }}>
-            <Text style={[styles.text, { fontWeight: '700' }]}>{c.name}</Text>
+          <Card key={c.id} onPress={() => onSelect(c)} style={selectedId === c.id && { borderColor: colors.marinho, borderWidth: borders.campo }}>
+            <Text style={styles.optionText}>{c.name}</Text>
             {c.city ? <Muted>{placeOf(c)}</Muted> : null}
-            {extra ? <Text style={{ color: colors.warning, fontSize: 13 }}>{extra}</Text> : null}
+            {extra ? <Text style={[type.secundario, { color: colors.naoFeito }]}>{extra}</Text> : null}
           </Card>
         )
       })}
