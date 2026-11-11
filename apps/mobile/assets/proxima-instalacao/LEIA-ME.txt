@@ -1,0 +1,9 @@
+Ícone e tela de abertura do kit de marca EFFEX (briefing da reformulação visual, seção 10).
+
+Ainda NÃO estão ligados no app.json de propósito: trocar o ícone (icon, adaptiveIcon) ou ligar a tela de
+abertura muda a parte nativa (runtime/fingerprint). Depois disso, as atualizações via internet só chegam a
+APKs gerados depois da troca. Ligar só junto com um APK novo (deploy\gerar-apk.ps1).
+
+- icon.png: ícone do app (1024px, fundo marinho)
+- adaptive-icon.png: primeiro plano do ícone adaptativo do Android, com fundo #061D39
+- splash-icon.png: imagem da tela de abertura, com fundo #061D39
