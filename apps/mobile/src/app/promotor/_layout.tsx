@@ -1,8 +1,8 @@
 import { Redirect, Stack } from 'expo-router'
+import { stackOptions } from '@/components/navigation'
 import { LoadingView } from '@/components/ui'
 import { DayProvider } from '@/features/promotor/DayContext'
 import { useAuth } from '@/lib/auth'
-import { colors } from '@/lib/theme'
 
 export default function PromotorLayout() {
   const { status, user } = useAuth()
@@ -13,13 +13,7 @@ export default function PromotorLayout() {
   return (
     <DayProvider>
       <Stack
-        screenOptions={{
-          headerStyle: { backgroundColor: colors.surface },
-          headerTintColor: colors.primary,
-          headerTitleStyle: { color: colors.text },
-          contentStyle: { backgroundColor: colors.bg },
-          headerBackTitle: 'Voltar',
-        }}
+        screenOptions={stackOptions}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="visita/[id]" options={{ title: 'Atendimento' }} />

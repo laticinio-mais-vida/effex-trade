@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { Modal, Pressable, ScrollView, Text, useWindowDimensions, View, type ScrollViewInstance } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { resolveUrl } from '@/lib/config'
-import { colors, space } from '@/lib/theme'
+import { colors, radius, sizes, space, type } from '@/lib/theme'
 
 const TypingContext = createContext<(on: boolean) => void>(() => {})
 
@@ -20,7 +20,7 @@ export function useViewerTyping(on: boolean) {
   }, [on, setTyping])
 }
 
-/** Foto em tela cheia com área de informações/ações abaixo. */
+/** Foto inteira sobre fundo preto, com a folha creme de dados e decisão embaixo. */
 export function PhotoViewer({ url, visible, onClose, children }: { url: string | null; visible: boolean; onClose: () => void; children?: ReactNode }) {
   const insets = useSafeAreaInsets()
   const { height } = useWindowDimensions()
@@ -35,19 +35,23 @@ export function PhotoViewer({ url, visible, onClose, children }: { url: string |
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={onClose}>
       <TypingContext.Provider value={setTyping}>
-        <View style={{ flex: 1, backgroundColor: '#0d1117', paddingTop: insets.top }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', padding: space.md }}>
-            <Pressable onPress={onClose} hitSlop={12}>
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Fechar</Text>
+        <View style={{ flex: 1, backgroundColor: colors.preto, paddingTop: insets.top }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: space.sm }}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onClose}
+              style={{ minHeight: sizes.toque, minWidth: sizes.toque, justifyContent: 'center', paddingHorizontal: space.sm }}
+            >
+              <Text style={[type.botao, { color: colors.branco }]}>Fechar</Text>
             </Pressable>
           </View>
           {url ? <Image source={{ uri: resolveUrl(url) }} style={photoStyle} contentFit="contain" transition={150} /> : <View style={photoStyle} />}
           {children ? (
             <ScrollView
               ref={scroll}
-              style={[{ backgroundColor: colors.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16 }, typing ? { flex: 1 } : { maxHeight: '48%' }]}
+              style={[{ backgroundColor: colors.fundo, borderTopLeftRadius: radius.folha, borderTopRightRadius: radius.folha }, typing ? { flex: 1 } : { maxHeight: '48%' }]}
               // Escrevendo, sobra espaço embaixo para rolar o painel por cima do teclado (o resto fica atrás dele)
-              contentContainerStyle={{ padding: space.lg, gap: space.md, paddingBottom: typing ? Math.round(height * 0.5) : insets.bottom + space.lg }}
+              contentContainerStyle={{ padding: space.lg, gap: space.sm, paddingBottom: typing ? Math.round(height * 0.5) : insets.bottom + space.lg }}
               keyboardShouldPersistTaps="handled"
             >
               {children}

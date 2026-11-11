@@ -1,37 +1,86 @@
 /* EFFEX Trade — painel administrativo
-   Tinta azul-marinho + amarelo de etiqueta de gôndola como único acento forte. */
+   Base comum do visual (briefing da reformulação visual, seções 3 a 6): marinho, verde e creme. Cor, fonte e medida
+   saem das variáveis abaixo. */
 
 :root {
-  --ink: #14213d;
-  --ink-2: #1f3158;
-  --ink-3: #2c4170;
-  --text: #1b2433;
-  --muted: #5d6b7e;
-  --faint: #8a97a6;
-  --surface: #f3f6f9;
-  --panel: #ffffff;
-  --rule: #dce3ea;
-  --rule-strong: #c4ced9;
-  --tag: #f5c518;
-  --tag-deep: #e0b000;
-  --tag-ink: #1a1a1a;
+  /* Paleta */
+  --marinho: #061d39;
+  --verde-marca: #25b827; /* só no logo */
+  --fundo: #fef7eb;
+  --superficie: #ffffff;
+  --texto: var(--marinho);
+  --texto-sec: #475467;
+  --borda-campo: #8a93a3;
+  --divisoria: #e6dfd1;
+  --desab-texto: #5f6673;
+  --desab-fundo: #e7e4dd;
+  --feito: #146c34;
+  --feito-suave: #e3f4e8;
+  --justificado: #8f5106; /* só para Justificado */
+  --justificado-suave: #fbe3b8;
+  --em-atendimento: #1d4ed8;
+  --em-atendimento-suave: #e0eaff;
+  --nao-feito: #b42318;
+  --nao-feito-suave: #fde7e4;
+  --neutro: #475467;
+  --neutro-suave: #eef0f3;
+  --pino-justificado: #f2b705;
+  --item-ativo: rgba(254, 247, 235, 0.16); /* item ativo da barra lateral */
+  --veu: rgba(6, 29, 57, 0.5);
 
-  --done: #1e8e5a;
-  --done-bg: #e5f4ec;
-  --justified: #b87400;
-  --justified-bg: #fdf1dc;
-  --notdone: #c2413a;
-  --notdone-bg: #fbe9e7;
-  --progress: #2f6fdb;
-  --progress-bg: #e6eefc;
-  --idle: #8a97a6;
-  --idle-bg: #eef1f4;
+  /* Tipografia (Public Sans) */
+  --font: 'Public Sans', system-ui, sans-serif;
+  --fs-titulo: 28px;
+  --fs-destaque: 40px;
+  --fs-secao: 18px;
+  --fs-texto: 15px;
+  --fs-secundario: 14px;
+  --fs-selo: 13px;
 
-  --radius-s: 4px;
-  --radius-m: 8px;
-  --font: 'Barlow', system-ui, sans-serif;
-  --font-cond: 'Barlow Semi Condensed', 'Barlow', system-ui, sans-serif;
+  /* Espaços, raios e medidas */
+  --esp-1: 4px;
+  --esp-2: 8px;
+  --esp-3: 12px;
+  --esp-4: 16px;
+  --esp-5: 24px;
+  --esp-6: 32px;
+  --raio: 10px;
+  --raio-selo: 6px;
+  --raio-folha: 16px;
+  --campo-altura: 40px;
+  --linha-tabela: 44px;
+  --icone: 24px;
+  --icone-texto: 20px;
+  --sombra: 0 12px 32px rgba(6, 29, 57, 0.22); /* só em janela, folha e barra fixa */
   --sidebar: 232px;
+
+  /* Nomes antigos, só até a etapa 2 (barra lateral, Hoje, mapa e login ainda usam) */
+  --ink: var(--marinho);
+  --ink-2: rgba(254, 247, 235, 0.1);
+  --ink-3: var(--marinho);
+  --text: var(--texto);
+  --muted: var(--texto-sec);
+  --faint: var(--borda-campo);
+  --surface: var(--fundo);
+  --panel: var(--superficie);
+  --rule: var(--divisoria);
+  --rule-strong: var(--borda-campo);
+  --tag: var(--pino-justificado);
+  --tag-deep: var(--pino-justificado);
+  --tag-ink: var(--marinho);
+  --done: var(--feito);
+  --done-bg: var(--feito-suave);
+  --justified: var(--justificado);
+  --justified-bg: var(--justificado-suave);
+  --notdone: var(--nao-feito);
+  --notdone-bg: var(--nao-feito-suave);
+  --progress: var(--em-atendimento);
+  --progress-bg: var(--em-atendimento-suave);
+  --idle: var(--neutro);
+  --idle-bg: var(--neutro-suave);
+  --radius-s: var(--raio-selo);
+  --radius-m: var(--raio);
+  --font-cond: var(--font);
 
   color-scheme: light;
 }
@@ -48,10 +97,10 @@ body,
 
 body {
   margin: 0;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--fundo);
+  color: var(--texto);
   font-family: var(--font);
-  font-size: 15px;
+  font-size: var(--fs-texto);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
@@ -59,39 +108,71 @@ body {
 h1,
 h2,
 h3 {
-  font-family: var(--font-cond);
-  font-weight: 700;
-  line-height: 1.15;
+  font-family: var(--font);
+  line-height: 1.2;
   margin: 0;
-  color: var(--ink);
+  color: var(--texto);
 }
+/* Título da página: único lugar com itálico */
 h1 {
-  font-size: 28px;
+  font-size: var(--fs-titulo);
+  font-weight: 700;
+  font-style: italic;
 }
 h2 {
-  font-size: 20px;
+  font-size: var(--fs-secao);
+  font-weight: 600;
 }
 h3 {
-  font-size: 16px;
+  font-size: var(--fs-texto);
+  font-weight: 600;
 }
 
 a {
-  color: var(--progress);
+  color: var(--marinho);
 }
 
 :focus-visible {
-  outline: 2px solid var(--progress);
+  outline: 2px solid var(--marinho);
   outline-offset: 2px;
 }
 
+/* Algarismos tabulares: indicadores, tabelas e horários */
 .num {
   font-variant-numeric: tabular-nums;
 }
+.destaque {
+  font-size: var(--fs-destaque);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
 .muted {
-  color: var(--muted);
+  color: var(--texto-sec);
 }
 .small {
-  font-size: 13px;
+  font-size: var(--fs-selo);
+}
+
+/* Ícone Ionicons (src/icons.tsx): herda a cor do texto */
+.icon {
+  display: inline-flex;
+  flex: none;
+  width: var(--icone-texto);
+  height: var(--icone-texto);
+}
+.icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+  stroke: currentColor;
+}
+/* As três regras que o componente oficial (ion-icon) aplica aos desenhos */
+.icon .ionicon-fill-none {
+  fill: none;
+}
+.icon .ionicon-stroke-width {
+  stroke-width: 32px;
 }
 
 /* ---------- Layout ---------- */
@@ -215,26 +296,27 @@ a {
   margin-bottom: 18px;
 }
 
-/* ---------- Painéis e tabelas ---------- */
+/* ---------- Cartões e tabelas ---------- */
+/* Cartão: branco, borda fina, sem sombra */
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-m);
+  background: var(--superficie);
+  border: 1px solid var(--divisoria);
+  border-radius: var(--raio);
 }
 .panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--rule);
+  gap: var(--esp-3);
+  padding: var(--esp-3) var(--esp-4);
+  border-bottom: 1px solid var(--divisoria);
 }
 .panel-body {
-  padding: 16px 18px;
+  padding: var(--esp-4);
 }
 .stack {
   display: grid;
-  gap: 18px;
+  gap: var(--esp-4);
   align-content: start;
 }
 .nowrap {
@@ -243,122 +325,141 @@ a {
 .cols-2 {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 18px;
+  gap: var(--esp-4);
   align-items: start;
 }
 
+/* Tabela: cabeçalho 13 SemiBold cinza, linhas de 44px, divisória sem zebra, números à direita e tabulares,
+   nome principal em SemiBold sem sublinhado, linha inteira clicável */
 .table-wrap {
   overflow-x: auto;
 }
 table.data {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-secundario);
 }
 table.data th {
   text-align: left;
   font-weight: 600;
-  color: var(--muted);
-  font-size: 13px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--rule-strong);
+  color: var(--texto-sec);
+  font-size: var(--fs-selo);
+  padding: var(--esp-2) var(--esp-3);
+  border-bottom: 1px solid var(--divisoria);
   white-space: nowrap;
-  background: var(--panel);
+  background: var(--superficie);
   position: sticky;
   top: 0;
 }
 table.data td {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--rule);
+  height: var(--linha-tabela);
+  padding: var(--esp-3);
+  line-height: 20px;
+  border-bottom: 1px solid var(--divisoria);
   vertical-align: top;
 }
 table.data tr:last-child td {
   border-bottom: none;
 }
-table.data tbody tr:hover td {
-  background: #f8fafc;
-}
 table.data .r {
   text-align: right;
-}
-table.data td.r {
   font-variant-numeric: tabular-nums;
+}
+table.data a {
+  color: var(--texto);
+  font-weight: 600;
+  text-decoration: none;
+}
+table.data a:hover {
+  text-decoration: underline;
 }
 table.data tr.clickable {
   cursor: pointer;
 }
+table.data tr.clickable:hover td {
+  background: var(--neutro-suave);
+}
 .cond {
-  font-family: var(--font-cond);
+  font-family: var(--font);
 }
 
-/* ---------- Status ---------- */
+/* ---------- Selos de status ---------- */
+/* Selo: fundo suave, texto forte, 13 SemiBold, raio 6, sem bolinha. Cada status tem cor exclusiva: verde = feito,
+   âmbar = só Justificado, azul = em atendimento, vermelho = não feito (dias anteriores e relatórios) e reprovado,
+   cinza = não feito com o dia aberto, pendente e "a conferir". */
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 9px 2px 8px;
-  border-radius: 999px;
-  font-size: 13px;
+  padding: 1px var(--esp-2);
+  border-radius: var(--raio-selo);
+  font-size: var(--fs-selo);
   font-weight: 600;
+  line-height: 18px;
   white-space: nowrap;
-}
-.pill::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
 }
 .st-CONCLUIDA,
 .st-APROVADA,
-.st-CORRETA {
-  color: var(--done);
-  background: var(--done-bg);
+.st-CORRETA,
+.st-ACEITA {
+  color: var(--feito);
+  background: var(--feito-suave);
 }
-.st-JUSTIFICADA,
-.st-PENDENTE-req {
-  color: var(--justified);
-  background: var(--justified-bg);
+.st-JUSTIFICADA {
+  color: var(--justificado);
+  background: var(--justificado-suave);
 }
 .st-PENDENTE,
 .st-REPROVADA,
 .st-NEGADA,
 .st-INCORRETA {
-  color: var(--notdone);
-  background: var(--notdone-bg);
+  color: var(--nao-feito);
+  background: var(--nao-feito-suave);
 }
 .st-EM_ATENDIMENTO {
-  color: var(--progress);
-  background: var(--progress-bg);
+  color: var(--em-atendimento);
+  background: var(--em-atendimento-suave);
 }
+.st-PENDENTE-aberto,
+.st-PENDENTE-req,
 .st-CANCELADA,
 .st-idle {
-  color: var(--idle);
-  background: var(--idle-bg);
+  color: var(--neutro);
+  background: var(--neutro-suave);
+}
+/* Selo cheio (ex.: "Próximo") e de contorno (ex.: "Pode contestar") */
+.pill.marinho {
+  color: #fff;
+  background: var(--marinho);
+}
+.pill.contorno {
+  color: var(--marinho);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--marinho);
 }
 
+/* Selo neutro; .warn = atenção (cinza com texto vermelho: o âmbar é só de Justificado) */
 .chip {
   display: inline-block;
-  padding: 1px 7px;
-  border-radius: var(--radius-s);
-  background: var(--idle-bg);
-  color: var(--muted);
-  font-size: 12px;
+  padding: 1px var(--esp-2);
+  border-radius: var(--raio-selo);
+  background: var(--neutro-suave);
+  color: var(--neutro);
+  font-size: var(--fs-selo);
   font-weight: 600;
+  line-height: 18px;
   white-space: nowrap;
 }
 .chip.warn {
-  background: var(--justified-bg);
-  color: var(--justified);
+  color: var(--nao-feito);
 }
 
-/* Barra de execução empilhada (feito / justificado / em atendimento / não feito) */
+/* Barra de execução empilhada (feito / justificado / em atendimento), sobre fundo cinza */
 .execbar {
   display: flex;
   height: 8px;
   border-radius: 999px;
   overflow: hidden;
-  background: var(--idle-bg);
+  background: var(--neutro-suave);
   min-width: 120px;
 }
 .execbar span {
@@ -366,16 +467,16 @@ table.data tr.clickable {
   height: 100%;
 }
 .execbar .b-done {
-  background: var(--done);
+  background: var(--feito);
 }
 .execbar .b-just {
-  background: var(--justified);
+  background: var(--justificado);
 }
 .execbar .b-prog {
-  background: var(--progress);
+  background: var(--em-atendimento);
 }
 .execbar .b-pend {
-  background: #e6b7b3;
+  background: transparent;
 }
 
 /* ---------- Etiqueta de gôndola (resumo do dia) ---------- */
@@ -436,49 +537,60 @@ table.data tr.clickable {
 }
 
 /* ---------- Formulários ---------- */
+/* Campo: rótulo acima (14 SemiBold), fundo branco, borda 2px; em foco, borda marinho de 4px. 40px no painel. */
 .field {
   display: grid;
-  gap: 5px;
-  font-size: 13px;
+  gap: var(--esp-1);
+  font-size: var(--fs-secundario);
   font-weight: 600;
-  color: var(--muted);
+  color: var(--texto);
 }
 .field > span {
   white-space: nowrap;
+}
+.field-hint {
+  font-weight: 400;
+  color: var(--texto-sec);
+}
+.field-error {
+  font-weight: 400;
+  color: var(--nao-feito);
 }
 .input,
 select.input,
 textarea.input {
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-texto);
   font-weight: 400;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-s);
-  padding: 7px 10px;
-  min-height: 36px;
+  color: var(--texto);
+  background: var(--superficie);
+  border: 2px solid var(--borda-campo);
+  border-radius: var(--raio);
+  padding: 0 var(--esp-3);
+  min-height: var(--campo-altura);
 }
 textarea.input {
-  min-height: 80px;
+  min-height: calc(var(--campo-altura) * 2);
+  padding: var(--esp-2) var(--esp-3);
   resize: vertical;
 }
+/* A borda de 4px é a de 2px mais 2px por dentro: o texto não muda de lugar */
 .input:focus {
-  outline: 2px solid var(--progress);
-  outline-offset: -1px;
-  border-color: transparent;
+  outline: none;
+  border-color: var(--marinho);
+  box-shadow: inset 0 0 0 2px var(--marinho);
 }
 /* Campos que vêm do ERP (só leitura no cadastro do cliente) */
 .input[readonly],
 .input:disabled {
-  background: var(--idle-bg);
-  border-color: var(--rule);
-  color: var(--muted);
+  background: var(--desab-fundo);
+  border-color: var(--divisoria);
+  color: var(--desab-texto);
 }
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 16px;
+  gap: var(--esp-3) var(--esp-4);
 }
 .form-grid .full {
   grid-column: 1 / -1;
@@ -486,168 +598,186 @@ textarea.input {
 .check {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--text);
-  font-weight: 500;
+  gap: var(--esp-2);
+  font-size: var(--fs-secundario);
+  color: var(--texto);
+  font-weight: 400;
   cursor: pointer;
 }
 .check input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--ink);
+  width: 18px;
+  height: 18px;
+  accent-color: var(--marinho);
 }
 
+/* ---------- Botões ---------- */
+/* .btn sozinho = secundário (branco, borda marinho de 3px). primary = marinho cheio, uma ação primária por página.
+   approve/reject = decisões, na cor do resultado. danger = ação rara destrutiva (contorno vermelho). text = ação de
+   texto. Desabilitado: fundo e texto cinza, nunca o primário desbotado; o que falta vai em .btn-hint abaixo. */
 .btn {
   font: inherit;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-texto);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 36px;
-  padding: 7px 14px;
-  border-radius: var(--radius-s);
-  border: 1px solid var(--rule-strong);
-  background: var(--panel);
-  color: var(--ink);
+  gap: var(--esp-2);
+  min-height: var(--campo-altura);
+  padding: 0 var(--esp-4);
+  border-radius: var(--raio);
+  border: 3px solid var(--marinho);
+  background: var(--superficie);
+  color: var(--marinho);
   cursor: pointer;
   white-space: nowrap;
   text-decoration: none;
 }
 .btn:hover {
-  background: #eef2f6;
+  background: var(--neutro-suave);
 }
-.btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.btn.primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #fff;
-}
-.btn.primary:hover {
-  background: var(--ink-3);
-}
+.btn.primary,
 .btn.accent {
-  background: var(--tag);
-  border-color: var(--tag-deep);
-  color: var(--tag-ink);
-}
-.btn.accent:hover {
-  background: var(--tag-deep);
-}
-.btn.danger {
-  color: var(--notdone);
-  border-color: #e7b9b5;
-}
-.btn.good {
-  color: var(--done);
-  border-color: #a8d5bd;
+  background: var(--marinho);
+  border-color: var(--marinho);
+  color: #fff;
 }
 .btn.approve {
-  background: var(--done);
-  border-color: var(--done);
+  background: var(--feito);
+  border-color: var(--feito);
   color: #fff;
-}
-.btn.approve:hover {
-  background: #17734a;
 }
 .btn.reject {
-  background: var(--notdone);
-  border-color: var(--notdone);
+  background: var(--nao-feito);
+  border-color: var(--nao-feito);
   color: #fff;
 }
+.btn.primary:hover,
+.btn.accent:hover,
+.btn.approve:hover,
 .btn.reject:hover {
-  background: #a3332d;
+  opacity: 0.9;
+}
+.btn.danger {
+  background: var(--superficie);
+  border-color: var(--nao-feito);
+  color: var(--nao-feito);
+}
+.btn.danger:hover {
+  background: var(--nao-feito-suave);
+}
+.btn.text {
+  border-color: transparent;
+  background: none;
+  padding: 0 var(--esp-1);
+}
+.btn.text:hover {
+  text-decoration: underline;
+}
+.btn:disabled,
+.btn:disabled:hover {
+  background: var(--desab-fundo);
+  border-color: var(--desab-fundo);
+  color: var(--desab-texto);
+  opacity: 1;
+  text-decoration: none;
+  cursor: not-allowed;
+}
+.btn-hint {
+  font-size: var(--fs-secundario);
+  color: var(--texto-sec);
 }
 .btn.small {
-  min-height: 28px;
-  padding: 3px 9px;
-  font-size: 13px;
+  min-height: 32px;
+  padding: 0 var(--esp-3);
+  font-size: var(--fs-secundario);
 }
+/* Botão só com ícone (ex.: fechar janela) */
 .btn.icon {
-  width: 30px;
-  min-height: 30px;
+  width: 36px;
+  min-height: 36px;
   padding: 0;
+  border-color: transparent;
+  background: none;
+}
+.btn.icon:hover {
+  background: var(--neutro-suave);
 }
 .btn-row {
   display: flex;
-  gap: 8px;
+  gap: var(--esp-2);
   flex-wrap: wrap;
   align-items: center;
 }
 
+/* Seletor (ex.: Pendentes / Auditadas / Todas): fundo cinza; opção selecionada branca, texto marinho e borda de 2px */
 .segmented {
   display: inline-flex;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-s);
-  overflow: hidden;
-  background: var(--panel);
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--raio);
+  background: var(--neutro-suave);
 }
 .segmented button {
   font: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  border: none;
+  font-size: var(--fs-secundario);
+  font-weight: 600;
+  min-height: calc(var(--campo-altura) - 4px);
+  padding: 0 var(--esp-3);
+  border: 2px solid transparent;
+  border-radius: 8px;
   background: none;
-  padding: 7px 14px;
+  color: var(--texto-sec);
   cursor: pointer;
-  color: var(--muted);
-  border-right: 1px solid var(--rule);
-}
-.segmented button:last-child {
-  border-right: none;
 }
 .segmented button.on {
-  background: var(--ink);
-  color: #fff;
+  background: var(--superficie);
+  border-color: var(--marinho);
+  color: var(--marinho);
 }
 
+/* Avisos */
 .alert {
-  border-radius: var(--radius-s);
-  padding: 10px 14px;
-  font-size: 14px;
-  background: var(--notdone-bg);
-  color: #8f2a24;
-  border: 1px solid #f0c8c4;
+  border-radius: var(--raio-selo);
+  padding: var(--esp-3) var(--esp-4);
+  font-size: var(--fs-secundario);
+  background: var(--nao-feito-suave);
+  color: var(--nao-feito);
+  border-left: 4px solid var(--nao-feito);
 }
 .alert.ok {
-  background: var(--done-bg);
-  color: #145c3b;
-  border-color: #b9e0cb;
+  background: var(--feito-suave);
+  color: var(--feito);
+  border-left-color: var(--feito);
 }
 .empty {
-  padding: 40px 20px;
+  padding: 40px var(--esp-5);
   text-align: center;
-  color: var(--muted);
+  color: var(--texto-sec);
 }
 .loading {
-  padding: 40px 20px;
+  padding: 40px var(--esp-5);
   text-align: center;
-  color: var(--faint);
+  color: var(--texto-sec);
 }
 
-/* ---------- Modal ---------- */
+/* ---------- Janela ---------- */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(20, 33, 61, 0.55);
+  background: var(--veu);
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--esp-5);
   z-index: 2000;
 }
 .modal {
-  background: var(--panel);
-  border-radius: var(--radius-m);
+  background: var(--superficie);
+  border-radius: var(--raio);
   width: min(640px, 100%);
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 50px rgba(20, 33, 61, 0.35);
+  box-shadow: var(--sombra);
 }
 .modal.wide {
   width: min(1100px, 100%);
@@ -656,19 +786,20 @@ textarea.input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--rule);
+  gap: var(--esp-3);
+  padding: var(--esp-3) var(--esp-4) var(--esp-3) var(--esp-5);
+  border-bottom: 1px solid var(--divisoria);
 }
 .modal-body {
-  padding: 18px 20px;
+  padding: var(--esp-4) var(--esp-5);
   overflow-y: auto;
 }
 .modal-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--rule);
+  gap: var(--esp-2);
+  padding: var(--esp-3) var(--esp-5);
+  border-top: 1px solid var(--divisoria);
 }
 
 /* ---------- Login ---------- */
@@ -909,26 +1040,28 @@ textarea.input {
   color: var(--muted);
 }
 
+/* Abas de página: ativa em marinho com sublinhado de 3px */
 .tabs {
   display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--rule);
-  margin-bottom: 16px;
+  gap: var(--esp-1);
+  border-bottom: 1px solid var(--divisoria);
+  margin-bottom: var(--esp-4);
 }
 .tabs button {
   font: inherit;
   font-weight: 600;
   border: none;
   background: none;
-  padding: 10px 14px;
+  min-height: var(--campo-altura);
+  padding: 0 var(--esp-3);
   cursor: pointer;
-  color: var(--muted);
+  color: var(--texto-sec);
   border-bottom: 3px solid transparent;
   margin-bottom: -1px;
 }
 .tabs button.on {
-  color: var(--ink);
-  border-bottom-color: var(--tag);
+  color: var(--marinho);
+  border-bottom-color: var(--marinho);
 }
 
 .route-list {
@@ -1309,7 +1442,7 @@ textarea.input {
   border-radius: var(--radius-s);
   max-height: 260px;
   overflow-y: auto;
-  box-shadow: 0 8px 20px rgba(20, 33, 61, 0.15);
+  box-shadow: var(--sombra);
 }
 .picker-list button {
   display: block;
@@ -1323,15 +1456,13 @@ textarea.input {
   cursor: pointer;
 }
 .picker-list button:hover,
-.picker-list button:focus {
-  background: #f2f6fb;
-}
+.picker-list button:focus,
 .picker-list button.on {
-  background: var(--progress-bg);
+  background: var(--neutro-suave);
 }
 .picker-list .picker-all {
-  border-bottom: 1px solid var(--rule);
-  color: var(--progress);
+  border-bottom: 1px solid var(--divisoria);
+  color: var(--marinho);
   font-weight: 600;
 }
 .picker-check {

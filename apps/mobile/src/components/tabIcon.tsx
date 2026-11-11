@@ -1,11 +1,22 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { Text, type ColorValue } from 'react-native'
+import { sizes, type } from '@/lib/theme'
 
-/** Ícone para tabBarIcon das abas. */
-export function tabIcon(name: keyof typeof Ionicons.glyphMap) {
-  return function TabBarIcon({ color, size }: { color: ColorValue; size: number }) {
-    return <Ionicons name={name} color={color as string} size={size} />
+type IconName = keyof typeof Ionicons.glyphMap
+
+/** Ícone de aba: contorno no estado normal, preenchido na aba ativa (o nome sem "-outline"). */
+export function tabIcon(name: IconName) {
+  const filled = name.replace(/-outline$/, '') as IconName
+  const active: IconName = filled in Ionicons.glyphMap ? filled : name
+  return function TabBarIcon({ color, focused }: { color: ColorValue; focused: boolean; size: number }) {
+    return <Ionicons name={focused ? active : name} color={color as string} size={sizes.icone} />
   }
+}
+
+/** Contador da aba: some no zero e vira "99+" acima de 99. */
+export function tabBadge(n: number): number | string | undefined {
+  if (n <= 0) return undefined
+  return n > 99 ? '99+' : n
 }
 
 /**
@@ -15,7 +26,7 @@ export function tabIcon(name: keyof typeof Ionicons.glyphMap) {
 export function tabLabel(text?: string) {
   return function TabBarLabel({ color, children }: { color: ColorValue; children: string }) {
     return (
-      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ color, fontSize: 11, fontWeight: '600', textAlign: 'center', paddingHorizontal: 1 }}>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[type.selo, { color, textAlign: 'center', paddingHorizontal: 1 }]}>
         {text ?? children}
       </Text>
     )

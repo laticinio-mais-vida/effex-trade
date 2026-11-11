@@ -1,4 +1,4 @@
-import { colors } from './theme'
+import { tones, type Tone } from './theme'
 import type { AuditStatus, ContestStatus, PhotoType, RequestStatus, Role, TaskRecurrence, Visit, VisitModule, VisitOrigin, VisitStatus } from './types'
 
 export const photoTypeLabels: Record<PhotoType, string> = {
@@ -10,12 +10,23 @@ export const photoTypeLabels: Record<PhotoType, string> = {
   ATIVIDADE_EXTRA: 'Atividade extra',
 }
 
-export const visitStatusInfo: Record<VisitStatus, { label: string; color: string; bg: string }> = {
-  PENDENTE: { label: 'Não feito', color: colors.muted, bg: colors.neutralSoft },
-  EM_ATENDIMENTO: { label: 'Em atendimento', color: colors.info, bg: colors.infoSoft },
-  CONCLUIDA: { label: 'Feito', color: colors.success, bg: colors.successSoft },
-  JUSTIFICADA: { label: 'Justificado', color: colors.warning, bg: colors.warningSoft },
-  CANCELADA: { label: 'Substituído', color: colors.faint, bg: colors.neutralSoft },
+/** Rótulo e cor de status: `tone` para os componentes (Badge), color/bg para quem pinta direto. */
+export type StatusInfo = { label: string; tone: Tone; color: string; bg: string }
+const info = (label: string, tone: Tone): StatusInfo => ({ label, tone, color: tones[tone].forte, bg: tones[tone].suave })
+
+/** Status da visita com o dia aberto: "Não feito" fica cinza enquanto ainda dá tempo. */
+export const visitStatusInfo: Record<VisitStatus, StatusInfo> = {
+  PENDENTE: info('Não feito', 'neutro'),
+  EM_ATENDIMENTO: info('Em atendimento', 'emAtendimento'),
+  CONCLUIDA: info('Feito', 'feito'),
+  JUSTIFICADA: info('Justificado', 'justificado'),
+  CANCELADA: info('Substituído', 'neutro'),
+}
+
+/** "Não feito" é cinza com o dia aberto e vermelho nos dias anteriores (o rótulo não muda). */
+export function visitStatusFor(status: VisitStatus, dayOpen: boolean): StatusInfo {
+  if (status === 'PENDENTE' && !dayOpen) return info('Não feito', 'naoFeito')
+  return visitStatusInfo[status]
 }
 
 export const originLabels: Record<VisitOrigin, string | null> = {
@@ -40,22 +51,31 @@ export const recurrenceLabels: Record<TaskRecurrence, string | null> = {
   MENSAL: 'Mensal',
 }
 
-export const requestStatusInfo: Record<RequestStatus, { label: string; color: string; bg: string }> = {
-  PENDENTE: { label: 'Aguardando', color: colors.warning, bg: colors.warningSoft },
-  APROVADA: { label: 'Aprovada', color: colors.success, bg: colors.successSoft },
-  NEGADA: { label: 'Negada', color: colors.danger, bg: colors.dangerSoft },
-  CANCELADA: { label: 'Cancelada', color: colors.faint, bg: colors.neutralSoft },
+export const requestStatusInfo: Record<RequestStatus, StatusInfo> = {
+  PENDENTE: info('Aguardando', 'neutro'),
+  APROVADA: info('Aprovada', 'feito'),
+  NEGADA: info('Negada', 'naoFeito'),
+  CANCELADA: info('Cancelada', 'neutro'),
 }
 
-export const auditStatusInfo: Record<AuditStatus, { label: string; color: string; bg: string }> = {
-  APROVADA: { label: 'Aprovada', color: colors.success, bg: colors.successSoft },
-  REPROVADA: { label: 'Reprovada', color: colors.danger, bg: colors.dangerSoft },
+/** Foto: Pendente cinza, Aprovada verde, Reprovada vermelho. */
+export const photoPendingInfo: StatusInfo = info('Pendente', 'neutro')
+export const auditStatusInfo: Record<AuditStatus, StatusInfo> = {
+  APROVADA: info('Aprovada', 'feito'),
+  REPROVADA: info('Reprovada', 'naoFeito'),
 }
 
-export const contestStatusInfo: Record<ContestStatus, { label: string; color: string; bg: string }> = {
-  PENDENTE: { label: 'Contestação aguardando', color: colors.warning, bg: colors.warningSoft },
-  ACEITA: { label: 'Contestação aceita', color: colors.success, bg: colors.successSoft },
-  NEGADA: { label: 'Contestação negada', color: colors.danger, bg: colors.dangerSoft },
+/** Conferência da auditoria do vendedor: "A conferir" cinza, Correta verde, Incorreta vermelho. */
+export const reviewPendingInfo: StatusInfo = info('A conferir', 'neutro')
+export const reviewVerdictInfo: Record<'CORRETA' | 'INCORRETA', StatusInfo> = {
+  CORRETA: info('Correta', 'feito'),
+  INCORRETA: info('Incorreta', 'naoFeito'),
+}
+
+export const contestStatusInfo: Record<ContestStatus, StatusInfo> = {
+  PENDENTE: info('Contestação aguardando', 'neutro'),
+  ACEITA: info('Contestação aceita', 'feito'),
+  NEGADA: info('Contestação negada', 'naoFeito'),
 }
 
 export const roleLabels: Record<Role, string> = { ADMIN: 'administrador', SUPERVISOR: 'supervisor', VENDEDOR: 'vendedor', PROMOTOR: 'promotor' }

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { api } from './api'
+import { Icon } from './icons'
 import { visitStatusLabel } from './format'
 import type { Client, Lookups, Paged, Product, Stats, VisitStatus } from './types'
 
@@ -16,8 +17,13 @@ export function PageHead({ title, description, actions }: { title: string; descr
   )
 }
 
-export function StatusPill({ status, label }: { status: string; label?: string }) {
-  return <span className={`pill st-${status}`}>{label ?? visitStatusLabel[status as VisitStatus] ?? status}</span>
+/**
+ * Selo de status. "Não feito" (PENDENTE) é vermelho nos dias anteriores e nos relatórios e cinza com o dia aberto:
+ * passe `dayOpen` onde o dia ainda está em andamento.
+ */
+export function StatusPill({ status, label, dayOpen }: { status: string; label?: string; dayOpen?: boolean }) {
+  const cls = status === 'PENDENTE' && dayOpen ? 'PENDENTE-aberto' : status
+  return <span className={`pill st-${cls}`}>{label ?? visitStatusLabel[status as VisitStatus] ?? status}</span>
 }
 
 export function ExecBar({ stats }: { stats: Stats }) {
@@ -84,7 +90,7 @@ export function Modal({
         <div className="modal-head">
           <h2 id={titleId}>{title}</h2>
           <button className="btn icon" onClick={onClose} aria-label="Fechar">
-            ✕
+            <Icon name="close" size={24} />
           </button>
         </div>
         <div className="modal-body">{children}</div>

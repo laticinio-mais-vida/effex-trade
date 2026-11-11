@@ -1,15 +1,16 @@
-import { tabIcon } from '@/components/tabIcon'
+import { useTabsOptions } from '@/components/navigation'
+import { tabBadge, tabIcon } from '@/components/tabIcon'
 import { Redirect, Tabs } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { LoadingView } from '@/components/ui'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useBadgesChanged } from '@/lib/events'
-import { colors } from '@/lib/theme'
 
 export default function VendedorLayout() {
   const { status, user } = useAuth()
   const [pending, setPending] = useState(0)
+  const tabsOptions = useTabsOptions()
 
   const refreshBadge = useCallback(() => {
     api<{ pending: number }>('/audit/summary')
@@ -30,19 +31,14 @@ export default function VendedorLayout() {
 
   return (
     <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: colors.primary,
-        headerStyle: { backgroundColor: colors.surface },
-        headerTitleStyle: { color: colors.text },
-        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
-      }}
+      screenOptions={tabsOptions}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Avaliação de fotos',
           tabBarLabel: 'Avaliação',
-          tabBarBadge: pending > 0 ? pending : undefined,
+          tabBarBadge: tabBadge(pending),
           tabBarIcon: tabIcon('images-outline'),
         }}
       />

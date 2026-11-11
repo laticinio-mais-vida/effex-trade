@@ -1,14 +1,15 @@
-import { tabIcon, tabLabel } from '@/components/tabIcon'
+import { useTabsOptions } from '@/components/navigation'
+import { tabBadge, tabIcon, tabLabel } from '@/components/tabIcon'
 import { Tabs } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { fetchOpenAlerts, notifyNewAlerts } from '@/features/supervisor/alerts'
 import { api } from '@/lib/api'
 import { useBadgesChanged } from '@/lib/events'
-import { colors } from '@/lib/theme'
 import type { SupervisorSummary } from '@/lib/types'
 
 export default function SupervisorTabs() {
   const [counts, setCounts] = useState({ requests: 0, alerts: 0, vendorAudits: 0, photos: 0, contests: 0 })
+  const tabsOptions = useTabsOptions()
 
   const refresh = useCallback(() => {
     Promise.all([api<SupervisorSummary>('/supervisor/summary'), api<{ pending: number }>('/audit/summary')])
@@ -27,15 +28,10 @@ export default function SupervisorTabs() {
     return () => clearInterval(timer)
   }, [refresh])
 
-  const badge = (n: number) => (n > 0 ? (n > 99 ? '99+' : n) : undefined)
-
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: colors.primary,
-        headerStyle: { backgroundColor: colors.surface },
-        headerTitleStyle: { color: colors.text },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        ...tabsOptions,
         // Seis abas: o rótulo diminui a letra até caber, em vez de cortar com reticências
         tabBarLabel: tabLabel(),
       }}
@@ -44,7 +40,7 @@ export default function SupervisorTabs() {
         name="index"
         options={{
           title: 'Liberações',
-          tabBarBadge: badge(counts.requests + counts.alerts),
+          tabBarBadge: tabBadge(counts.requests + counts.alerts),
           tabBarIcon: tabIcon('key-outline'),
         }}
       />
@@ -53,7 +49,7 @@ export default function SupervisorTabs() {
         options={{
           title: 'Auditoria de fotos',
           tabBarLabel: tabLabel('Fotos'),
-          tabBarBadge: badge(counts.photos),
+          tabBarBadge: tabBadge(counts.photos),
           tabBarIcon: tabIcon('images-outline'),
         }}
       />
@@ -62,7 +58,7 @@ export default function SupervisorTabs() {
         options={{
           title: 'Auditorias dos vendedores',
           tabBarLabel: tabLabel('Vendedores'),
-          tabBarBadge: badge(counts.vendorAudits),
+          tabBarBadge: tabBadge(counts.vendorAudits),
           tabBarIcon: tabIcon('checkmark-done-outline'),
         }}
       />
@@ -70,7 +66,7 @@ export default function SupervisorTabs() {
         name="contestacoes"
         options={{
           title: 'Contestações',
-          tabBarBadge: badge(counts.contests),
+          tabBarBadge: tabBadge(counts.contests),
           tabBarIcon: tabIcon('chatbox-ellipses-outline'),
         }}
       />
