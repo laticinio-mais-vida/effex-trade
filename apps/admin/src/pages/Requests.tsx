@@ -55,7 +55,8 @@ export function RequestsPage() {
     <div>
       <PageHead
         title="Liberações"
-        description="Pedidos dos promotores (check-in fora da cerca, sem fotos, mudança de ordem, troca de cliente) e liberações diretas do supervisor. Pedidos de hoje podem ser decididos aqui ou no app."
+        description="Pedidos dos promotores e liberações diretas do supervisor."
+        help="Pedidos dos promotores (check-in fora da cerca, sem fotos, mudança de ordem, troca de cliente) e liberações diretas do supervisor. Pedidos de hoje podem ser decididos aqui ou no app."
       />
       <div className="toolbar">
         <DateRange from={range.from} to={range.to} onChange={setRange} />
@@ -107,7 +108,7 @@ export function RequestsPage() {
                     {r.createdBy.role !== 'PROMOTOR' && <span className="chip">Liberado direto por {r.createdBy.name}</span>}
                   </td>
                   <td>{r.visit ? `${r.visit.position}º · ${r.visit.client.name}` : '—'}</td>
-                  <td style={{ maxWidth: 280 }}>{r.reason ?? '—'}</td>
+                  <td className="col-texto">{r.reason ?? '—'}</td>
                   <td>
                     <StatusPill status={r.status === 'PENDENTE' ? 'PENDENTE-req' : r.status} label={requestStatusLabel[r.status]} />
                   </td>
@@ -123,12 +124,12 @@ export function RequestsPage() {
                   </td>
                   <td>
                     {r.status === 'PENDENTE' && r.date === today() && (
-                      <div className="btn-row" style={{ flexWrap: 'nowrap' }}>
-                        <button className="btn small good" onClick={() => setDeciding({ request: r, approve: true })}>
-                          Aprovar
-                        </button>
-                        <button className="btn small danger" onClick={() => setDeciding({ request: r, approve: false })}>
+                      <div className="btn-row nowrap-row">
+                        <button className="btn small reject" onClick={() => setDeciding({ request: r, approve: false })}>
                           Negar
+                        </button>
+                        <button className="btn small approve" onClick={() => setDeciding({ request: r, approve: true })}>
+                          Aprovar
                         </button>
                       </div>
                     )}
@@ -149,18 +150,18 @@ export function RequestsPage() {
               <button className="btn" onClick={() => setDeciding(null)}>
                 Voltar
               </button>
-              <button className={`btn ${deciding.approve ? 'primary' : 'danger'}`} onClick={() => decide.mutate()} disabled={decide.isPending}>
+              <button className={`btn ${deciding.approve ? 'approve' : 'reject'}`} onClick={() => decide.mutate()} disabled={decide.isPending}>
                 {deciding.approve ? 'Aprovar' : 'Negar'}
               </button>
             </>
           }
         >
           <div className="stack">
-            <p style={{ margin: 0 }}>
+            <p className="m-0">
               <strong>{deciding.request.typeLabel}</strong> para {deciding.request.promotor.name}
               {deciding.request.visit ? ` em ${deciding.request.visit.client.name}` : ''}.
             </p>
-            {deciding.request.reason && <p className="muted" style={{ margin: 0 }}>Motivo do promotor: "{deciding.request.reason}"</p>}
+            {deciding.request.reason && <p className="muted m-0">Motivo do promotor: "{deciding.request.reason}"</p>}
             <Field label="Observação para o promotor (opcional)">
               <textarea className="input" value={note} onChange={(e) => setNote(e.target.value)} />
             </Field>

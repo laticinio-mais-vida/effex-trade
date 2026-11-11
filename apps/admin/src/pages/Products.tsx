@@ -201,7 +201,7 @@ function ImportProducts({ onClose }: { onClose: () => void }) {
     >
       <div className="stack">
         <p style={{ margin: 0 }}>Planilha em CSV (ponto e vírgula) com estas colunas. Produtos com código já cadastrado são atualizados.</p>
-        <code className="small" style={{ background: 'var(--surface)', padding: 10, borderRadius: 4 }}>codigo;nome;marca;categoria</code>
+        <code className="small" style={{ background: 'var(--fundo)', padding: 'var(--esp-3)', borderRadius: 'var(--raio-selo)' }}>codigo;nome;marca;categoria</code>
         <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         {problem && <div className="alert">{problem}</div>}
         {rows.length > 0 && !run.data && <p style={{ margin: 0 }}>{rows.length} produtos lidos.</p>}
@@ -270,7 +270,7 @@ function ImportMix({ onClose }: { onClose: () => void }) {
         <p style={{ margin: 0 }}>
           Uma linha para cada produto que o cliente compra no período. Para cada cliente que aparece na planilha, o mix anterior é trocado pelo da planilha; os demais clientes não mudam.
         </p>
-        <code className="small" style={{ background: 'var(--surface)', padding: 10, borderRadius: 4 }}>nome_fantasia;cidade;uf;produto_codigo</code>
+        <code className="small" style={{ background: 'var(--fundo)', padding: 'var(--esp-3)', borderRadius: 'var(--raio-selo)' }}>nome_fantasia;cidade;uf;produto_codigo</code>
         <p className="small muted" style={{ margin: 0 }}>
           Com dois clientes de mesmo nome fantasia na cidade, inclua a coluna razao_social para desempatar. Também dá para usar a coluna cliente_id no lugar de
           nome_fantasia, cidade e uf (o id está na planilha baixada em Clientes).

@@ -57,7 +57,7 @@ export function PhotoFacts({
       {Object.entries(meta ?? {}).map(([k, v]) => (
         <div key={k} style={{ display: 'contents' }}>
           <dt>{metaLabels[k] ?? k}</dt>
-          <dd style={k === 'avisoIntervaloCurto' ? { color: 'var(--justified)', fontWeight: 600 } : undefined}>{metaValue(k, v)}</dd>
+          <dd className={k === 'avisoIntervaloCurto' ? 'texto-erro' : undefined}>{metaValue(k, v)}</dd>
         </div>
       ))}
       {notes && (
@@ -82,7 +82,7 @@ const roleLabel: Record<string, string> = { VENDEDOR: 'vendedor', SUPERVISOR: 's
 export function AuditList({ audits, title = 'Auditorias' }: { audits: PhotoAuditInfo[]; title?: string }) {
   if (audits.length === 0) return null
   return (
-    <div className="stack" style={{ gap: 8 }}>
+    <div className="stack" style={{ gap: 'var(--esp-2)' }}>
       <h3>{title}</h3>
       {audits.map((a) => (
         <div key={a.id} className="small">

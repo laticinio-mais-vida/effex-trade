@@ -6,7 +6,7 @@ import { auditLabel, MIN_JUSTIFICATION, useViewerKeys, verdictLabel } from '../a
 import { useAuth } from '../auth'
 import { addDays, fmtDate, fmtDateTime, fmtNumber, photoTypeLabel, today } from '../format'
 import type { AuditErrors, Paged, ReviewVerdict, VendorAudit } from '../types'
-import { DateRange, Empty, ErrorBox, Field, Loading, Modal, PageHead, Pager, Segmented, StatusPill, Tabs, useLookups } from '../ui'
+import { DateRange, Empty, ErrorBox, Field, Loading, Modal, NavArrows, PageHead, Pager, Segmented, Shortcut, StatusPill, Tabs, useLookups } from '../ui'
 
 type Tab = 'conferir' | 'correcoes'
 type ReviewState = 'pendentes' | 'conferidas' | 'todas'
@@ -70,10 +70,11 @@ export function AuditErrorsPage() {
   return (
     <div>
       <PageHead
-        title="Correções de auditoria"
-        description="Confira as aprovações e reprovações que o vendedor fez nas fotos: marque cada uma como correta ou incorreta (a incorreta exige justificativa). As incorretas viram as correções do vendedor, que vão no PDF. É a mesma conferência do app do supervisor (aba Auditorias dos vendedores)."
+        title="Auditorias dos vendedores"
+        description="Confira se o vendedor aprovou e reprovou certo cada foto."
+        help="Confira as aprovações e reprovações que o vendedor fez nas fotos: marque cada uma como correta ou incorreta (a incorreta exige justificativa). As incorretas viram as correções do vendedor, que vão no PDF. É a mesma conferência do app do supervisor (aba Auditorias dos vendedores)."
         actions={
-          <button className="btn accent" onClick={download} disabled={!vendedorId || downloading}>
+          <button className="btn primary" onClick={download} disabled={!vendedorId || downloading}>
             {downloading ? 'Gerando PDF…' : 'Baixar PDF para o vendedor'}
           </button>
         }
@@ -102,24 +103,22 @@ export function AuditErrorsPage() {
       {errors.isLoading && vendedorId && <Loading />}
       {data && (
         <div className="stack">
-          <section className="tags" aria-label="Indicadores do vendedor">
-            <div className="shelf-tag alt">
-              <span className="tag-label">Fotos auditadas</span>
-              <span className="tag-value num">{data.stats.audited}</span>
+          <section className="kpis" aria-label="Indicadores do vendedor">
+            <div className="kpi">
+              <span className="kpi-label">Fotos auditadas</span>
+              <span className="kpi-valor tom-marinho">{data.stats.audited}</span>
             </div>
-            <div className="shelf-tag alt">
-              <span className="tag-label">Conferidas pelo supervisor</span>
-              <span className="tag-value num">{data.stats.reviewed}</span>
+            <div className="kpi">
+              <span className="kpi-label">Conferidas pelo supervisor</span>
+              <span className="kpi-valor tom-marinho">{data.stats.reviewed}</span>
             </div>
-            <div className="shelf-tag alt">
-              <span className="tag-label">Auditorias incorretas</span>
-              <span className="tag-value num" style={{ color: data.stats.incorrect ? 'var(--notdone)' : undefined }}>
-                {data.stats.incorrect}
-              </span>
+            <div className="kpi">
+              <span className="kpi-label">Auditorias incorretas</span>
+              <span className="kpi-valor tom-nao-feito">{data.stats.incorrect}</span>
             </div>
-            <div className="shelf-tag">
-              <span className="tag-label">Taxa de acerto</span>
-              <span className="tag-value num">{data.stats.accuracy == null ? '—' : `${fmtNumber(data.stats.accuracy, 1)}%`}</span>
+            <div className="kpi">
+              <span className="kpi-label">Taxa de acerto</span>
+              <span className="kpi-valor tom-feito">{data.stats.accuracy == null ? '—' : `${fmtNumber(data.stats.accuracy, 1)}%`}</span>
             </div>
           </section>
 
@@ -156,7 +155,7 @@ export function AuditErrorsPage() {
                     <div className="photo-card-body">
                       <div className="photo-card-top">
                         <span className="chip">{photoTypeLabel[a.photo.type]}</span>
-                        {a.review ? <StatusPill status={a.review.verdict} label={verdictLabel[a.review.verdict]} /> : <span className="chip warn">A conferir</span>}
+                        {a.review ? <StatusPill status={a.review.verdict} label={verdictLabel[a.review.verdict]} /> : <span className="chip">A conferir</span>}
                       </div>
                       <strong title={a.client.name}>{a.client.name}</strong>
                       <span className="muted">
@@ -187,11 +186,11 @@ export function AuditErrorsPage() {
                   <h2>Auditorias a corrigir ({data.items.length})</h2>
                 </div>
                 {data.items.map((item) => (
-                  <article key={item.auditId} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 16, padding: 16, borderBottom: '1px solid var(--rule)' }}>
+                  <article key={item.auditId} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 'var(--esp-4)', padding: 'var(--esp-4)', borderBottom: '1px solid var(--divisoria)' }}>
                     <a href={apiUrl(item.photo.url)} target="_blank" rel="noreferrer">
-                      <img src={apiUrl(item.photo.url)} alt="" style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 4 }} />
+                      <img src={apiUrl(item.photo.url)} alt="" style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 'var(--raio-selo)' }} />
                     </a>
-                    <div className="stack" style={{ gap: 6 }}>
+                    <div className="stack" style={{ gap: 'var(--esp-2)' }}>
                       <h3>{item.client.name}</h3>
                       <span className="muted small">
                         {photoTypeLabel[item.photo.type]}, visita de {fmtDate(item.visitDate)} por {item.promotor}
@@ -303,13 +302,8 @@ function ReviewViewer({
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onPrev} disabled={!hasPrev}>
-            Anterior
-          </button>
-          <button className="btn" onClick={onNext} disabled={!hasNext}>
-            Próxima
-          </button>
-          <span style={{ flex: 1 }} />
+          <NavArrows onPrev={onPrev} onNext={onNext} hasPrev={hasPrev} hasNext={hasNext} />
+          <span className="flex-1" />
           {saved && <span className="muted small">Conferida como {verdictLabel[saved].toLowerCase()}.</span>}
           {marking ? (
             <>
@@ -319,14 +313,15 @@ function ReviewViewer({
               <button className="btn reject" onClick={confirmIncorrect} disabled={!canMark || save.isPending}>
                 {save.isPending ? 'Gravando…' : 'Confirmar incorreta'}
               </button>
+              {!canMark && <span className="btn-hint">Escreva pelo menos {MIN_JUSTIFICATION} caracteres</span>}
             </>
           ) : (
             <>
               <button className="btn reject" onClick={startIncorrect} disabled={save.isPending}>
-                Incorreta
+                Incorreta <Shortcut k="I" />
               </button>
               <button className="btn approve" onClick={markCorrect} disabled={save.isPending}>
-                {save.isPending ? 'Gravando…' : 'Correta'}
+                {save.isPending ? 'Gravando…' : <>Correta <Shortcut k="C" /></>}
               </button>
             </>
           )}
@@ -340,7 +335,7 @@ function ReviewViewer({
         <div className="stack">
           <PhotoFacts client={audit.client} promotor={audit.promotor} takenAt={audit.photo.takenAt} meta={audit.photo.meta} notes={audit.photo.notes} products={audit.photo.products} />
 
-          <div className="stack" style={{ gap: 8 }}>
+          <div className="stack" style={{ gap: 'var(--esp-2)' }}>
             <h3>Auditoria do vendedor</h3>
             <div className="small">
               <StatusPill status={audit.status} label={auditLabel[audit.status]} /> por {audit.vendedor.name} em {fmtDateTime(audit.createdAt)}
@@ -348,7 +343,7 @@ function ReviewViewer({
             </div>
           </div>
 
-          <div className="stack" style={{ gap: 8 }}>
+          <div className="stack" style={{ gap: 'var(--esp-2)' }}>
             <h3>Conferência</h3>
             {audit.review ? (
               <div className="small">
@@ -369,7 +364,7 @@ function ReviewViewer({
                 hint="Vai no PDF de correções para o vendedor."
               />
             )}
-            {!marking && <span className="muted small">Atalhos: C correta, I incorreta, setas navegam. Depois de conferir, abre a próxima.</span>}
+            {!marking && <span className="muted small">Depois de conferir, abre a próxima.</span>}
           </div>
           <ErrorBox error={save.error} />
         </div>

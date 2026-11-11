@@ -3,6 +3,7 @@ import L from 'leaflet'
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from 'react-leaflet'
 import { api } from '../api'
+import { cssVar } from '../css'
 import { areaLabel, DEFAULT_MODULES, distanceModeLabel, fmtDate, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
 import {
   DAYS_INTERVAL,
@@ -316,13 +317,13 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
         )}
       </div>
       {query.data && (
-        <p className="small muted" style={{ margin: '-4px 0 12px' }}>
+        <p className="small muted" style={{ margin: 'calc(var(--esp-1) * -1) 0 var(--esp-3)' }}>
           {query.data.promotor.areas.length > 0 ? (
             <>
               Cidades do promotor: {query.data.promotor.areas.map(areaLabel).join(', ')}. Só aparecem clientes dessas cidades e com localização cadastrada.
             </>
           ) : (
-            <span style={{ color: 'var(--notdone)' }}>Este promotor não tem cidades cadastradas: inclua as cidades dele em Usuários para montar o roteiro.</span>
+            <span style={{ color: 'var(--nao-feito)' }}>Este promotor não tem cidades cadastradas: inclua as cidades dele em Usuários para montar o roteiro.</span>
           )}
         </p>
       )}
@@ -393,7 +394,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                   <Empty>Nenhum cliente neste dia. Use “Adicionar cliente”, acima, para incluir.</Empty>
                 ) : (
                   <div>
-                    <p className="small muted" style={{ margin: '0 0 8px' }}>
+                    <p className="small muted" style={{ margin: '0 0 var(--esp-2)' }}>
                       Arraste os clientes para cima ou para baixo para mudar a ordem de atendimento.
                     </p>
                     <ol className="route-list sortable" ref={listRef}>
@@ -431,7 +432,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                             <span>
                               {c.name}
                               <div className="small muted">{[c.city, c.state].filter(Boolean).join(' - ')}</div>
-                              {c.outsideArea && <div className="small" style={{ color: 'var(--notdone)' }}>Fora das cidades do promotor</div>}
+                              {c.outsideArea && <div className="small" style={{ color: 'var(--nao-feito)' }}>Fora das cidades do promotor</div>}
                               <button
                                 type="button"
                                 className={`freq-chip${c.frequency.type === 'SEMANAL' && isDefaultStructure(c.modules) ? '' : ' custom'}${frequencyError(c.frequency) ? ' bad' : ''}`}
@@ -511,7 +512,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
               <MapContainer center={[-12.97, -38.48]} zoom={12} style={{ height: '100%' }}>
                 <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 <Fit clients={list} />
-                {list.length > 1 && <Polyline positions={list.map((c) => [c.latitude, c.longitude] as [number, number])} pathOptions={{ color: '#14213d', weight: 2, opacity: 0.5 }} />}
+                {list.length > 1 && <Polyline positions={list.map((c) => [c.latitude, c.longitude] as [number, number])} pathOptions={{ color: cssVar('--marinho'), weight: 2, opacity: 0.5 }} />}
                 {list.map((c, i) => (
                   <Marker
                     key={c.id}
@@ -586,8 +587,8 @@ function TodayUpdateNotice({ update, onClose }: { update: TodayRouteUpdate; onCl
   const changed = update.added.length + update.removed.length + update.changed.length > 0 || update.reordered
   if (!update.closed && !changed && update.kept.length === 0) return null
   return (
-    <div className="alert ok" role="status" style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+    <div className="alert ok" role="status" style={{ marginBottom: 'var(--esp-4)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--esp-3)' }}>
         <strong>
           {update.closed
             ? `O promotor já encerrou o roteiro de hoje (${fmtDate(update.date)}): as mudanças valem a partir do próximo dia.`
@@ -601,7 +602,7 @@ function TodayUpdateNotice({ update, onClose }: { update: TodayRouteUpdate; onCl
       </div>
       {!update.closed && (
         <>
-          <ul style={{ margin: '6px 0', paddingLeft: 20 }}>
+          <ul style={{ margin: 'var(--esp-2) 0', paddingLeft: 'var(--esp-5)' }}>
             {update.added.length > 0 && <li>Incluídos: {names(update.added)}.</li>}
             {update.removed.length > 0 && <li>Retirados: {names(update.removed)}.</li>}
             {update.changed.length > 0 && <li>Nova estrutura de atendimento: {names(update.changed)}.</li>}

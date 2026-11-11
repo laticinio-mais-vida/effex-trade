@@ -19,84 +19,79 @@ import { SettingsPage } from './pages/Settings'
 import { TasksPage } from './pages/Tasks'
 import { UsersPage } from './pages/Users'
 import type { Dashboard } from './types'
+import { Icon, type IconName } from './icons'
 import { Loading } from './ui'
 
-function TagMark() {
-  return (
-    <svg className="brand-tag" viewBox="0 0 30 22" aria-hidden="true">
-      <path d="M2 2h19l7 9-7 9H2z" fill="#F5C518" stroke="#F5C518" strokeWidth="2" strokeLinejoin="round" />
-      <circle cx="20" cy="11" r="2.3" fill="#14213D" />
-    </svg>
-  )
-}
+type NavItem = { to: string; label: string; icon: IconName; badge?: 'requests' | 'contests' | 'alerts' }
 
-const groups = [
+const groups: { title: string; links: NavItem[] }[] = [
   {
     title: 'Operação',
     links: [
-      { to: '/', label: 'Hoje', badge: 'alerts' as const },
-      { to: '/mapa', label: 'Mapa' },
-      { to: '/liberacoes', label: 'Liberações', badge: 'requests' as const },
-      { to: '/relatorios', label: 'Relatórios' },
-      { to: '/fotos', label: 'Avaliar fotos' },
-      { to: '/correcoes', label: 'Correções de auditoria' },
-      { to: '/contestacoes', label: 'Contestações', badge: 'contests' as const },
+      { to: '/', label: 'Hoje', icon: 'today-outline', badge: 'alerts' },
+      { to: '/mapa', label: 'Mapa', icon: 'map-outline' },
+      { to: '/liberacoes', label: 'Liberações', icon: 'key-outline', badge: 'requests' },
+      { to: '/relatorios', label: 'Relatórios', icon: 'bar-chart-outline' },
+      { to: '/fotos', label: 'Avaliar fotos', icon: 'images-outline' },
+      { to: '/correcoes', label: 'Auditorias dos vendedores', icon: 'checkmark-done-outline' },
+      { to: '/contestacoes', label: 'Contestações', icon: 'chatbubbles-outline', badge: 'contests' },
     ],
   },
   {
     title: 'Cadastros',
     links: [
-      { to: '/roteiros', label: 'Roteiros' },
-      { to: '/clientes', label: 'Clientes' },
-      { to: '/produtos', label: 'Produtos e mix' },
-      { to: '/atividades', label: 'Atividades extras' },
-      { to: '/usuarios', label: 'Usuários' },
-      { to: '/motivos', label: 'Motivos de justificativa' },
+      { to: '/roteiros', label: 'Roteiros', icon: 'trail-sign-outline' },
+      { to: '/clientes', label: 'Clientes', icon: 'storefront-outline' },
+      { to: '/produtos', label: 'Produtos e mix', icon: 'cube-outline' },
+      { to: '/atividades', label: 'Atividades extras', icon: 'clipboard-outline' },
+      { to: '/usuarios', label: 'Usuários', icon: 'people-outline' },
+      { to: '/motivos', label: 'Motivos de justificativa', icon: 'document-text-outline' },
     ],
   },
-  { title: 'Configuração', links: [{ to: '/regras', label: 'Regras' }] },
+  { title: 'Configuração', links: [{ to: '/regras', label: 'Regras', icon: 'options-outline' }] },
 ]
 
 function Sidebar() {
   const { user, logout } = useAuth()
   const { data } = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/admin/dashboard'), refetchInterval: 60_000 })
+  const counts = { requests: data?.pendingRequests ?? 0, contests: data?.pendingContests ?? 0, alerts: data?.alerts.length ?? 0 }
+  const countTitle = { requests: 'Pedidos de liberação aguardando decisão', contests: 'Contestações esperando decisão', alerts: 'Alertas para o supervisor' }
   return (
     <aside className="sidebar">
-      <NavLink to="/" className="brand">
-        <TagMark />
-        EFFEX Trade
-      </NavLink>
+      <div className="sidebar-brand">
+        <NavLink to="/" className="brand" aria-label="EFFEX Trade: ir para Hoje">
+          <img src="/marca/effex-trade-assinatura-negativo.svg" alt="EFFEX Trade" />
+        </NavLink>
+        <div className="client-logo">
+          <img src="/marca/cliente-mais-vida.png" alt="Laticínio Mais Vida" />
+        </div>
+      </div>
       <nav aria-label="Menu principal">
         {groups.map((g) => (
           <div className="nav-group" key={g.title}>
             <div className="nav-group-title">{g.title}</div>
-            {g.links.map((l) => (
-              <NavLink key={l.to} to={l.to} end={l.to === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                {l.label}
-                {'badge' in l && l.badge === 'requests' && !!data?.pendingRequests && <span className="nav-count">{data.pendingRequests}</span>}
-                {'badge' in l && l.badge === 'contests' && !!data?.pendingContests && (
-                  <span className="nav-count" title="Contestações esperando decisão">
-                    {data.pendingContests}
-                  </span>
-                )}
-                {'badge' in l && l.badge === 'alerts' && !!data?.alerts.length && (
-                  <span className="nav-count" title="Alertas para o supervisor">
-                    {data.alerts.length}
-                  </span>
-                )}
-              </NavLink>
-            ))}
+            <div className="nav-group-items">
+              {g.links.map((l) => (
+                <NavLink key={l.to} to={l.to} end={l.to === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                  <Icon name={l.icon} />
+                  <span className="nav-label">{l.label}</span>
+                  {l.badge && counts[l.badge] > 0 && (
+                    <span className="nav-count num" title={countTitle[l.badge]}>
+                      {counts[l.badge] > 99 ? '99+' : counts[l.badge]}
+                    </span>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           </div>
         ))}
       </nav>
       <div className="sidebar-foot">
         <strong>{user?.name}</strong>
         <span>{user ? roleLabel[user.role] : ''}</span>
-        <div style={{ marginTop: 8 }}>
-          <button className="linklike" onClick={logout}>
-            Sair
-          </button>
-        </div>
+        <button className="btn danger small" onClick={logout}>
+          Sair
+        </button>
       </div>
     </aside>
   )

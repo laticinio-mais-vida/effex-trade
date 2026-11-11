@@ -14,7 +14,8 @@ export function TasksPage() {
     <div>
       <PageHead
         title="Atividades extras"
-        description="Tarefas pedidas ao promotor além do roteiro, como colocar placas de preço ou montar uma ponta de gôndola. Aparecem no atendimento dos clientes cuja estrutura tem atividade extra, na recorrência escolhida (uma vez, toda semana...); podem exigir foto ou só a confirmação do promotor, e podem ser obrigatórias para encerrar o atendimento."
+        description="Tarefas pedidas ao promotor além do roteiro."
+        help="Tarefas pedidas ao promotor além do roteiro, como colocar placas de preço ou montar uma ponta de gôndola. Aparecem no atendimento dos clientes cuja estrutura tem atividade extra, na recorrência escolhida (uma vez, toda semana...); podem exigir foto ou só a confirmação do promotor, e podem ser obrigatórias para encerrar o atendimento."
         actions={
           <button className="btn primary" onClick={() => setEditing('new')}>
             Nova atividade

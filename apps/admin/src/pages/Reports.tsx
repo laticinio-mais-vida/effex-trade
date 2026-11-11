@@ -17,7 +17,7 @@ import {
   visitStatusLabel,
 } from '../format'
 import type { DistanceMode, GpsCoverage, Report, ReportRow, VisitStatus } from '../types'
-import { DateRange, Empty, ErrorBox, Loading, PageHead, PromotorSelect, Segmented, StatusPill, Tabs } from '../ui'
+import { DateRange, Empty, ErrorBox, HelpLine, Loading, PageHead, PromotorSelect, Segmented, StatusPill, Tabs } from '../ui'
 
 type Tab = 'resumo' | 'jornadas' | 'visitas' | 'rupturas' | 'justificativas'
 type StatusFilter = 'todos' | VisitStatus
@@ -154,13 +154,15 @@ function KmNote({ source, gpsSource }: { source: DistanceMode | null; gpsSource:
     misto: 'O servidor de rotas não respondeu em alguns trechos.',
   }
   return (
-    <p className="small muted" style={{ margin: '0 0 10px' }}>
-      Km pela rota {distanceModeLabel[source]}. {why[source]}
-      <br />
-      Km percorrido (GPS): o caminho que o celular registrou da saída de um cliente até a chegada no seguinte (inclui a ida e a volta do almoço)
+    <div className="km-note">
+      <HelpLine summary={`Km pela rota ${distanceModeLabel[source]} e km percorrido pelo GPS do celular.`}>
+        Km pela rota {distanceModeLabel[source]}. {why[source]}
+        <br />
+        Km percorrido (GPS): o caminho que o celular registrou da saída de um cliente até a chegada no seguinte (inclui a ida e a volta do almoço)
       {gpsSource ? `, ${gpsModeLabel[gpsSource]}` : ''}. É calculado alguns minutos depois que o promotor encerra o dia; onde faltou GPS, aquele pedaço segue a
-      rota estimada e fica marcado.
-    </p>
+        rota estimada e fica marcado.
+      </HelpLine>
+    </div>
   )
 }
 
@@ -232,9 +234,7 @@ function Summary({ data }: { data: Report }) {
               <td className="r">{s.total}</td>
               <td className="r">{s.done}</td>
               <td className="r">{s.justified}</td>
-              <td className="r" style={{ color: s.notDone ? 'var(--notdone)' : undefined }}>
-                {s.notDone}
-              </td>
+              <td className={`r ${s.notDone ? 'tom-nao-feito' : ''}`}>{s.notDone}</td>
               <td className="r">{s.extras}</td>
               <td className="r">
                 <strong>{fmtNumber(s.executionRate, 1)}%</strong>
@@ -258,9 +258,7 @@ function Summary({ data }: { data: Report }) {
                 )}
               </td>
               <td className="r">{s.ruptures}</td>
-              <td className="r" style={{ color: s.autoClosed ? 'var(--justified)' : undefined }}>
-                {s.autoClosed}
-              </td>
+              <td className={`r ${s.autoClosed ? 'tom-nao-feito' : ''}`}>{s.autoClosed}</td>
               <td className="r" title="Check-ins fora da cerca liberados / visitas liberadas sem fotos">
                 {s.geofenceWaivers + s.photoWaivers}
               </td>
@@ -274,12 +272,11 @@ function Summary({ data }: { data: Report }) {
 
 function Days({ data }: { data: Report }) {
   return (
-    <div className="panel table-wrap">
-      <table className="data">
+    <div className="panel table-wrap wide">
+      <table className="data wide">
         <thead>
           <tr>
-            <th>Data</th>
-            <th>Promotor</th>
+            <th>Data e promotor</th>
             <th title="Abertura do primeiro atendimento">Início do trabalho</th>
             <th>Almoço</th>
             <th title="Horário da última atividade">Fim do trabalho</th>
@@ -302,9 +299,9 @@ function Days({ data }: { data: Report }) {
         <tbody>
           {data.days.map((d) => (
             <tr key={`${d.date}-${d.promotor.id}`}>
-              <td className="num">{fmtDate(d.date)}</td>
               <td className="nowrap">
-                {d.promotor.name}
+                <span className="num">{fmtDate(d.date)}</span>
+                <div className="nome">{d.promotor.name}</div>
                 {d.routeOrderWaived && (
                   <div>
                     <span className="chip warn" title="O supervisor liberou o dia inteiro da ordem do roteiro">
@@ -349,9 +346,7 @@ function Days({ data }: { data: Report }) {
               <td className="r">{d.total}</td>
               <td className="r">{d.done}</td>
               <td className="r">{d.justified}</td>
-              <td className="r" style={{ color: d.notDone ? 'var(--notdone)' : undefined }}>
-                {d.notDone}
-              </td>
+              <td className={`r ${d.notDone ? 'tom-nao-feito' : ''}`}>{d.notDone}</td>
               <td className="r">{fmtMinutes(d.clientMin)}</td>
               <td className="r">{fmtMinutes(d.travelMin)}</td>
               <td className="r">{routeKm(d.travelKm)}</td>
@@ -369,12 +364,11 @@ function Days({ data }: { data: Report }) {
 function Visits({ rows }: { rows: ReportRow[] }) {
   if (rows.length === 0) return <Empty>Nenhuma visita com este status.</Empty>
   return (
-    <div className="panel table-wrap">
-      <table className="data">
+    <div className="panel table-wrap wide">
+      <table className="data wide">
         <thead>
           <tr>
-            <th>Data</th>
-            <th>Promotor</th>
+            <th>Data e promotor</th>
             <th className="r">#</th>
             <th>Cliente</th>
             <th>Status</th>
@@ -397,8 +391,10 @@ function Visits({ rows }: { rows: ReportRow[] }) {
         <tbody>
           {rows.map((r) => (
             <tr key={r.id}>
-              <td className="num">{fmtDate(r.date)}</td>
-              <td className="nowrap">{r.promotor.name}</td>
+              <td className="nowrap">
+                <span className="num">{fmtDate(r.date)}</span>
+                <div className="nome">{r.promotor.name}</div>
+              </td>
               <td className="r">{r.position}</td>
               <td>
                 {r.client.name}
@@ -466,17 +462,17 @@ function Visits({ rows }: { rows: ReportRow[] }) {
               </td>
               <td className="r">{r.checkinDistance != null ? `${r.checkinDistance} m` : '—'}</td>
               <td className="r">{r.photoCount}</td>
-              <td className="small" style={{ minWidth: 220 }}>
+              <td className="small col-rupturas">
                 {r.ruptures.length ? r.ruptures.map((p) => p.name).join(', ') : <span className="muted">—</span>}
               </td>
-              <td style={{ maxWidth: 320 }}>
+              <td className="col-justificativa">
                 {r.justification && (
                   <div>
                     <strong>{r.justification.reason}</strong>: {r.justification.text}
                   </div>
                 )}
                 {r.approvedRequests.length > 0 && (
-                  <div className="btn-row" style={{ gap: 4, marginTop: 2 }}>
+                  <div className="chip-row">
                     {r.approvedRequests.map((t, i) => (
                       <span key={i} className="chip warn">
                         {permissionShort[t] ?? t}
@@ -541,15 +537,15 @@ function Ruptures({ data }: { data: Report }) {
             Produtos do mix do cliente que não apareciam nas fotos de depois e o promotor confirmou como ruptura.
           </p>
           {ranking.map((r) => (
-            <div key={r.name} style={{ display: 'grid', gap: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <div key={r.name} style={{ display: 'grid', gap: 'var(--esp-1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--esp-2)' }}>
                 <span>{r.name}</span>
                 <span className="num">
                   <strong>{r.count}</strong> <span className="muted small">em {r.clients.size} {r.clients.size === 1 ? 'cliente' : 'clientes'}</span>
                 </span>
               </div>
               <div className="execbar">
-                <span className="b-pend" style={{ width: `${(r.count / max) * 100}%`, background: 'var(--notdone)' }} />
+                <span className="b-pend" style={{ width: `${(r.count / max) * 100}%`, background: 'var(--nao-feito)' }} />
               </div>
             </div>
           ))}
@@ -600,7 +596,7 @@ function Justifications({ data }: { data: Report }) {
         </div>
         <div className="panel-body stack">
           {sorted.map(([reason, n]) => (
-            <div key={reason} style={{ display: 'grid', gap: 4 }}>
+            <div key={reason} style={{ display: 'grid', gap: 'var(--esp-1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>{reason}</span>
                 <strong className="num">{n}</strong>

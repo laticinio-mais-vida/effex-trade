@@ -5,7 +5,7 @@ import { AuditList, JustificationBox, PhotoFacts } from '../audit'
 import { auditLabel, MIN_JUSTIFICATION, useViewerKeys } from '../audit-labels'
 import { addDays, fmtDate, fmtDateTime, photoTypeLabel, today } from '../format'
 import type { AuditStatus, Paged, PhotoItem, PhotoType } from '../types'
-import { DateRange, Empty, ErrorBox, Field, Loading, Modal, PageHead, Pager, PromotorSelect, Segmented, StatusPill } from '../ui'
+import { DateRange, Empty, ErrorBox, Field, Loading, Modal, NavArrows, PageHead, Pager, PromotorSelect, Segmented, Shortcut, StatusPill } from '../ui'
 
 type AuditFilter = 'pendentes' | 'auditadas' | 'todas'
 const PAGE_SIZE = 48
@@ -74,14 +74,14 @@ export function PhotosPage() {
             <div className="photo-card-body">
               <div className="photo-card-top">
                 <span className="chip">{photoTypeLabel[p.type]}</span>
-                {p.myAudit ? <StatusPill status={p.myAudit.status} label={`Você: ${auditLabel[p.myAudit.status].toLowerCase()}`} /> : <span className="chip warn">Pendente</span>}
+                {p.myAudit ? <StatusPill status={p.myAudit.status} label={`Você: ${auditLabel[p.myAudit.status].toLowerCase()}`} /> : <span className="chip">Pendente</span>}
               </div>
               <strong title={p.client.name}>{p.client.name}</strong>
               <span className="muted">
                 {p.promotor.name}, {fmtDate(p.visit.date)}
               </span>
               {p.audits.some((a) => a.id !== p.myAudit?.id) && (
-                <span className="btn-row" style={{ gap: 4 }}>
+                <span className="btn-row" style={{ gap: 'var(--esp-1)' }}>
                   {p.audits
                     .filter((a) => a.id !== p.myAudit?.id)
                     .map((a) => (
@@ -179,13 +179,8 @@ function PhotoViewer({
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onPrev} disabled={!hasPrev}>
-            Anterior
-          </button>
-          <button className="btn" onClick={onNext} disabled={!hasNext}>
-            Próxima
-          </button>
-          <span style={{ flex: 1 }} />
+          <NavArrows onPrev={onPrev} onNext={onNext} hasPrev={hasPrev} hasNext={hasNext} />
+          <span className="flex-1" />
           {saved && <span className="muted small">Foto {auditLabel[saved].toLowerCase()}.</span>}
           {rejecting ? (
             <>
@@ -195,14 +190,15 @@ function PhotoViewer({
               <button className="btn reject" onClick={confirmReject} disabled={!canReject || save.isPending}>
                 {save.isPending ? 'Gravando…' : 'Confirmar reprovação'}
               </button>
+              {!canReject && <span className="btn-hint">Escreva pelo menos {MIN_JUSTIFICATION} caracteres</span>}
             </>
           ) : (
             <>
               <button className="btn reject" onClick={startReject} disabled={save.isPending}>
-                Reprovar
+                Reprovar <Shortcut k="R" />
               </button>
               <button className="btn approve" onClick={approve} disabled={save.isPending}>
-                {save.isPending ? 'Gravando…' : 'Aprovar'}
+                {save.isPending ? 'Gravando…' : <>Aprovar <Shortcut k="A" /></>}
               </button>
             </>
           )}
@@ -217,7 +213,7 @@ function PhotoViewer({
           <PhotoFacts client={photo.client} promotor={photo.promotor} takenAt={photo.takenAt} task={photo.task} meta={photo.meta} notes={photo.notes} products={photo.products} />
           <AuditList audits={others} title="Auditorias de outras pessoas" />
 
-          <div className="stack" style={{ gap: 8 }}>
+          <div className="stack" style={{ gap: 'var(--esp-2)' }}>
             <h3>Sua auditoria</h3>
             {mine ? (
               <div className="small">
@@ -237,7 +233,7 @@ function PhotoViewer({
                 placeholder="Ex.: foto escura, gôndola desorganizada, preço não aparece"
               />
             )}
-            {!rejecting && <span className="muted small">Atalhos: A aprova, R reprova, setas navegam. Depois de decidir, abre a próxima foto.</span>}
+            {!rejecting && <span className="muted small">Depois de decidir, abre a próxima foto.</span>}
           </div>
           <ErrorBox error={save.error} />
         </div>

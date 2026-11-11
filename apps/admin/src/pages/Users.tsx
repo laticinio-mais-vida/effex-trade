@@ -81,7 +81,7 @@ export function UsersPage() {
                     ) : u.areas.length ? (
                       u.areas.map(areaLabel).join(', ')
                     ) : (
-                      <span style={{ color: 'var(--notdone)' }}>Nenhuma: não vê clientes</span>
+                      <span style={{ color: 'var(--nao-feito)' }}>Nenhuma: não vê clientes</span>
                     )}
                   </td>
                   <td>{u.supervisor?.name ?? <span className="muted">—</span>}</td>
@@ -268,13 +268,13 @@ function AreasField({ areas, onChange }: { areas: Area[]; onChange: (areas: Area
           Incluir
         </button>
       </div>
-      {typed && !known && cities.data && <span className="small" style={{ color: 'var(--justified)', fontWeight: 400 }}>Ainda não há clientes cadastrados em {typed} - {state}.</span>}
+      {typed && !known && cities.data && <span className="small" style={{ color: 'var(--nao-feito)', fontWeight: 400 }}>Ainda não há clientes cadastrados em {typed} - {state}.</span>}
       {areas.length === 0 ? (
-        <span className="small" style={{ color: 'var(--notdone)', fontWeight: 400 }}>
+        <span className="small" style={{ color: 'var(--nao-feito)', fontWeight: 400 }}>
           Nenhuma cidade: inclua ao menos uma para o usuário ver clientes.
         </span>
       ) : (
-        <ul className="client-chips" style={{ marginTop: 4 }}>
+        <ul className="client-chips" style={{ marginTop: 'var(--esp-1)' }}>
           {areas.map((a) => (
             <li key={`${a.state}|${a.city ?? ''}`} className="client-chip">
               <span>

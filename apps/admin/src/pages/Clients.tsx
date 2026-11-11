@@ -3,6 +3,7 @@ import L from 'leaflet'
 import { useEffect, useState } from 'react'
 import { Circle, MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { api } from '../api'
+import { cssVar } from '../css'
 import { useAuth } from '../auth'
 import { downloadCsv, fmtDateTime, fmtNumber, parseCsv, UFS } from '../format'
 import type { Client, ClientCity, ErpSyncStatus, Paged, ProductRef, SettingsResponse } from '../types'
@@ -115,7 +116,7 @@ export function ClientsPage() {
         }
       />
       {last && (
-        <p className="small muted" style={{ margin: '-6px 0 14px' }}>
+        <p className="small muted" style={{ margin: 'calc(var(--esp-2) * -1) 0 var(--esp-4)' }}>
           Atualizado do ERP em {fmtDateTime(last.at)}
           {last.sourceModifiedAt && ` (cópia do banco de ${fmtDateTime(last.sourceModifiedAt)})`}: {fmtNumber(last.created)} novos, {fmtNumber(last.updated)} alterados,{' '}
           {fmtNumber(last.inactivated)} inativados, {fmtNumber(last.located)} localizações do ERP. Clientes novos ou alterados no ERP chegam quando a sincronização roda no
@@ -123,7 +124,7 @@ export function ClientsPage() {
         </p>
       )}
       {missing > 0 && filters.located !== 'sem' && (
-        <div className="alert" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <div className="alert" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--esp-3)', marginBottom: 'var(--esp-4)' }}>
           <span style={{ flex: '1 1 320px' }}>
             {missing === 1 ? '1 cliente ativo está' : `${fmtNumber(missing)} clientes ativos estão`} sem localização e não {missing === 1 ? 'pode' : 'podem'} entrar em roteiro. Baixe a
             planilha deles, preencha a latitude e a longitude e importe de volta.
@@ -221,12 +222,12 @@ export function ClientsPage() {
                   <td>
                     <strong>{c.name}</strong>
                     {c.erpId != null && (
-                      <span className="chip" title="Cadastro vindo do ERP" style={{ marginLeft: 8 }}>
+                      <span className="chip" title="Cadastro vindo do ERP" style={{ marginLeft: 'var(--esp-2)' }}>
                         ERP {c.erpId}
                       </span>
                     )}
                     {c.geofenceExempt && (
-                      <span className="chip warn" title="Dispensado da cerca eletrônica: check-in e check-out de qualquer lugar" style={{ marginLeft: 8 }}>
+                      <span className="chip warn" title="Dispensado da cerca eletrônica: check-in e check-out de qualquer lugar" style={{ marginLeft: 'var(--esp-2)' }}>
                         Sem cerca
                       </span>
                     )}
@@ -240,7 +241,7 @@ export function ClientsPage() {
                         {c.erpId != null && c.locationSource && <div className="small muted">{c.locationSource === 'PAINEL' ? 'editada no painel' : 'do ERP'}</div>}
                       </>
                     ) : (
-                      <span style={{ color: 'var(--notdone)' }}>Sem localização</span>
+                      <span style={{ color: 'var(--nao-feito)' }}>Sem localização</span>
                     )}
                   </td>
                   <td>{c.active ? 'Ativo' : <span className="muted">Inativo</span>}</td>
@@ -390,8 +391,8 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
             Dá para colar as coordenadas copiadas do Google Maps (ex.: “-12.9714, -38.5014”) em qualquer um dos dois campos.
             {!hasPoint && !halfPoint && ' Sem localização, o cliente fica cadastrado mas não entra em roteiro.'}
           </span>
-          {halfPoint && <span className="small full" style={{ color: 'var(--notdone)' }}>Preencha latitude e longitude válidas (as duas).</span>}
-          {removingPoint && <span className="small full" style={{ color: 'var(--notdone)' }}>A localização não pode ser apagada: corrija os números ou marque no mapa.</span>}
+          {halfPoint && <span className="small full" style={{ color: 'var(--nao-feito)' }}>Preencha latitude e longitude válidas (as duas).</span>}
+          {removingPoint && <span className="small full" style={{ color: 'var(--nao-feito)' }}>A localização não pode ser apagada: corrija os números ou marque no mapa.</span>}
           <label className="check full">
             <input type="checkbox" checked={form.active} disabled={fromErp} onChange={(e) => set({ active: e.target.checked })} />
             Cliente ativo (inativos saem dos roteiros dos próximos dias)
@@ -401,7 +402,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
             Dispensar a cerca eletrônica: check-in e check-out neste cliente de qualquer lugar
           </label>
           {form.geofenceExempt && (
-            <span className="small full" style={{ color: 'var(--justified)' }}>
+            <span className="small full" style={{ color: 'var(--nao-feito)' }}>
               Qualquer promotor poderá dar entrada neste cliente sem estar nele. Cada check-in feito fora do raio de {radius} m fica marcado como "sem cerca" no relatório
               de execução.
             </span>
@@ -413,19 +414,19 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
             </span>
           )}
         </div>
-        <div className="stack" style={{ gap: 8 }}>
-          <div style={{ height: 360, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--rule)' }}>
+        <div className="stack" style={{ gap: 'var(--esp-2)' }}>
+          <div style={{ height: 360, borderRadius: 'var(--raio)', overflow: 'hidden', border: '1px solid var(--divisoria)' }}>
             <MapContainer center={center} zoom={hasPoint ? 16 : 12} style={{ height: '100%' }}>
               <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
               <PickLocation onPick={(la, ln) => set({ latitude: la.toFixed(6), longitude: ln.toFixed(6) })} />
               <Recenter lat={center[0]} lng={center[1]} zoom={hasPoint ? 15 : 12} target={hasPoint ? 'ponto' : (near?.id ?? 'padrao')} />
               {hasPoint && (
                 <>
-                  <Circle center={[lat, lng]} radius={radius} pathOptions={{ color: '#14213d', weight: 1, fillColor: '#f5c518', fillOpacity: 0.25 }} />
+                  <Circle center={[lat, lng]} radius={radius} pathOptions={{ color: cssVar('--marinho'), weight: 1, fillColor: cssVar('--marinho'), fillOpacity: 0.12 }} />
                   <Marker
                     position={[lat, lng]}
                     draggable
-                    icon={L.divIcon({ className: '', html: '<div class="pin PENDENTE" style="background:#14213d">●</div>', iconSize: [26, 26], iconAnchor: [13, 13] })}
+                    icon={L.divIcon({ className: '', html: '<div class="pin marinho">●</div>', iconSize: [26, 26], iconAnchor: [13, 13] })}
                     eventHandlers={{ dragend: (e) => set({ latitude: e.target.getLatLng().lat.toFixed(6), longitude: e.target.getLatLng().lng.toFixed(6) }) }}
                   />
                 </>
@@ -452,18 +453,18 @@ function ClientMix({ clientId }: { clientId: string }) {
   const mix = query.data ?? []
   const ids = mix.map((p) => p.id)
   return (
-    <section className="stack" style={{ gap: 10, marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
+    <section className="stack" style={{ gap: 'var(--esp-3)', marginTop: 'var(--esp-5)', paddingTop: 'var(--esp-4)', borderTop: '1px solid var(--divisoria)' }}>
       <div>
         <h3>Mix do cliente ({mix.length} produtos)</h3>
-        <p className="muted small" style={{ margin: '4px 0 0' }}>
+        <p className="muted small" style={{ margin: 'var(--esp-1) 0 0' }}>
           Produtos que este cliente compra. Os que não aparecerem nas fotos de depois serão confirmados pelo promotor como ruptura. Também dá para importar o mix de todos os clientes em Produtos e mix.
         </p>
       </div>
       <ProductPicker exclude={ids} onPick={(p) => save.mutate([...ids, p.id])} />
       {query.isLoading && <Loading />}
-      <div className="btn-row" style={{ gap: 6 }}>
+      <div className="btn-row" style={{ gap: 'var(--esp-2)' }}>
         {mix.map((p) => (
-          <span key={p.id} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 4px 3px 8px', opacity: p.active ? 1 : 0.6 }}>
+          <span key={p.id} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--esp-2)', padding: '3px var(--esp-1) 3px var(--esp-2)', opacity: p.active ? 1 : 0.6 }}>
             {p.code} · {p.name}
             <button className="btn icon small" style={{ width: 22, minHeight: 22 }} aria-label={`Tirar ${p.name} do mix`} onClick={() => save.mutate(ids.filter((id) => id !== p.id))}>
               ✕
@@ -587,10 +588,10 @@ function ImportClients({ fromErp, onClose }: { fromErp: boolean; onClose: () => 
           Para preencher a localização: use <strong>Baixar planilha</strong> (ou “Baixar planilha deles”, só os sem localização), preencha a latitude e a longitude e importe o arquivo de
           volta, salvo como CSV separado por ponto e vírgula. As colunas são:
         </p>
-        <code className="small" style={{ background: 'var(--surface)', padding: 10, borderRadius: 4, overflowX: 'auto' }}>
+        <code className="small" style={{ background: 'var(--fundo)', padding: 'var(--esp-3)', borderRadius: 'var(--raio-selo)', overflowX: 'auto' }}>
           {IMPORT_COLUMNS.join(';')}
         </code>
-        <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
+        <ul className="small" style={{ margin: 0, paddingLeft: 'var(--esp-4)' }}>
           {fromErp ? (
             <>
               <li>Linha com id altera aquele cliente. Sem id, o cliente é procurado pelo nome fantasia (ou razão social) na mesma cidade e UF.</li>
@@ -608,7 +609,7 @@ function ImportClients({ fromErp, onClose }: { fromErp: boolean; onClose: () => 
         {read && !read.missing && !result && (
           <p style={{ margin: 0 }}>
             {read.rows.length} linhas prontas, {withCoords} com localização.
-            {read.problems.length > 0 && <span style={{ color: 'var(--notdone)' }}> {read.problems.length} com problema ficam de fora (lista abaixo).</span>}
+            {read.problems.length > 0 && <span style={{ color: 'var(--nao-feito)' }}> {read.problems.length} com problema ficam de fora (lista abaixo).</span>}
           </p>
         )}
         {result && (
@@ -617,7 +618,7 @@ function ImportClients({ fromErp, onClose }: { fromErp: boolean; onClose: () => 
           </div>
         )}
         {problems.length > 0 && (
-          <div className="small" style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--rule)', borderRadius: 4, padding: '6px 10px' }}>
+          <div className="small" style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--divisoria)', borderRadius: 'var(--raio-selo)', padding: 'var(--esp-2) var(--esp-3)' }}>
             {problems.map((p) => (
               <div key={`${p.line}-${p.message}`}>
                 <strong>Linha {p.line}:</strong> {p.message}

@@ -4,19 +4,20 @@ import { useEffect, useMemo, useState } from 'react'
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
-import { fmtTime, initials, originLabel, timeAgo, today, visitStatusLabel } from '../format'
+import { cssVar } from '../css'
+import { fmtTime, initials, isStale, originLabel, timeAgo, today, visitStatusLabel } from '../format'
 import type { MapData } from '../types'
 import { ErrorBox, ExecBar, Field, StatusPill } from '../ui'
-
-const STALE_MIN = 15
 
 type MapVisit = MapData['visits'][number]
 /** Visitas de clientes com localização (os sem localização não têm como aparecer no mapa). */
 const located = (visits: MapVisit[]) =>
   visits.filter((v): v is MapVisit & { client: { latitude: number; longitude: number } } => v.client.latitude != null && v.client.longitude != null)
 
-function pinIcon(status: string, label: string | number) {
-  return L.divIcon({ className: '', html: `<div class="pin ${status}">${label}</div>`, iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -14] })
+/** Pino na cor do status; "não feito" fica cinza enquanto o dia está aberto e vermelho nos dias anteriores. */
+function pinIcon(status: string, label: string | number, dayOpen: boolean) {
+  const cls = `pin ${status}${dayOpen && status === 'PENDENTE' ? ' aberto' : ''}`
+  return L.divIcon({ className: '', html: `<div class="${cls}">${label}</div>`, iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -14] })
 }
 
 function personIcon(name: string, stale: boolean) {
@@ -82,13 +83,15 @@ export function MapPage() {
 
   const select = (id: string) => setParams(id ? { promotor: id } : {})
   const selected = data?.promotores.find((p) => p.id === promotorId)
+  const dayOpen = date === today()
+  const now = query.dataUpdatedAt
 
   return (
     <div className="map-page">
       <aside className="map-side">
         <div className="map-side-head">
-          <h1 style={{ fontSize: 24 }}>Mapa da rota</h1>
-          <div className="btn-row" style={{ alignItems: 'flex-end' }}>
+          <h1>Mapa da rota</h1>
+          <div className="btn-row end">
             <Field label="Data">
               <input className="input" type="date" value={date} max={today()} onChange={(e) => e.target.value && setDate(e.target.value)} />
             </Field>
@@ -97,7 +100,7 @@ export function MapPage() {
             </button>
           </div>
           <span className="muted small">
-            {date === today() ? `Próxima atualização em ${countdown}` : 'Dia encerrado: posição final de cada promotor.'}
+            {dayOpen ? `Próxima atualização em ${countdown}` : 'Dia encerrado: posição final de cada promotor.'}
           </span>
         </div>
         <div className="map-list">
@@ -108,7 +111,7 @@ export function MapPage() {
             </div>
           </button>
           {list.map((p) => {
-            const stale = !p.lastPing || Date.now() - new Date(p.lastPing.recordedAt).getTime() > STALE_MIN * 60_000
+            const stale = isStale(p.lastPing?.recordedAt, now)
             return (
               <button key={p.id} className={`map-item ${p.id === promotorId ? 'on' : ''}`} onClick={() => select(p.id)}>
                 <div className="map-item-top">
@@ -120,7 +123,7 @@ export function MapPage() {
                 <ExecBar stats={p.stats} />
                 <span className="small muted">
                   {p.lunch && !p.lunch.end ? (
-                    <span style={{ color: p.lunch.overdue ? 'var(--notdone)' : undefined, fontWeight: p.lunch.overdue ? 600 : undefined }}>
+                    <span className={p.lunch.overdue ? 'texto-erro' : undefined}>
                       Em almoço desde {fmtTime(p.lunch.start)}
                       {p.lunch.overdue ? ', acima do limite (supervisor alertado)' : ''}.{' '}
                     </span>
@@ -128,7 +131,7 @@ export function MapPage() {
                     ''
                   )}
                   {p.currentVisit ? `Em ${p.currentVisit.clientName} desde ${fmtTime(p.currentVisit.since)}. ` : ''}
-                  <span style={{ color: stale && date === today() ? 'var(--notdone)' : undefined }}>
+                  <span className={stale && dayOpen ? 'texto-erro' : undefined}>
                     {p.lastPing ? `Último sinal ${timeAgo(p.lastPing.recordedAt)}` : 'Sem sinal no dia'}
                   </span>
                 </span>
@@ -136,8 +139,8 @@ export function MapPage() {
             )
           })}
           {selected && data && (
-            <div style={{ padding: '14px 18px' }}>
-              <h3 style={{ marginBottom: 8 }}>Clientes de {selected.name.split(' ')[0]}</h3>
+            <div className="map-detail">
+              <h3>Clientes de {selected.name.split(' ')[0]}</h3>
               <ol className="route-list">
                 {data.visits.map((v) => (
                   <li key={v.id}>
@@ -149,7 +152,7 @@ export function MapPage() {
                         {v.checkinAt ? `${fmtTime(v.checkinAt)}–${fmtTime(v.checkoutAt)}` : v.justification ? v.justification.reason : originLabel[v.origin]}
                       </span>
                     </span>
-                    <StatusPill status={v.status} />
+                    <StatusPill status={v.status} dayOpen={dayOpen} />
                   </li>
                 ))}
               </ol>
@@ -160,16 +163,16 @@ export function MapPage() {
 
       <div className="map-canvas">
         {query.error && (
-          <div className="map-overlay" style={{ left: 14, right: 'auto' }}>
+          <div className="map-overlay left">
             <ErrorBox error={query.error} />
           </div>
         )}
         <div className="map-overlay">
           <div className="legend">
-            <span><i style={{ background: 'var(--done)' }} />Feito</span>
-            <span><i style={{ background: 'var(--justified)' }} />Justificado</span>
-            <span><i style={{ background: 'var(--progress)' }} />Em atendimento</span>
-            <span><i style={{ background: 'var(--notdone)' }} />Não feito</span>
+            <span><i className="dot CONCLUIDA" />Feito</span>
+            <span><i className="dot JUSTIFICADA" />Justificado</span>
+            <span><i className="dot EM_ATENDIMENTO" />Em atendimento</span>
+            <span><i className={`dot PENDENTE${dayOpen ? ' aberto' : ''}`} />Não feito</span>
           </div>
           <span className="muted">Número no pino = ordem no roteiro. Círculo com iniciais = promotor.</span>
         </div>
@@ -177,10 +180,10 @@ export function MapPage() {
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <FitBounds points={points} fitKey={`${date}|${promotorId}`} />
           {data && data.trail.length > 1 && (
-            <Polyline positions={data.trail.map((t) => [t.latitude, t.longitude] as [number, number])} pathOptions={{ color: '#14213d', weight: 3, opacity: 0.55, dashArray: '6 6' }} />
+            <Polyline positions={data.trail.map((t) => [t.latitude, t.longitude] as [number, number])} pathOptions={{ color: cssVar('--marinho'), weight: 3, opacity: 0.55, dashArray: '6 6' }} />
           )}
           {located(data?.visits ?? []).map((v) => (
-            <Marker key={v.id} position={[v.client.latitude, v.client.longitude]} icon={pinIcon(v.status, v.position)}>
+            <Marker key={v.id} position={[v.client.latitude, v.client.longitude]} icon={pinIcon(v.status, v.position, dayOpen)}>
               <Popup>
                 <strong>{v.client.name}</strong>
                 <br />
@@ -204,7 +207,7 @@ export function MapPage() {
           {data?.promotores
             .filter((p) => p.lastPing)
             .map((p) => {
-              const stale = Date.now() - new Date(p.lastPing!.recordedAt).getTime() > STALE_MIN * 60_000
+              const stale = isStale(p.lastPing!.recordedAt, now)
               return (
                 <Marker key={p.id} position={[p.lastPing!.latitude, p.lastPing!.longitude]} icon={personIcon(p.name, stale)} zIndexOffset={1000}>
                   <Popup>
@@ -216,7 +219,7 @@ export function MapPage() {
                     {p.lastPing!.mocked && (
                       <>
                         <br />
-                        <strong style={{ color: 'var(--notdone)' }}>Localização simulada detectada</strong>
+                        <strong className="texto-erro">Localização simulada detectada</strong>
                       </>
                     )}
                     <br />

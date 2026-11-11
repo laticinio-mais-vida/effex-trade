@@ -5,14 +5,14 @@ import { AuditList, JustificationBox, PhotoFacts } from '../audit'
 import { MIN_JUSTIFICATION, useViewerKeys } from '../audit-labels'
 import { fmtDate, fmtDateTime, photoTypeLabel } from '../format'
 import type { Contest, ContestStatus, Paged } from '../types'
-import { Empty, ErrorBox, Loading, Modal, PageHead, Pager, PromotorSelect, Segmented, StatusPill } from '../ui'
+import { Empty, ErrorBox, Loading, Modal, NavArrows, PageHead, Pager, PromotorSelect, Segmented, Shortcut, StatusPill } from '../ui'
 
 type State = 'pendentes' | 'decididas' | 'todas'
 type Decision = 'ACEITA' | 'NEGADA'
 const PAGE_SIZE = 48
 
 export function ContestStatusTag({ status }: { status: ContestStatus }) {
-  if (status === 'PENDENTE') return <span className="chip warn">Aguardando decisão</span>
+  if (status === 'PENDENTE') return <span className="chip">Aguardando decisão</span>
   return <StatusPill status={status === 'ACEITA' ? 'APROVADA' : 'REPROVADA'} label={status === 'ACEITA' ? 'Aceita' : 'Negada'} />
 }
 
@@ -41,7 +41,8 @@ export function ContestsPage() {
     <div>
       <PageHead
         title="Contestações"
-        description="Fotos reprovadas que os promotores contestaram pelo app (até 2 por dia, com explicação). Aceitar: a foto passa a valer como aprovada; a reprovação do vendedor fica conferida como incorreta (entra no PDF de correções dele) e a do supervisor ou do administrador vira aprovação. Negar: a reprovação continua e o promotor vê a sua resposta. É a mesma lista da aba Contestações do app do supervisor."
+        description="Fotos reprovadas que os promotores contestaram pelo app."
+        help="Fotos reprovadas que os promotores contestaram pelo app (até 2 por dia, com explicação). Aceitar: a foto passa a valer como aprovada; a reprovação do vendedor fica conferida como incorreta (entra no PDF de correções dele) e a do supervisor ou do administrador vira aprovação. Negar: a reprovação continua e o promotor vê a sua resposta. É a mesma lista da aba Contestações do app do supervisor."
       />
       <div className="toolbar">
         <PromotorSelect value={promotorId} onChange={resetPage(setPromotorId)} />
@@ -166,13 +167,8 @@ function ContestViewer({
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onPrev} disabled={!hasPrev}>
-            Anterior
-          </button>
-          <button className="btn" onClick={onNext} disabled={!hasNext}>
-            Próxima
-          </button>
-          <span style={{ flex: 1 }} />
+          <NavArrows onPrev={onPrev} onNext={onNext} hasPrev={hasPrev} hasNext={hasNext} />
+          <span className="flex-1" />
           {saved && <span className="muted small">Contestação {saved === 'ACEITA' ? 'aceita: a foto vale como aprovada' : 'negada'}.</span>}
           {pending &&
             (denying ? (
@@ -183,14 +179,15 @@ function ContestViewer({
                 <button className="btn reject" onClick={confirmDeny} disabled={!canDeny || save.isPending}>
                   {save.isPending ? 'Gravando…' : 'Confirmar negação'}
                 </button>
+                {!canDeny && <span className="btn-hint">Escreva pelo menos {MIN_JUSTIFICATION} caracteres</span>}
               </>
             ) : (
               <>
                 <button className="btn reject" onClick={() => setDenying(true)} disabled={save.isPending}>
-                  Negar
+                  Negar <Shortcut k="N" />
                 </button>
                 <button className="btn approve" onClick={accept} disabled={save.isPending}>
-                  {save.isPending ? 'Gravando…' : 'Aceitar'}
+                  {save.isPending ? 'Gravando…' : <>Aceitar <Shortcut k="A" /></>}
                 </button>
               </>
             ))}
@@ -212,7 +209,7 @@ function ContestViewer({
           />
           <AuditList audits={contest.audits} />
 
-          <div className="stack" style={{ gap: 8 }}>
+          <div className="stack" style={{ gap: 'var(--esp-2)' }}>
             <h3>Contestação do promotor</h3>
             <div className="small">
               <ContestStatusTag status={contest.status} /> enviada em {fmtDateTime(contest.createdAt)}
@@ -234,7 +231,7 @@ function ContestViewer({
               />
             )}
             {pending && !denying && (
-              <span className="muted small">Aceitar aprova a foto. Negar exige uma resposta ao promotor. Atalhos: A aceita, N nega, setas navegam.</span>
+              <span className="muted small">Aceitar aprova a foto. Negar exige uma resposta ao promotor.</span>
             )}
           </div>
           <ErrorBox error={save.error} />

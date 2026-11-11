@@ -58,6 +58,14 @@ export function fmtNumber(n: number | null | undefined, digits = 0) {
   return n.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })
 }
 
+/** Sem localização nova há mais que isto, o promotor conta como "sem sinal" (Hoje e mapa). */
+export const SIGNAL_STALE_MIN = 15
+
+/** Sem sinal: nunca mandou localização ou a última é mais velha que SIGNAL_STALE_MIN em relação a `now`. */
+export function isStale(recordedAt: string | null | undefined, now: number) {
+  return !recordedAt || now - new Date(recordedAt).getTime() > SIGNAL_STALE_MIN * 60_000
+}
+
 export function timeAgo(iso: string | null | undefined) {
   if (!iso) return 'sem sinal'
   const min = Math.round((Date.now() - new Date(iso).getTime()) / 60_000)

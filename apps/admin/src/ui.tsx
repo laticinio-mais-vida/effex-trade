@@ -5,12 +5,13 @@ import { Icon } from './icons'
 import { visitStatusLabel } from './format'
 import type { Client, Lookups, Paged, Product, Stats, VisitStatus } from './types'
 
-export function PageHead({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
+/** Cabeçalho da página. Com `help`, a descrição fica numa linha e o "?" abre a explicação completa. */
+export function PageHead({ title, description, help, actions }: { title: string; description?: ReactNode; help?: ReactNode; actions?: ReactNode }) {
   return (
     <header className="page-head">
       <div>
         <h1>{title}</h1>
-        {description && <p>{description}</p>}
+        {help ? <HelpLine summary={description}>{help}</HelpLine> : description && <p>{description}</p>}
       </div>
       {actions && <div className="btn-row">{actions}</div>}
     </header>
@@ -21,6 +22,54 @@ export function PageHead({ title, description, actions }: { title: string; descr
  * Selo de status. "Não feito" (PENDENTE) é vermelho nos dias anteriores e nos relatórios e cinza com o dia aberto:
  * passe `dayOpen` onde o dia ainda está em andamento.
  */
+/** Anterior e Próxima das janelas de foto: setas grandes. */
+export function NavArrows({ onPrev, onNext, hasPrev, hasNext }: { onPrev: () => void; onNext: () => void; hasPrev: boolean; hasNext: boolean }) {
+  return (
+    <div className="nav-arrows">
+      <button className="btn nav-arrow" onClick={onPrev} disabled={!hasPrev} aria-label="Foto anterior" title="Anterior (seta para a esquerda)">
+        <Icon name="arrow-back" size={24} />
+      </button>
+      <button className="btn nav-arrow" onClick={onNext} disabled={!hasNext} aria-label="Próxima foto" title="Próxima (seta para a direita)">
+        <Icon name="arrow-forward" size={24} />
+      </button>
+    </div>
+  )
+}
+
+/** Atalho de teclado dentro do botão: "Reprovar · R". */
+export function Shortcut({ k }: { k: string }) {
+  return <span className="atalho" aria-hidden="true">· {k}</span>
+}
+
+/** Uma linha de resumo e um "?" que abre (e fecha) a explicação completa logo abaixo. */
+export function HelpLine({ summary, children }: { summary: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const id = useId()
+  return (
+    <div className="help-line">
+      <p className="help-summary">
+        <span>{summary}</span>
+        <button
+          type="button"
+          className="help-btn"
+          aria-expanded={open}
+          aria-controls={id}
+          aria-label={open ? 'Fechar a explicação' : 'Como funciona'}
+          title={open ? 'Fechar a explicação' : 'Como funciona'}
+          onClick={() => setOpen((o) => !o)}
+        >
+          ?
+        </button>
+      </p>
+      {open && (
+        <div id={id} className="help-full">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function StatusPill({ status, label, dayOpen }: { status: string; label?: string; dayOpen?: boolean }) {
   const cls = status === 'PENDENTE' && dayOpen ? 'PENDENTE-aberto' : status
   return <span className={`pill st-${cls}`}>{label ?? visitStatusLabel[status as VisitStatus] ?? status}</span>
@@ -213,7 +262,7 @@ export function ProductPicker({ onPick, exclude = [] }: { onPick: (p: Product) =
       />
       {open && (
         <div className="picker-list">
-          {items.length === 0 && <div className="muted small" style={{ padding: 10 }}>Nenhum produto encontrado.</div>}
+          {items.length === 0 && <div className="muted small" style={{ padding: 'var(--esp-3)' }}>Nenhum produto encontrado.</div>}
           {items.map((p) => (
             <button
               key={p.id}
@@ -291,7 +340,7 @@ export function ClientPicker({
       />
       {open && (
         <div className="picker-list">
-          {items.length === 0 && <div className="muted small" style={{ padding: 10 }}>Nenhum cliente encontrado.</div>}
+          {items.length === 0 && <div className="muted small" style={{ padding: 'var(--esp-3)' }}>Nenhum cliente encontrado.</div>}
           {multi && onPickMany && items.length > 1 && (
             <button type="button" className="picker-all" onClick={() => onPickMany(items)}>
               {items.every((c) => selectedIds.includes(c.id)) ? `Desmarcar os ${items.length} resultados` : `Marcar os ${items.length} resultados`}

@@ -95,7 +95,7 @@ export function SettingsPage() {
         }
       />
       {!isAdmin && (
-        <div className="alert" style={{ marginBottom: 16 }}>
+        <div className="alert" style={{ marginBottom: 'var(--esp-4)' }}>
           Somente administradores podem alterar as regras.
         </div>
       )}
@@ -118,7 +118,7 @@ export function SettingsPage() {
                 ]}
               />
             </div>
-            <div className="panel-body stack" style={{ gap: 12 }}>
+            <div className="panel-body stack" style={{ gap: 'var(--esp-3)' }}>
               {target === 'todos' ? (
                 <p className="muted" style={{ margin: 0 }}>
                   Você está editando a regra geral. Promotores com exceção numa regra continuam com a exceção dele até ela ser removida (lista no fim da página).
@@ -143,9 +143,9 @@ export function SettingsPage() {
                       Limpar seleção
                     </button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 'var(--esp-2)' }}>
                     {promotores.map((p) => (
-                      <label key={p.id} className="check" style={{ padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, background: selected.includes(p.id) ? '#fffbea' : undefined }}>
+                      <label key={p.id} className="check" style={{ padding: 'var(--esp-2) var(--esp-2)', border: '1px solid var(--divisoria)', borderRadius: 'var(--raio-selo)', background: selected.includes(p.id) ? 'var(--neutro-suave)' : undefined }}>
                         <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggle(p.id)} />
                         {p.name}
                         {overridesById.has(p.id) && <span className="chip warn">com exceção</span>}
@@ -207,10 +207,10 @@ export function SettingsPage() {
                       <strong>{o.promotor.name}</strong>
                     </td>
                     <td>
-                      <div className="btn-row" style={{ gap: 6 }}>
+                      <div className="btn-row" style={{ gap: 'var(--esp-2)' }}>
                         {Object.entries(o.values).map(([key, value]) =>
                           meta[key] ? (
-                            <span key={key} className="chip warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <span key={key} className="chip warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--esp-2)' }}>
                               {meta[key]!.label}: {fmtValue(value, meta[key]!)}
                               {isAdmin && (
                                 <button
@@ -266,21 +266,21 @@ function RuleRow({
 }) {
   const id = `rule-${settingKey}`
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 280px', gap: 20, padding: '14px 18px', borderBottom: '1px solid var(--rule)', opacity: disabled && m.scope === 'geral' ? 0.55 : 1 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 280px', gap: 'var(--esp-5)', padding: 'var(--esp-4) var(--esp-4)', borderBottom: '1px solid var(--divisoria)', opacity: disabled && m.scope === 'geral' ? 0.55 : 1 }}>
       <div>
         <label htmlFor={id} style={{ fontWeight: 600 }}>
           {m.label}
           {changed && (
-            <span className="chip warn" style={{ marginLeft: 8 }}>
+            <span className="chip warn" style={{ marginLeft: 'var(--esp-2)' }}>
               alterado
             </span>
           )}
         </label>
-        <p className="muted small" style={{ margin: '4px 0 0' }}>
+        <p className="muted small" style={{ margin: 'var(--esp-1) 0 0' }}>
           {m.help} Padrão: {fmtValue(defaultValue, m)}.
         </p>
         {exceptions.length > 0 && (
-          <p className="small" style={{ margin: '4px 0 0', color: 'var(--justified)' }}>
+          <p className="small" style={{ margin: 'var(--esp-1) 0 0', color: 'var(--nao-feito)' }}>
             Exceção: {exceptions.map((o) => `${o.promotor.name} (${fmtValue(o.values[settingKey], m)})`).join(', ')}
           </p>
         )}
@@ -307,7 +307,7 @@ function RuleRow({
           </div>
         )}
         {Array.isArray(value) && m.options && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }} id={id}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--esp-2) var(--esp-4)' }} id={id}>
             {m.options.map((o) => {
               const list = value as (string | number)[]
               const on = list.some((v) => String(v) === String(o.value))

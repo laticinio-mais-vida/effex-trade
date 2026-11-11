@@ -1,11 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { fmtLongDate, fmtMinutes, fmtTime, timeAgo } from '../format'
+import { fmtLongDate, fmtMinutes, fmtTime, isStale, SIGNAL_STALE_MIN, timeAgo } from '../format'
 import type { AlertItem, Dashboard, MapData } from '../types'
 import { ErrorBox, ExecBar, Loading, PageHead } from '../ui'
 
+type MapPromotor = MapData['promotores'][number]
+
+const lunchOverdue = (p: MapPromotor) => !!p.lunch && !p.lunch.end && p.lunch.overdue
+
 export function DashboardPage() {
+  const navigate = useNavigate()
   const dash = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/admin/dashboard'), refetchInterval: 60_000 })
   const map = useQuery({ queryKey: ['map', '', ''], queryFn: () => api<MapData>('/admin/map'), refetchInterval: 180_000 })
 
@@ -13,12 +18,25 @@ export function DashboardPage() {
   if (dash.error || !dash.data) return <ErrorBox error={dash.error} />
   const d = dash.data
   const finished = d.visits.done + d.visits.justified
+  const pct = (n: number) => `${d.visits.total ? (n / d.visits.total) * 100 : 0}%`
+
+  // Exceções primeiro (sem sinal, almoço acima do limite), depois a ordem de sempre
+  const now = map.dataUpdatedAt
+  const exception = (p: MapPromotor) => isStale(p.lastPing?.recordedAt, now) || lunchOverdue(p)
+  const promotores = [...(map.data?.promotores ?? [])].sort((a, b) => Number(exception(b)) - Number(exception(a)))
+
+  const todos = [
+    { to: '/liberacoes', count: d.pendingRequests, text: 'pedidos de liberação aguardando decisão' },
+    { to: '/fotos', count: d.photosUnreviewed, text: 'fotos dos últimos 7 dias para você aprovar ou reprovar' },
+    { to: '/contestacoes', count: d.pendingContests, text: 'contestações de fotos reprovadas esperando decisão' },
+    { to: '/relatorios', count: d.visits.pending, text: 'clientes do roteiro de hoje ainda sem atendimento' },
+  ].filter((t) => t.count > 0)
 
   return (
     <div className="stack">
       <PageHead
         title={`Hoje, ${fmtLongDate(d.date)}`}
-        description={`${d.promotores} promotores em rota, ${d.online} com localização recebida nos últimos 15 minutos.`}
+        description={`${d.promotores} promotores em rota, ${d.online} com localização recebida nos últimos ${SIGNAL_STALE_MIN} minutos.`}
         actions={
           <Link className="btn" to="/mapa">
             Abrir mapa
@@ -26,32 +44,44 @@ export function DashboardPage() {
         }
       />
 
-      {d.alerts.length > 0 && <Alerts alerts={d.alerts} />}
+      {d.alerts.length > 0 && <Alerts alerts={d.alerts} now={dash.dataUpdatedAt} />}
 
-      <section className="tags" aria-label="Execução do dia">
-        <div className="shelf-tag">
-          <span className="tag-label">Clientes feitos</span>
-          <span className="tag-value num">
+      <section className="kpis" aria-label="Execução do dia">
+        <div className="kpi">
+          <span className="kpi-label">Clientes feitos</span>
+          <span className="kpi-valor tom-feito">
             {d.visits.done}
             <small>/ {d.visits.total}</small>
           </span>
-          <span className="tag-foot">{d.visits.total ? Math.round((d.visits.done / d.visits.total) * 100) : 0}% do roteiro do dia</span>
+          <div className="execbar" role="img" aria-label={`${d.visits.done} feitos e ${d.visits.inProgress} em atendimento de ${d.visits.total}`}>
+            <span className="b-done" style={{ width: pct(d.visits.done) }} />
+            <span className="b-prog" style={{ width: pct(d.visits.inProgress) }} />
+          </div>
+          <span className="kpi-pe">{d.visits.total ? Math.round((d.visits.done / d.visits.total) * 100) : 0}% do roteiro do dia</span>
         </div>
-        <div className="shelf-tag">
-          <span className="tag-label">Em atendimento agora</span>
-          <span className="tag-value num">{d.visits.inProgress}</span>
-          <span className="tag-foot">{d.visits.pending} clientes ainda não atendidos</span>
+        <div className="kpi">
+          <span className="kpi-label">Em atendimento agora</span>
+          <span className="kpi-valor tom-em-atendimento">{d.visits.inProgress}</span>
+          <span className="kpi-pe">{d.visits.pending} clientes ainda não atendidos</span>
         </div>
-        <div className="shelf-tag alt">
-          <span className="tag-label">Justificados</span>
-          <span className="tag-value num">{d.visits.justified}</span>
-          <span className="tag-foot">{finished} de {d.visits.total} com desfecho</span>
+        <div className="kpi">
+          <span className="kpi-label">Justificados</span>
+          <span className="kpi-valor tom-justificado">{d.visits.justified}</span>
+          <span className="kpi-pe">
+            {finished} de {d.visits.total} com desfecho
+          </span>
         </div>
-        <Link to="/liberacoes" className="shelf-tag alt" style={{ textDecoration: 'none' }}>
-          <span className="tag-label">Liberações aguardando</span>
-          <span className="tag-value num">{d.pendingRequests}</span>
-          <span className="tag-foot">{d.pendingRequests ? 'Toque para decidir' : 'Nenhum pedido pendente'}</span>
-        </Link>
+        <div className="kpi acao">
+          <span className="kpi-label">Liberações aguardando</span>
+          <span className="kpi-valor tom-marinho">{d.pendingRequests}</span>
+          {d.pendingRequests ? (
+            <Link className="btn primary small" to="/liberacoes">
+              Decidir
+            </Link>
+          ) : (
+            <span className="kpi-pe">Nenhum pedido pendente</span>
+          )}
+        </div>
       </section>
 
       <div className="cols-2">
@@ -75,12 +105,12 @@ export function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {map.data?.promotores.map((p) => (
-                    <tr key={p.id}>
+                  {promotores.map((p) => (
+                    <tr key={p.id} className="clickable" onClick={() => navigate(`/mapa?promotor=${p.id}`)}>
                       <td>
                         <Link to={`/mapa?promotor=${p.id}`}>{p.name}</Link>
                       </td>
-                      <td style={{ minWidth: 140, verticalAlign: 'middle' }}>
+                      <td className="col-barra">
                         <ExecBar stats={p.stats} />
                       </td>
                       <td className="r">
@@ -88,8 +118,9 @@ export function DashboardPage() {
                       </td>
                       <td>
                         {p.lunch && !p.lunch.end ? (
-                          <span style={{ color: p.lunch.overdue ? 'var(--notdone)' : undefined, fontWeight: p.lunch.overdue ? 600 : undefined }}>
+                          <span className={p.lunch.overdue ? 'texto-erro' : undefined}>
                             Almoço desde {fmtTime(p.lunch.start)}
+                            {p.lunch.overdue ? ' (acima do limite)' : ''}
                           </span>
                         ) : p.currentVisit ? (
                           `${p.currentVisit.clientName} desde ${fmtTime(p.currentVisit.since)}`
@@ -97,7 +128,7 @@ export function DashboardPage() {
                           <span className="muted">—</span>
                         )}
                       </td>
-                      <td className={p.lastPing ? '' : 'muted'}>{timeAgo(p.lastPing?.recordedAt)}</td>
+                      <td className={`nowrap ${isStale(p.lastPing?.recordedAt, now) ? 'texto-erro' : ''}`}>{timeAgo(p.lastPing?.recordedAt)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -110,14 +141,18 @@ export function DashboardPage() {
           <div className="panel-head">
             <h2>Para fazer</h2>
           </div>
-          <div className="panel-body stack">
-            <TodoLine to="/liberacoes" count={d.pendingRequests} text="pedidos de liberação aguardando decisão" />
-            <TodoLine to="/fotos" count={d.photosUnreviewed} text="fotos dos últimos 7 dias para você aprovar ou reprovar" />
-            <TodoLine to="/contestacoes" count={d.pendingContests} text="contestações de fotos reprovadas esperando decisão" />
-            <TodoLine to="/relatorios" count={d.visits.pending} text="clientes do roteiro de hoje ainda sem atendimento" />
-            <p className="muted small" style={{ margin: 0 }}>
-              {d.photosToday} fotos registradas hoje.
-            </p>
+          <div className="panel-body todo-list">
+            {todos.length ? (
+              todos.map((t) => (
+                <Link key={t.to} className="todo" to={t.to}>
+                  <span className="todo-num">{t.count}</span>
+                  <span className="todo-text">{t.text}</span>
+                </Link>
+              ))
+            ) : (
+              <p className="muted m-0">Nada pendente agora.</p>
+            )}
+            <p className="muted small m-0">{d.photosToday} fotos registradas hoje.</p>
           </div>
         </section>
       </div>
@@ -126,34 +161,32 @@ export function DashboardPage() {
 }
 
 /** Alertas para o supervisor (ex.: almoço acima do limite). Somem ao marcar "ciente". */
-function Alerts({ alerts }: { alerts: AlertItem[] }) {
+function Alerts({ alerts, now }: { alerts: AlertItem[]; now: number }) {
   const qc = useQueryClient()
   const ack = useMutation({
     mutationFn: (id: string) => api(`/supervisor/alerts/${id}/ack`, { method: 'POST', body: {} }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['dashboard'] }),
   })
   return (
-    <section className="panel" style={{ borderColor: '#f0c8c4' }} aria-label="Alertas">
-      <div className="panel-head" style={{ background: 'var(--notdone-bg)' }}>
-        <h2 style={{ color: '#8f2a24' }}>
-          {alerts.length === 1 ? '1 alerta' : `${alerts.length} alertas`} para o supervisor
-        </h2>
+    <section className="panel alerta" aria-label="Alertas">
+      <div className="panel-head">
+        <h2>{alerts.length === 1 ? '1 alerta' : `${alerts.length} alertas`} para o supervisor</h2>
       </div>
       <table className="data">
         <tbody>
           {alerts.map((a) => (
             <tr key={a.id}>
-              <td style={{ verticalAlign: 'middle' }}>
+              <td>
                 <strong>{a.message}</strong>
                 <div className="small muted">
                   {a.resolvedAt
                     ? `Voltou às ${fmtTime(a.lunchEndedAt ?? a.resolvedAt)}${a.lunchStartedAt && a.lunchEndedAt ? `, ${fmtMinutes((new Date(a.lunchEndedAt).getTime() - new Date(a.lunchStartedAt).getTime()) / 60_000)} de almoço` : ''}.`
                     : a.lunchStartedAt
-                      ? `Em almoço há ${fmtMinutes((Date.now() - new Date(a.lunchStartedAt).getTime()) / 60_000)}${a.promotor.phone ? `. Telefone ${a.promotor.phone}` : ''}.`
+                      ? `Em almoço há ${fmtMinutes((now - new Date(a.lunchStartedAt).getTime()) / 60_000)}${a.promotor.phone ? `. Telefone ${a.promotor.phone}` : ''}.`
                       : ''}
                 </div>
               </td>
-              <td style={{ width: 120, verticalAlign: 'middle' }}>
+              <td className="col-acao">
                 <button className="btn small" onClick={() => ack.mutate(a.id)} disabled={ack.isPending}>
                   Ciente
                 </button>
@@ -163,16 +196,5 @@ function Alerts({ alerts }: { alerts: AlertItem[] }) {
         </tbody>
       </table>
     </section>
-  )
-}
-
-function TodoLine({ to, count, text }: { to: string; count: number; text: string }) {
-  return (
-    <Link to={to} style={{ display: 'flex', gap: 12, alignItems: 'baseline', textDecoration: 'none', color: 'inherit' }}>
-      <span className="cond num" style={{ fontSize: 30, fontWeight: 700, color: count ? 'var(--ink)' : 'var(--faint)', minWidth: 44 }}>
-        {count}
-      </span>
-      <span>{text}</span>
-    </Link>
   )
 }
