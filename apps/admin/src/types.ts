@@ -70,6 +70,24 @@ export type ErpSyncStatus = {
     located: number
     unlocated: number
   } | null
+  /** Vendas guardadas: as do último envio que trouxe vendas (null: nenhum trouxe ainda) */
+  sales: SalesPeriod | null
+}
+
+/** Período das vendas do ERP guardadas no servidor (AAAA-MM-DD) */
+export type SalesPeriod = { at: string; from: string; to: string; total: number }
+
+/** Vendas de um cliente no período guardado, vindas do ERP */
+export type ClientSales = {
+  period: SalesPeriod | null
+  /** Notas de venda do cliente no período */
+  count: number
+  total: number
+  lastDate: string | null
+  /** Do maior valor para o menor */
+  products: { erpId: number; name: string; unit: string | null; quantity: number; value: number; purchases: number; lastDate: string }[]
+  /** Da mais recente para a mais antiga */
+  sales: { id: number; date: string; invoice: string | null; total: number; items: { erpId: number; name: string; unit: string | null; quantity: number; value: number }[] }[]
 }
 
 /** Cidade com clientes cadastrados */

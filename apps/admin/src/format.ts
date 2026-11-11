@@ -66,6 +66,17 @@ export function isStale(recordedAt: string | null | undefined, now: number) {
   return !recordedAt || now - new Date(recordedAt).getTime() > SIGNAL_STALE_MIN * 60_000
 }
 
+/** 1234.5 -> "R$ 1.234,50" */
+export function fmtMoney(n: number | null | undefined) {
+  if (n == null) return '—'
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+/** Quantidade com a unidade do ERP: casas decimais só quando tem (ex.: "12 UND", "4,25 KG") */
+export function fmtQuantity(n: number, unit?: string | null) {
+  return `${n.toLocaleString('pt-BR', { maximumFractionDigits: 3 })}${unit ? ` ${unit}` : ''}`
+}
+
 export function timeAgo(iso: string | null | undefined) {
   if (!iso) return 'sem sinal'
   const min = Math.round((Date.now() - new Date(iso).getTime()) / 60_000)

@@ -17,8 +17,10 @@ Os clientes vêm da **cópia do banco do ERP**, a mesma que o BI Mais Vida lê
 
    ```
    11073 clientes no ERP (3141 ativos). Cópia do banco de 29/10/2026 às 08:58.
+   10149 vendas de 11/09/2026 a 11/11/2026: 2482 clientes, 51712 itens, R$ 12.492.643,80.
    Sincronização concluída:
      12 novos, 3 alterados, 1 inativados, 0 reativados
+     Vendas de 11/09/2026 a 11/11/2026 guardadas: 10149 vendas de 2482 clientes
    ```
 
 3. Aperte uma tecla para fechar. Não precisa deixar nada aberto.
@@ -32,6 +34,12 @@ O que acontece no site:
 | Cliente inativado (ou apagado) | Fica inativo: sai dos roteiros dos próximos dias |
 | Cliente reativado | Volta a ficar ativo |
 | Latitude e longitude (campos LATITUDADE e LONGITUDE do cadastro do cliente; sem elas, as de entrega) | Viram a localização do cliente, enquanto ninguém a corrigir no EFFEX |
+| Vendas dos últimos 2 meses (notas de venda a cliente não canceladas, com os produtos) | Aparecem no cadastro do cliente, em Clientes; a cada sincronização o período inteiro é trocado |
+
+**Vendas:** o período vai de 2 meses antes até o último dia com venda na cópia do banco (com a cópia de hoje, até
+hoje). O valor é o de cada item na nota, sem descontar devoluções, como o faturamento do BI Mais Vida. No painel, em
+Clientes, a linha "Atualizado do ERP em …" mostra o período guardado, e o cadastro de cada cliente do ERP mostra o que
+ele comprou (por produto e nota a nota). As vendas não mudam o mix do cliente.
 
 **Localização:** vem do ERP, mas pode ser corrigida no painel, em Clientes (no mapa, um por um, ou pela planilha, vários
 de uma vez). **Depois de corrigida no EFFEX, a sincronização não a muda mais**, mesmo que o ERP mande outra. O resumo da
@@ -61,6 +69,9 @@ A janela mostra `NÃO SINCRONIZOU:` e o motivo.
 | `Assinatura inválida` | A chave do `sync\config.ini` não é a mesma do servidor (veja [Trocar a chave](#trocar-a-chave-da-sincronização)). |
 | `... clientes ativos do ERP ficariam inativos de uma vez` | Trava contra cópia do banco quebrada: mais de 30% dos clientes sumiriam. Confira a cópia. Se estiver certo, rode no Prompt de Comando, na pasta `sync`: `sincronizar-clientes.bat --forcar`. |
 | `falta a senha do banco` / `falta a chave` | O `sync\config.ini` está incompleto (modelo em `sync\config.exemplo.ini`). |
+| `Atenção: as vendas não foram lidas (...)` | Os clientes foram assim mesmo, e o site continua com as vendas do envio anterior. O motivo vem entre parênteses (ex.: uma tabela de vendas mudou no ERP): mande para quem cuida do sistema. |
+| `o servidor não guardou as vendas` | O site ainda está na versão anterior, que aceita o pacote mas ignora as vendas. Publique a versão nova (`deploy\publicar.ps1`) e rode de novo. |
+| `A venda ... fora do período` / `aparece duas vezes` | Erro na leitura das vendas: nada foi gravado (nem os clientes). Mande a mensagem para quem cuida do sistema. |
 
 ---
 

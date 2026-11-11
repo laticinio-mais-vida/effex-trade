@@ -11,8 +11,11 @@ import { pausedMinutesWithin, travelLegs } from '../src/services/reports'
 import { ensureWorkDay } from '../src/services/workdays'
 import { prisma } from '../src/db'
 import { env } from '../src/env'
-import { addDays } from '../src/lib/dates'
+import { addDays, todayIn } from '../src/lib/dates'
+import { HttpError } from '../src/lib/errors'
 import { signSync } from '../src/routes/sync'
+import type { ErpSalesInput } from '../src/services/erp-sales'
+import { syncErpClients } from '../src/services/erp-sync'
 
 const API = process.env.API_URL ?? 'http://localhost:3333'
 let failures = 0
@@ -976,21 +979,89 @@ else {
   const inativo = erp({ erpId: 900003, name: 'Mercado Inativo do ERP', active: false })
   const outro = erp({ erpId: 900004, name: 'Mercado Outro do ERP', latitude: -12.97, longitude: -38.47 })
   const base = [ribeira, novo, inativo, outro]
+  // Vendas dos últimos 2 meses, no mesmo pacote dos clientes. As de 900002 chegam no envio que cria o cliente
+  const hoje = todayIn()
+  const vendas = (list: ErpSalesInput['list']): ErpSalesInput => ({
+    from: addDays(hoje, -61),
+    to: hoje,
+    products: [
+      { erpId: 32, name: 'QUEIJO MUSSARELA  4KG', unit: 'KG' },
+      { erpId: 25, name: 'MANTEIGA 200G', unit: 'UND' },
+    ],
+    list,
+  })
+  const v1 = {
+    erpId: 700001,
+    clientErpId: 900002,
+    date: addDays(hoje, -10),
+    invoice: '055770',
+    items: [
+      { product: 32, quantity: 8.5, value: 320 },
+      { product: 25, quantity: 10, value: 80.5 },
+      { product: 32, quantity: 4, value: 160 },
+    ],
+  }
+  const v2 = { erpId: 700002, clientErpId: 900002, date: addDays(hoje, -3), invoice: '055801', items: [{ product: 25, quantity: 5, value: 40.25 }] }
+  const semCadastro = { erpId: 700003, clientErpId: 999999, date: addDays(hoje, -3), invoice: '055802', items: [{ product: 25, quantity: 1, value: 8 }] }
 
   r = await sync({ clients: base }, { key: 'chave-errada' })
   check('sincronização com chave errada recusada', r.status === 401 && r.data.code === 'ASSINATURA_INVALIDA', r.data)
   r = await sync({ clients: base }, { at: sentAt - 20 * 60 })
   check('sincronização com relógio fora da janela recusada', r.status === 401 && r.data.code === 'RELOGIO', r.data)
-  r = await sync({ sourceModifiedAt: new Date().toISOString(), clients: base })
+  r = await sync({ sourceModifiedAt: new Date().toISOString(), clients: base, sales: vendas([v1, v2, semCadastro]) })
   check('primeira sincronização vincula o cliente já cadastrado e cria os novos', r.status === 200 && r.data.linked === 1 && r.data.created === 3 && r.data.located === 2, r.data)
+  check(
+    'vendas chegam com os clientes, até as do cliente criado no mesmo envio; a de cliente fora do cadastro fica de fora com aviso',
+    r.data.sales?.total === 2 && r.data.sales.clients === 1 && r.data.sales.items === 3 && r.data.sales.skipped === 1 &&
+      r.data.warnings.some((w: string) => w.includes('999999')),
+    r.data,
+  )
   let c = await byErp(900001)
   check('cliente vinculado mantém a localização que já tinha (do painel)', c?.name === 'Mercado Ribeira' && c.latitude === -12.917 && c.locationSource === 'PAINEL', c)
   c = await byErp(900002)
   check('cliente novo recebe a localização do ERP', c?.latitude === -12.96 && c.locationSource === 'ERP', c)
+  const novoId = c.id
+  const salesOf = async () => (await call(admin, 'GET', `/admin/clients/${novoId}/sales`)).data
+  let s = await salesOf()
+  const queijo = s.products?.find((p: any) => p.erpId === 32)
+  check(
+    'vendas do cliente: resumo por produto (o mesmo produto na nota soma) e notas da mais recente',
+    s.count === 2 && s.total === 600.75 && s.lastDate === addDays(hoje, -3) && s.products[0].erpId === 32 &&
+      queijo?.name === 'QUEIJO MUSSARELA 4KG' && queijo.quantity === 12.5 && queijo.value === 480 && queijo.purchases === 1 &&
+      s.products[1].purchases === 2 && s.sales[0].id === 700002 && s.period?.to === hoje,
+    s,
+  )
   r = await sync({ clients: base })
   check('reenvio igual não muda nada', r.status === 200 && r.data.created === 0 && r.data.updated === 0 && r.data.located === 0 && r.data.unchanged === 4, r.data)
+  s = await salesOf()
+  check('pacote sem as vendas mantém as do envio anterior', r.data.sales === null && s.count === 2, { r: r.data, s })
   r = await sync({ clients: base }, { at: sentAt })
   check('pacote repetido recusado', r.status === 409 && r.data.code === 'ENVIO_REPETIDO', r.data)
+
+  // Direto pelo serviço: a rota aceita só 12 envios por minuto, e os envios acima e abaixo já usam todos
+  const syncDirect = async (input: Parameters<typeof syncErpClients>[0]) => {
+    try {
+      return { status: 200, data: (await syncErpClients(input, { sentAt: new Date(++sentAt * 1000) })) as any }
+    } catch (e) {
+      if (e instanceof HttpError) return { status: e.statusCode, data: { error: e.message, code: e.code } as any }
+      throw e
+    }
+  }
+  r = await syncDirect({ clients: base, sales: vendas([v2]) })
+  s = await salesOf()
+  check('novo envio troca as vendas do período inteiro', r.status === 200 && s.count === 1 && s.total === 40.25, { r: r.data, s })
+  r = await syncDirect({ clients: base, sales: vendas([{ ...v1, date: addDays(hoje, -90) }]) })
+  check('venda fora do período recusada', r.status === 400 && r.data.code === 'VENDA_FORA_DO_PERIODO', r.data)
+  r = await syncDirect({ clients: base, sales: vendas([v1, v1]) })
+  check('venda repetida no envio recusada', r.status === 400 && r.data.code === 'VENDA_REPETIDA', r.data)
+  r = await syncDirect({ clients: base, sales: { ...vendas([v2]), from: addDays(hoje, -500) } })
+  check('período de vendas longo demais recusado', r.status === 400 && r.data.code === 'PERIODO_INVALIDO', r.data)
+  s = await salesOf()
+  check('envio recusado não mexe nas vendas', s.count === 1, s)
+  r = await call(admin, 'GET', '/admin/clients/sync-status')
+  check('situação mostra o período das vendas guardadas', r.data.sales?.from === addDays(hoje, -61) && r.data.sales.to === hoje && r.data.sales.total === 1, r.data)
+  r = await call(supervisor, 'GET', `/admin/clients/${novoId}/sales`)
+  check('supervisor vê as vendas dos clientes das cidades dele', r.status === 200 && r.data.count === 1, r.data)
   r = await sync({ clients: [ribeira, { ...novo, latitude: -12.961 }, inativo, outro] })
   c = await byErp(900002)
   // keptManual 1: o Ribeira, cuja localização é do painel e o ERP manda outra
