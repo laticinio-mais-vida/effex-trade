@@ -1,7 +1,9 @@
 import { prisma, type LocationSource, type Prisma } from '../db'
 import { cityKey, UFS } from '../lib/cities'
+import { toDbDate } from '../lib/dates'
 import { badRequest, conflict } from '../lib/errors'
 import { clientMatcher, erpOwnsLocation, samePoint, unlocated } from './clients'
+import { normalizeSales, replaceSales, type ErpSalesInput } from './erp-sales'
 
 /**
  * Sincronização dos clientes com o ERP. O computador da empresa lê a tabela CLIENTES da cópia do banco (pasta sync/)
@@ -11,6 +13,7 @@ import { clientMatcher, erpOwnsLocation, samePoint, unlocated } from './clients'
  * - código que sumiu do ERP: o cliente fica inativo.
  * Localização: a do ERP entra e é atualizada enquanto ninguém a editar no painel (ou pela planilha); depois disso a
  * editada vale e a sincronização não a muda mais. Coordenada vazia no ERP não apaga a que o cliente já tem.
+ * No mesmo pacote vêm as vendas dos últimos 2 meses, gravadas na mesma transação (src/services/erp-sales.ts).
  * Mix, roteiros e visitas nunca são tocados.
  */
 
@@ -123,10 +126,9 @@ function erpLocation(c: Pick<Current, 'latitude' | 'longitude' | 'locationSource
   return { latitude: r.latitude, longitude: r.longitude, locationSource: 'ERP' as const }
 }
 
-export async function syncErpClients(
-  input: { clients: ErpClientInput[]; sourceModifiedAt?: Date | null; force?: boolean },
-  meta: { sentAt: Date; ip?: string },
-) {
+type SyncInput = { clients: ErpClientInput[]; sales?: ErpSalesInput | null; sourceModifiedAt?: Date | null; force?: boolean }
+
+export async function syncErpClients(input: SyncInput, meta: { sentAt: Date; ip?: string }) {
   if (running) throw conflict('Já existe uma sincronização em andamento. Tente de novo em instantes.', 'SINCRONIZACAO_EM_ANDAMENTO')
   running = true
   try {
@@ -136,13 +138,15 @@ export async function syncErpClients(
   }
 }
 
-async function run(input: { clients: ErpClientInput[]; sourceModifiedAt?: Date | null; force?: boolean }, meta: { sentAt: Date; ip?: string }) {
+async function run(input: SyncInput, meta: { sentAt: Date; ip?: string }) {
   const last = await prisma.erpSync.findFirst({ where: { kind: 'CLIENTES' }, orderBy: { sentAt: 'desc' }, select: { sentAt: true } })
   if (last && meta.sentAt <= last.sentAt) {
     throw conflict('Este envio é igual ou mais antigo que o último recebido. Rode a sincronização de novo.', 'ENVIO_REPETIDO')
   }
 
   const { rows, seen, warnings } = normalize(input.clients)
+  // Sem as vendas no pacote, ficam as guardadas no envio anterior
+  const sales = input.sales ? normalizeSales(input.sales) : null
   const select = { id: true, erpId: true, name: true, legalName: true, city: true, state: true, active: true, latitude: true, longitude: true, locationSource: true }
   const [existing, unlinked] = await Promise.all([
     prisma.client.findMany({ where: { erpId: { not: null } }, select }),
@@ -203,11 +207,13 @@ async function run(input: { clients: ErpClientInput[]; sourceModifiedAt?: Date |
     )
   }
 
-  const unlocatedCount = await prisma.$transaction(
+  const saved = await prisma.$transaction(
     async (tx) => {
       for (const u of updates) await tx.client.update({ where: { id: u.id }, data: u.data })
       for (let i = 0; i < creates.length; i += CREATE_BATCH) await tx.client.createMany({ data: creates.slice(i, i + CREATE_BATCH) })
       if (absent.length) await tx.client.updateMany({ where: { id: { in: absent.map((c) => c.id) } }, data: { active: false } })
+      // Depois dos clientes: as vendas dos clientes novos já encontram o cadastro
+      const salesResult = sales ? await replaceSales(tx, sales) : null
       const count = await tx.client.count({ where: { AND: [{ erpId: { not: null }, active: true }, unlocated] } })
       await tx.erpSync.create({
         data: {
@@ -221,13 +227,21 @@ async function run(input: { clients: ErpClientInput[]; sourceModifiedAt?: Date |
           linked,
           located,
           unlocated: count,
+          sales: salesResult?.total ?? null,
+          salesFrom: sales ? toDbDate(sales.from) : null,
+          salesTo: sales ? toDbDate(sales.to) : null,
           ip: meta.ip ?? null,
         },
       })
-      return count
+      return { unlocated: count, sales: salesResult }
     },
     { maxWait: 10_000, timeout: 120_000 },
   )
+
+  const unknown = saved.sales?.unknownClients ?? []
+  if (unknown.length) {
+    warnings.push(`${saved.sales!.skipped} venda(s) de ${unknown.length} cliente(s) fora do cadastro de clientes ficaram de fora (códigos ${codes(unknown)})`)
+  }
 
   return {
     total: rows.length,
@@ -241,7 +255,16 @@ async function run(input: { clients: ErpClientInput[]; sourceModifiedAt?: Date |
     /** A localização do ERP mudou, mas a editada no painel foi mantida */
     keptManual,
     unchanged: rows.length - creates.length - linked - updates.filter((u) => !('erpId' in u.data)).length,
-    unlocated: unlocatedCount,
+    unlocated: saved.unlocated,
+    /** Vendas guardadas (null: o pacote veio sem as vendas, e ficaram as do envio anterior) */
+    sales: saved.sales && {
+      from: saved.sales.from,
+      to: saved.sales.to,
+      total: saved.sales.total,
+      clients: saved.sales.clients,
+      items: saved.sales.items,
+      skipped: saved.sales.skipped,
+    },
     warnings,
   }
 }

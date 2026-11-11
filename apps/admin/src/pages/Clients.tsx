@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { Circle, MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { downloadCsv, fmtDateTime, fmtNumber, parseCsv, UFS } from '../format'
-import type { Client, ClientCity, ErpSyncStatus, Paged, ProductRef, SettingsResponse } from '../types'
+import { downloadCsv, fmtDate, fmtDateTime, fmtMoney, fmtNumber, fmtQuantity, parseCsv, UFS } from '../format'
+import type { Client, ClientCity, ClientSales, ErpSyncStatus, Paged, ProductRef, SettingsResponse } from '../types'
 import { Empty, ErrorBox, Field, Loading, Modal, PageHead, Pager, ProductPicker, Segmented } from '../ui'
 
 const PAGE_SIZE = 50
@@ -60,6 +60,7 @@ export function ClientsPage() {
   const sync = useQuery({ queryKey: ['erp-sync'], queryFn: () => api<ErpSyncStatus>('/admin/clients/sync-status') })
   const fromErp = sync.data?.erpActive ?? false
   const last = sync.data?.last
+  const sales = sync.data?.sales
   const states = [...new Set(cities.data?.map((c) => c.state))]
   const setFilter = (patch: Partial<Filters>) => {
     setFilters((f) => ({ ...f, ...patch }))
@@ -120,6 +121,7 @@ export function ClientsPage() {
           {last.sourceModifiedAt && ` (cópia do banco de ${fmtDateTime(last.sourceModifiedAt)})`}: {fmtNumber(last.created)} novos, {fmtNumber(last.updated)} alterados,{' '}
           {fmtNumber(last.inactivated)} inativados, {fmtNumber(last.located)} localizações do ERP. Clientes novos ou alterados no ERP chegam quando a sincronização roda no
           computador da empresa.
+          {sales && ` Vendas do ERP de ${fmtDate(sales.from)} a ${fmtDate(sales.to)}: ${fmtNumber(sales.total)} notas (as de cada cliente ficam no cadastro dele).`}
         </p>
       )}
       {missing > 0 && filters.located !== 'sem' && (
@@ -437,7 +439,91 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
       </div>
       <ErrorBox error={save.error} />
       {client && <ClientMix clientId={client.id} />}
+      {client?.erpId != null && <ClientErpSales clientId={client.id} />}
     </Modal>
+  )
+}
+
+/** Vendas do cliente vindas do ERP: os últimos 2 meses, trocados a cada sincronização. Só leitura. */
+function ClientErpSales({ clientId }: { clientId: string }) {
+  const query = useQuery({ queryKey: ['client-sales', clientId], queryFn: () => api<ClientSales>(`/admin/clients/${clientId}/sales`) })
+  const data = query.data
+  const period = data?.period
+  return (
+    <section className="stack" style={{ gap: 10, marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
+      <div>
+        <h3>Vendas do ERP{period ? ` de ${fmtDate(period.from)} a ${fmtDate(period.to)}` : ''}</h3>
+        {data && (
+          <p className="muted small" style={{ margin: '4px 0 0' }}>
+            {!period
+              ? 'As vendas dos últimos 2 meses chegam com a sincronização dos clientes com o ERP, que ainda não mandou nenhuma.'
+              : data.count === 0
+                ? 'Nenhuma venda para este cliente no período.'
+                : `${fmtNumber(data.count)} ${data.count === 1 ? 'nota' : 'notas'}, ${fmtMoney(data.total)} no total, a última em ${fmtDate(data.lastDate)}. Notas de venda não canceladas, sem descontar devoluções.`}
+          </p>
+        )}
+      </div>
+      {query.isLoading && <Loading />}
+      <ErrorBox error={query.error} />
+      {data && data.products.length > 0 && (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Produto</th>
+                <th className="r">Quantidade</th>
+                <th className="r">Valor</th>
+                <th className="r">Notas</th>
+                <th>Última compra</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.products.map((p) => (
+                <tr key={p.erpId}>
+                  <td>
+                    {p.name}
+                    <div className="small muted">código {p.erpId} no ERP</div>
+                  </td>
+                  <td className="r">{fmtQuantity(p.quantity, p.unit)}</td>
+                  <td className="r">{fmtMoney(p.value)}</td>
+                  <td className="r">{p.purchases}</td>
+                  <td>{fmtDate(p.lastDate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {data && data.sales.length > 0 && (
+        <details>
+          <summary className="small" style={{ cursor: 'pointer' }}>
+            Ver {data.sales.length === 1 ? 'a nota' : `as ${data.sales.length} notas`}
+          </summary>
+          <div className="table-wrap" style={{ marginTop: 8 }}>
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Nota fiscal</th>
+                  <th>Produtos</th>
+                  <th className="r">Valor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sales.map((s) => (
+                  <tr key={s.id}>
+                    <td>{fmtDate(s.date)}</td>
+                    <td>{s.invoice ?? <span className="muted">—</span>}</td>
+                    <td className="small">{s.items.map((i) => `${i.name} (${fmtQuantity(i.quantity, i.unit)})`).join('; ')}</td>
+                    <td className="r">{fmtMoney(s.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </section>
   )
 }
 

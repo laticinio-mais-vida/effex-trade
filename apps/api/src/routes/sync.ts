@@ -4,13 +4,14 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { env } from '../env'
 import { badRequest, HttpError } from '../lib/errors'
-import { parse } from '../lib/validate'
+import { parse, zDate } from '../lib/validate'
 import { syncErpClients } from '../services/erp-sync'
 
 /**
- * Recebe os clientes do ERP mandados pelo computador da empresa (sync/sincronizar-clientes.bat). Não usa login: o
- * pacote vem assinado com HMAC-SHA256 da hora do envio e do hash do corpo, com a SYNC_KEY que só o servidor e o
- * sync/config.ini conhecem (o mesmo esquema do BI Mais Vida). A chave nunca trafega.
+ * Recebe os clientes do ERP, com as vendas dos últimos 2 meses, mandados pelo computador da empresa
+ * (sync/sincronizar-clientes.bat). Não usa login: o pacote vem assinado com HMAC-SHA256 da hora do envio e do hash do
+ * corpo, com a SYNC_KEY que só o servidor e o sync/config.ini conhecem (o mesmo esquema do BI Mais Vida). A chave
+ * nunca trafega.
  */
 
 /** Diferença aceita entre o relógio do computador que envia e o do servidor. */
@@ -24,16 +25,38 @@ export function signSync(key: string, sentAt: string, body: Buffer) {
 }
 
 const zText = z.string().max(500).nullish()
+/** Código do ERP (coluna INTEGER do Firebird) */
+const zErpCode = z.number().int().nonnegative().max(2_147_483_647)
+
+/** Vendas dos últimos 2 meses (services/erp-sales.ts). Período e datas são conferidos lá. */
+const syncSales = z.object({
+  from: zDate,
+  to: zDate,
+  products: z.array(z.object({ erpId: zErpCode, name: zText, unit: zText })).max(100_000),
+  list: z
+    .array(
+      z.object({
+        erpId: zErpCode.positive(),
+        clientErpId: zErpCode.positive(),
+        date: zDate,
+        invoice: zText,
+        items: z.array(z.object({ product: zErpCode, quantity: z.number(), value: z.number() })).min(1).max(2000),
+      }),
+    )
+    .max(500_000),
+})
 
 const syncBody = z.object({
   /** Data do arquivo da cópia do banco no computador que enviou */
   sourceModifiedAt: z.coerce.date().nullish(),
   /** Confirma uma inativação em massa (sync/sincronizar.py --forcar) */
   force: z.boolean().optional(),
+  /** Sem as vendas (a leitura delas falhou no computador, ou a sincronização é da versão anterior), ficam as já guardadas */
+  sales: syncSales.optional(),
   clients: z
     .array(
       z.object({
-        erpId: z.number().int().positive().max(2_147_483_647),
+        erpId: zErpCode.positive(),
         name: zText,
         legalName: zText,
         city: zText,
@@ -85,7 +108,7 @@ export async function syncRoutes(app: FastifyInstance) {
       throw badRequest('Pacote corrompido: não foi possível descompactar.', 'PACOTE_INVALIDO')
     }
     const result = await syncErpClients(parse(syncBody, payload), { sentAt: new Date(Number(sentAt) * 1000), ip: req.ip })
-    req.log.info({ sync: { ...result, warnings: result.warnings.length } }, 'clientes do ERP sincronizados')
+    req.log.info({ sync: { ...result, warnings: result.warnings.length } }, 'clientes (e vendas) do ERP sincronizados')
     return result
   })
 }

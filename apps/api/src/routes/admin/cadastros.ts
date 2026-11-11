@@ -8,6 +8,7 @@ import { fromDbDate, toDbDate, todayIn } from '../../lib/dates'
 import { badRequest, conflict, notFound } from '../../lib/errors'
 import { parse, zDate, zId, zIdParam, zLat, zLng, zPage, zQueryBool } from '../../lib/validate'
 import { clientMatcher, clientSearch, erpActive, erpFieldChanges, located, panelLocation, unlocated, withCityKey } from '../../services/clients'
+import { clientSales, salesPeriod } from '../../services/erp-sales'
 import { listPermissionTypes } from '../../services/permissions'
 import { frequencyColumns, serializeFrequency, zFrequency } from '../../services/route-frequency'
 import { listRouteSkips, skipRouteDate, undoRouteSkip } from '../../services/route-skips'
@@ -280,11 +281,12 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     return clients.map(serializeClient)
   })
 
-  /** Última sincronização com o ERP (pasta sync/ no computador da empresa). */
+  /** Última sincronização com o ERP (pasta sync/ no computador da empresa) e o período das vendas guardadas. */
   app.get('/clients/sync-status', async () => {
-    const [last, fromErp] = await Promise.all([
+    const [last, fromErp, sales] = await Promise.all([
       prisma.erpSync.findFirst({ where: { kind: 'CLIENTES' }, orderBy: { receivedAt: 'desc' } }),
       erpActive(),
+      salesPeriod(),
     ])
     return {
       erpActive: fromErp,
@@ -300,7 +302,16 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
         located: last.located,
         unlocated: last.unlocated,
       },
+      sales,
     }
+  })
+
+  /** Vendas do cliente nos últimos 2 meses, vindas do ERP com a sincronização (só leitura). */
+  app.get('/clients/:id/sales', async (req) => {
+    const { id } = parse(zIdParam, req.params)
+    const client = await prisma.client.findFirst({ where: { AND: [{ id }, await clientScope(req.user)] }, select: { id: true } })
+    if (!client) throw notFound('Cliente')
+    return clientSales(client.id)
   })
 
   app.post('/clients', async (req) => {

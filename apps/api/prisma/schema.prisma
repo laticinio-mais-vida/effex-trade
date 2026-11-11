@@ -170,8 +170,43 @@ model Client {
   mix             ClientProduct[]
   scheduledVisits ScheduledVisit[]
   routeSkips      RouteSkip[]
+  erpSales        ErpSale[]
 
   @@index([state, cityKey])
+}
+
+/// Venda do ERP dos últimos 2 meses (VENDAS: nota de venda a cliente, não cancelada). Chega junto com os clientes na
+/// sincronização (pasta sync/) e a cada envio o período inteiro é trocado: é uma cópia só leitura do ERP
+/// (src/services/erp-sales.ts).
+model ErpSale {
+  /// Código da venda no ERP (VENDAS.ID_VENDA)
+  id       Int      @id
+  clientId String
+  client   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  date     DateTime @db.Date
+  /// Número da nota fiscal (VENDAS.NOTAFISCAL), em texto como no ERP ("055770")
+  invoice  String?
+  /// Soma dos itens
+  total    Float
+
+  items ErpSaleItem[]
+
+  @@index([clientId, date])
+}
+
+/// Produto de uma venda do ERP (LISTAVENDA), um por produto na nota. Código, nome e unidade são os do cadastro de
+/// produtos do ERP (PRODUTOS) no dia do envio, sem ligação com o catálogo de produtos e o mix do EFFEX.
+model ErpSaleItem {
+  saleId       Int
+  sale         ErpSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productErpId Int
+  productName  String
+  unit         String?
+  quantity     Float
+  /// Valor do item na nota (LISTAVENDA.VALORTOTALITEM), sem descontar devoluções
+  value        Float
+
+  @@id([saleId, productErpId])
 }
 
 /// Roteiro fixo: quais clientes o promotor atende em cada dia da semana, e em que ordem
@@ -633,7 +668,7 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
-/// Cada sincronização recebida do computador da empresa (pasta sync/ -> POST /sync/clientes)
+/// Cada sincronização recebida do computador da empresa (pasta sync/ -> POST /sync/clientes, com os clientes e as vendas)
 model ErpSync {
   id               String    @id @default(cuid())
   kind             String    @default("CLIENTES")
@@ -652,6 +687,11 @@ model ErpSync {
   located          Int       @default(0)
   /// Clientes do ERP ativos e sem localização depois da sincronização
   unlocated        Int
+  /// Vendas guardadas neste envio (vazio: o pacote veio sem as vendas, e ficaram as do envio anterior)
+  sales            Int?
+  /// Primeiro e último dia das vendas do pacote (o último é o último dia com venda na cópia do banco)
+  salesFrom        DateTime? @db.Date
+  salesTo          DateTime? @db.Date
   ip               String?
 
   @@index([kind, receivedAt])
