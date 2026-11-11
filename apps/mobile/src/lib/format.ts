@@ -1,6 +1,9 @@
 import { tones, type Tone } from './theme'
 import type { AuditStatus, ContestStatus, PhotoType, RequestStatus, Role, TaskRecurrence, Visit, VisitModule, VisitOrigin, VisitStatus } from './types'
 
+/** Mínimo de caracteres das justificativas (reprovar foto, conferência incorreta, negar contestação), igual ao painel. */
+export const MIN_JUSTIFICATION = 5
+
 export const photoTypeLabels: Record<PhotoType, string> = {
   FACHADA: 'Fachada',
   ANTES: 'Antes',

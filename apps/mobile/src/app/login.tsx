@@ -1,12 +1,18 @@
+import { Image } from 'expo-image'
 import { Redirect } from 'expo-router'
 import { useState } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native'
+import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Banner, Button, Field, LoadingView, styles } from '@/components/ui'
+import { Banner, Button, Field, LoadingView, styles, TextAction } from '@/components/ui'
 import { errorMessage } from '@/lib/api'
 import { homeFor, useAuth } from '@/lib/auth'
 import { apiUrl, defaultApiUrl, normalizeUrl, saveApiUrl } from '@/lib/config'
-import { colors, space } from '@/lib/theme'
+import { colors, sizes, space } from '@/lib/theme'
+
+/** Assinatura do kit de marca (fundo claro). */
+const SIGNATURE = require('../../assets/marca/effex-trade-assinatura.png')
+/** Proporção do arquivo da assinatura (1600 x 224). */
+const SIGNATURE_RATIO = 1600 / 224
 
 export default function Login() {
   const { status, user, login } = useAuth()
@@ -52,25 +58,29 @@ export default function Login() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.fundo }}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: space.xl, gap: space.lg, flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
-          <View style={{ gap: 4, marginBottom: space.md }}>
-            <Text style={{ fontSize: 30, fontWeight: '800', color: colors.primary }}>EFFEX Trade</Text>
+          <View style={{ gap: space.sm, marginBottom: space.md }}>
+            <Image
+              source={SIGNATURE}
+              accessibilityLabel="EFFEX Trade"
+              style={{ width: '100%', maxWidth: sizes.assinatura, aspectRatio: SIGNATURE_RATIO }}
+              contentFit="contain"
+            />
             <Text style={styles.muted}>Promotoria de vendas</Text>
           </View>
 
           <Field label="Login" value={loginName} onChangeText={setLoginName} autoCapitalize="none" autoCorrect={false} placeholder="seu.login" returnKeyType="next" />
           <Field label="Senha" value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••" returnKeyType="go" onSubmitEditing={submit} />
           {error ? <Banner tone="danger" text={error} /> : null}
-          <Button title="Entrar" onPress={submit} loading={busy} disabled={!loginName.trim() || !password} />
+          <Button title="Entrar" onPress={submit} loading={busy} disabled={!loginName.trim() || !password} missing="Preencha o login e a senha" />
 
-          <View style={{ marginTop: space.lg, gap: space.sm }}>
-            <Pressable onPress={() => setEditingServer((v) => !v)}>
-              <Text style={styles.muted}>
-                Servidor: <Text style={{ color: colors.text }}>{apiUrl()}</Text> <Text style={{ color: colors.primary, fontWeight: '600' }}>{editingServer ? 'fechar' : 'alterar'}</Text>
-              </Text>
-            </Pressable>
+          <View style={{ marginTop: space.lg, gap: space.xs }}>
+            <Text style={styles.muted}>
+              Servidor: <Text style={{ color: colors.texto }}>{apiUrl()}</Text>
+            </Text>
+            <TextAction title={editingServer ? 'Fechar' : 'Alterar servidor'} onPress={() => setEditingServer((v) => !v)} style={{ alignSelf: 'flex-start' }} />
             {editingServer ? (
               <View style={{ gap: space.sm }}>
                 <Field value={server} onChangeText={setServer} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="http://192.168.0.10:3333" hint={`Padrão: ${defaultApiUrl()}`} />

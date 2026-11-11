@@ -33,7 +33,7 @@ export function AccountScreen({ extra }: { extra?: React.ReactNode }) {
   return (
     <Screen>
       <Card>
-        <Text style={styles.title}>{user.name}</Text>
+        <Text style={styles.sectionTitle}>{user.name}</Text>
         <Muted>
           {roleLabels[user.role]} · login {user.login}
         </Muted>
@@ -46,12 +46,19 @@ export function AccountScreen({ extra }: { extra?: React.ReactNode }) {
         <Field label="Senha atual" value={current} onChangeText={setCurrent} secureTextEntry />
         <Field label="Nova senha" value={next} onChangeText={setNext} secureTextEntry hint="Mínimo de 6 caracteres" />
         {msg ? <Banner tone={msg.ok ? 'success' : 'danger'} text={msg.text} /> : null}
-        <Button title="Salvar nova senha" variant="secondary" onPress={changePassword} loading={busy} disabled={!current || next.length < 6} />
+        <Button
+          title="Salvar nova senha"
+          variant="secondary"
+          onPress={changePassword}
+          loading={busy}
+          disabled={!current || next.length < 6}
+          missing={!current ? 'Digite a senha atual' : 'A nova senha precisa de pelo menos 6 caracteres'}
+        />
       </Card>
       <AppVersionCard />
       <Button
         title="Sair"
-        variant="danger"
+        variant="exit"
         onPress={() =>
           Alert.alert('Sair do app?', user.role === 'PROMOTOR' ? 'O envio da sua localização será interrompido.' : undefined, [
             { text: 'Cancelar', style: 'cancel' },

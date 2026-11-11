@@ -2,14 +2,14 @@ import { Image } from 'expo-image'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Keyboard, RefreshControl, Text, View } from 'react-native'
-import { Badge, Banner, Button, Card, CheckOption, EmptyState, Field, Muted, MultiPickerSheet, Row, Segmented, Sheet, styles } from '@/components/ui'
+import { Badge, Banner, Button, Card, CheckOption, DecisionPair, EmptyState, Field, Muted, MultiPickerSheet, Row, Segmented, Sheet, styles } from '@/components/ui'
 import { FilterChip } from '@/features/audit/FilterChip'
 import { PhotoViewer, useViewerTyping } from '@/features/PhotoViewer'
 import { api, errorMessage } from '@/lib/api'
 import { resolveUrl } from '@/lib/config'
 import { emitBadgesChanged } from '@/lib/events'
-import { auditStatusInfo, formatDate, formatTime, photoTypeLabels, todayLocal } from '@/lib/format'
-import { colors, radius, space } from '@/lib/theme'
+import { auditStatusInfo, formatDate, formatTime, MIN_JUSTIFICATION, photoPendingInfo, photoTypeLabels, todayLocal } from '@/lib/format'
+import { colors, radius, sizes, space } from '@/lib/theme'
 import type { Audit, AuditPhoto, Paged, PhotoType, Role } from '@/lib/types'
 
 type Status = 'pendentes' | 'auditadas' | 'todas'
@@ -147,17 +147,21 @@ export function PhotoAuditScreen() {
 
   const current = items.find((p) => p.id === selected) ?? null
 
+  // Depois de decidir, a próxima foto abre sozinha (em qualquer filtro), como no painel
   function onAudited(updated: AuditPhoto) {
     emitBadgesChanged()
+    const index = items.findIndex((p) => p.id === updated.id)
     if (status === 'pendentes') {
-      const index = items.findIndex((p) => p.id === updated.id)
+      // a decidida sai da fila; segue para a que ficou no lugar dela (ou a anterior, se era a última)
       const rest = items.filter((p) => p.id !== updated.id)
       setItems(rest)
       setTotal((t) => Math.max(0, t - 1))
-      // segue para a próxima foto pendente
       setSelected(rest[index]?.id ?? rest[index - 1]?.id ?? null)
+      if (!rest[index] && rest.length < total - 1) void load(page + 1, 'more')
     } else {
       setItems((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+      setSelected(items[index + 1]?.id ?? null)
+      if (!items[index + 1] && items.length < total) void load(page + 1, 'more')
     }
   }
 
@@ -190,26 +194,26 @@ export function PhotoAuditScreen() {
   )
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: colors.fundo }}>
       <FlatList
         data={items}
         keyExtractor={(p) => p.id}
-        contentContainerStyle={{ padding: space.lg, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl + space.sm }}
         ListHeaderComponent={header}
         ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(1, 'refresh')} colors={[colors.primary]} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(1, 'refresh')} colors={[colors.marinho]} />}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
           if (!loadingMore && !loading && items.length < total) void load(page + 1, 'more')
         }}
         ListEmptyComponent={
           loading ? (
-            <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+            <ActivityIndicator color={colors.marinho} style={{ marginTop: space.xxl + space.sm }} />
           ) : (
             <EmptyState title={status === 'pendentes' ? 'Nenhuma foto para auditar' : 'Nenhuma foto encontrada'} text="Puxe para baixo para atualizar." />
           )
         }
-        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginTop: space.md }} /> : undefined}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.marinho} style={{ marginTop: space.md }} /> : undefined}
         renderItem={({ item }) => <PhotoRow photo={item} onPress={() => setSelected(item.id)} />}
       />
 
@@ -336,19 +340,23 @@ function PhotoRow({ photo, onPress }: { photo: AuditPhoto; onPress: () => void }
   const mine = photo.myAudit ? auditStatusInfo[photo.myAudit.status] : null
   return (
     <Card onPress={onPress} style={{ flexDirection: 'row', gap: space.md, padding: space.md }}>
-      <Image source={{ uri: resolveUrl(photo.url) }} style={{ width: 84, height: 84, borderRadius: radius.sm, backgroundColor: colors.neutralSoft }} contentFit="cover" />
-      <View style={{ flex: 1, gap: 3 }}>
-        <Text style={[styles.text, { fontWeight: '700' }]} numberOfLines={1}>
+      <Image
+        source={{ uri: resolveUrl(photo.url) }}
+        style={{ width: sizes.miniatura, height: sizes.miniatura, borderRadius: radius.sm, backgroundColor: colors.neutroSuave }}
+        contentFit="cover"
+      />
+      <View style={{ flex: 1, gap: space.xs }}>
+        <Text style={styles.sectionTitle} numberOfLines={1}>
           {photo.client.name}
         </Text>
         <Muted>
-          {photoTypeLabels[photo.type]} · {formatDate(photo.visit.date)} {formatTime(photo.takenAt)}
+          {photoTypeLabels[photo.type]} · <Text style={styles.number}>{formatDate(photo.visit.date)} {formatTime(photo.takenAt)}</Text>
         </Muted>
         <Muted>Promotor: {photo.promotor.name}</Muted>
         <Row>
-          {mine ? <Badge label={`Você: ${mine.label}`} color={mine.color} bg={mine.bg} /> : <Badge label="Pendente" color={colors.warning} bg={colors.warningSoft} />}
+          {mine ? <Badge label={`Você: ${mine.label}`} tone={mine.tone} /> : <Badge label={photoPendingInfo.label} tone={photoPendingInfo.tone} />}
           {photo.otherAudits.map((a) => (
-            <Badge key={a.id} label={`${a.auditor.name.split(' ')[0]}: ${auditStatusInfo[a.status].label}`} color={auditStatusInfo[a.status].color} bg={colors.neutralSoft} />
+            <Badge key={a.id} label={`${a.auditor.name.split(' ')[0]}: ${auditStatusInfo[a.status].label}`} tone={auditStatusInfo[a.status].tone} />
           ))}
         </Row>
       </View>
@@ -361,8 +369,8 @@ function AuditLine({ audit, title }: { audit: Audit; title: string }) {
   return (
     <Card style={{ padding: space.md }}>
       <Row>
-        <Text style={[styles.text, { fontWeight: '700' }]}>{title}</Text>
-        <Badge label={info.label} color={info.color} bg={info.bg} />
+        <Text style={styles.optionText}>{title}</Text>
+        <Badge label={info.label} tone={info.tone} />
       </Row>
       {audit.justification ? <Text style={styles.text}>"{audit.justification}"</Text> : null}
       {audit.review ? (
@@ -417,19 +425,26 @@ function AuditPanel({ photo, onAudited }: { photo: AuditPhoto; onAudited: (p: Au
         multiline
         autoFocus
         placeholder="Ex.: foto escura, gôndola desorganizada"
-        hint="Mínimo de 5 caracteres"
-        style={{ minHeight: 80 }}
+        hint={`Mínimo de ${MIN_JUSTIFICATION} caracteres`}
       />
-      <Row>
+      <Row style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
         <Button title="Voltar" variant="secondary" onPress={stopRejecting} style={{ flex: 1 }} />
-        <Button title="Reprovar" variant="danger" onPress={() => submit('REPROVADA')} loading={busy === 'REPROVADA'} disabled={justification.trim().length < 5} style={{ flex: 1 }} />
+        <Button
+          title="Reprovar"
+          variant="reject"
+          onPress={() => submit('REPROVADA')}
+          loading={busy === 'REPROVADA'}
+          disabled={justification.trim().length < MIN_JUSTIFICATION}
+          missing={`Escreva pelo menos ${MIN_JUSTIFICATION} caracteres`}
+          style={{ flex: 1 }}
+        />
       </Row>
     </>
   ) : (
-    <Row>
-      <Button title="Reprovar" variant="danger" onPress={() => setRejecting(true)} style={{ flex: 1 }} />
-      <Button title="Aprovar" variant="success" onPress={() => submit('APROVADA')} loading={busy === 'APROVADA'} style={{ flex: 1 }} />
-    </Row>
+    <DecisionPair
+      negative={{ title: 'Reprovar', onPress: () => setRejecting(true), disabled: !!busy }}
+      positive={{ title: 'Aprovar', onPress: () => submit('APROVADA'), loading: busy === 'APROVADA' }}
+    />
   )
 
   return (

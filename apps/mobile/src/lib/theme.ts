@@ -165,6 +165,10 @@ export const sizes = {
   icone: 24,
   /** Ícone ao lado de texto */
   iconeComTexto: 20,
+  /** Miniatura de foto nas listas */
+  miniatura: 84,
+  /** Largura máxima da assinatura do EFFEX Trade no login */
+  assinatura: 280,
 }
 
 /** Sombra: só em janela, folha e barra fixa. Cartões se separam por borda. */
