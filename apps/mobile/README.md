@@ -56,7 +56,7 @@ As fotos chegam ao servidor e recebem uma faixa gravada na imagem com data e hor
 
 ## APK e atualizações
 
-O app é distribuído como APK (sem Play Store, só Android), gerado neste computador com `deploy\gerar-apk.ps1` (antes, uma vez: `deploy\preparar-android.ps1`, que instala o Android SDK e cria a chave de assinatura), na pasta `apk\` da raiz do projeto. O código novo chega aos celulares por atualização automática (expo-updates), servida pela própria API (`/updates`) e publicada com `deploy\atualizar-app.ps1`; APK novo só quando muda a parte nativa (o script avisa). A tela Conta (todos os perfis) mostra a versão e o código em uso e tem o botão **Buscar atualização**, que aplica na hora. Passo a passo, mensagem para os usuários e cuidados: [docs/app_android.md](../../docs/app_android.md).
+O app é distribuído como APK (sem Play Store, só Android), gerado neste computador com `deploy\gerar-apk.ps1` (antes, uma vez: `deploy\preparar-android.ps1`, que instala o Android SDK e cria a chave de assinatura), na pasta `apk\` da raiz do projeto. O código novo chega aos celulares por atualização automática (expo-updates), servida pela própria API (`/updates`) e publicada com `deploy\atualizar-app.ps1`; APK novo só quando muda a parte nativa (o script avisa). O `gerar-apk.ps1` publica o APK no servidor, e do build 3 em diante o app avisa "Nova versão do app", baixa e abre o instalador do Android (`src/lib/apkUpdate.ts`). A tela Conta (todos os perfis) mostra a versão e o código em uso e tem o botão **Buscar atualização**, que aplica na hora. Passo a passo, mensagem para os usuários e cuidados: [docs/app_android.md](../../docs/app_android.md).
 
 ## Telas
 

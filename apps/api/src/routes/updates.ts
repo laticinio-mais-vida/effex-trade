@@ -12,10 +12,31 @@ import { env } from '../env'
  *   republicada) e saem por /updates/files/ (app.ts), com URLs relativas a /updates/manifest.
  * - directive.json: volta todos para o código que veio no APK (rollBackToEmbedded).
  * Sem nada novo para o aparelho, a resposta é 204 e o app segue com o que tem.
+ *
+ * APK novo (quando muda a parte nativa): o deploy/publicar-apk.ps1 grava cada build em UPDATES_DIR/apk/android/<build>
+ * (info.json e o .apk, que sai por /updates/files/). O app compara o build mais recente com o instalado e oferece
+ * baixar e instalar (apps/mobile/src/lib/apkUpdate.ts).
  */
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/
 
 export async function updatesRoutes(app: FastifyInstance) {
+  // APK mais recente: 204 se nenhum foi publicado
+  app.get('/apk/android', async (_req, reply) => {
+    reply.header('cache-control', 'private, max-age=0')
+    const apk = await latestApk()
+    if (!apk) return reply.status(204).send()
+    return apk
+  })
+
+  // Link fixo para instalar do zero (mandar para um usuário novo): leva ao APK mais recente
+  app.get('/apk/android/baixar', async (_req, reply) => {
+    reply.header('cache-control', 'private, max-age=0')
+    const apk = await latestApk()
+    if (!apk) return reply.status(404).send({ error: 'Nenhum APK publicado.', code: 'NAO_ENCONTRADO' })
+    // Relativo: funciona com e sem o /api que o Caddy tira da frente
+    return reply.redirect(`../..${apk.path.slice('/updates'.length)}`)
+  })
+
   app.get('/manifest', async (req, reply) => {
     const platform = req.headers['expo-platform']
     const runtime = req.headers['expo-runtime-version']
@@ -62,6 +83,34 @@ async function latestEntry(folder: string) {
   } catch {
     return undefined // nenhuma publicação para este runtime
   }
+}
+
+/** Build mais recente com info.json válido. Pastas com ponto no início (ainda copiando) não são número e ficam de fora. */
+async function latestApk() {
+  const folder = join(env.updatesDir, 'apk', 'android')
+  let builds: string[]
+  try {
+    builds = (await readdir(folder, { withFileTypes: true })).filter((e) => e.isDirectory() && /^\d+$/.test(e.name)).map((e) => e.name)
+  } catch {
+    return null // nenhum APK publicado
+  }
+  builds.sort((a, b) => Number(b) - Number(a))
+  for (const build of builds) {
+    const info = await readJson(join(folder, build, 'info.json'))
+    if (!info || Number(info.build) !== Number(build) || typeof info.file !== 'string' || !SAFE_SEGMENT.test(info.file)) continue
+    return {
+      build: Number(build),
+      version: String(info.version ?? ''),
+      runtime: String(info.runtime ?? ''),
+      size: Number(info.size),
+      md5: String(info.md5 ?? ''),
+      sha256: String(info.sha256 ?? ''),
+      publishedAt: info.publishedAt ?? null,
+      message: info.message ?? null,
+      path: `/updates/files/apk/android/${build}/${info.file}`,
+    }
+  }
+  return null
 }
 
 async function readJson(path: string): Promise<any> {

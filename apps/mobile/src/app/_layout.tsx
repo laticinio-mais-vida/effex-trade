@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar'
 import { useEffect } from 'react'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { navigationTheme } from '@/components/navigation'
+import { ApkUpdatePrompt } from '@/features/ApkUpdate'
 import { AuthProvider } from '@/lib/auth'
 import { colors, fonts } from '@/lib/theme'
 import { AutoUpdates } from '@/lib/updates'
@@ -35,6 +36,7 @@ export default function RootLayout() {
         <AuthProvider>
           <StatusBar style="dark" />
           <AutoUpdates />
+          <ApkUpdatePrompt />
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.fundo } }} />
         </AuthProvider>
       </ThemeProvider>

@@ -155,7 +155,7 @@ Publicado em **https://effextrade.maisvida.cloud** (painel) e **https://effextra
 - `JWT_SECRET`, `SYNC_KEY`, `CORS_ORIGIN` (domínio do painel), `TRUST_PROXY=true` e `OSRM_URL=http://osrm:5000` ficam no `api.env` do servidor. As migrações rodam sozinhas quando a API sobe (`prisma migrate deploy`).
 - O servidor de rotas (OSRM) roda no mesmo VPS, como o serviço `osrm` do `deploy/docker-compose.yml`, só visível para a API; o mapa é preparado no próprio VPS e atualizado todo mês ([docs/publicacao_vps.md](docs/publicacao_vps.md#servidor-de-rotas-osrm)).
 - O painel usa a API pelo caminho relativo `/api` (`apps/admin/.env.production`), no mesmo domínio.
-- O app Android é um APK enviado aos usuários (sem Play Store), gerado no computador com `deploy\gerar-apk.ps1` na pasta `apk\`. O código novo chega por atualização automática servida pela própria API (`/api/updates`, publicações em `/opt/effex-trade/updates`), publicada com `deploy\atualizar-app.ps1`: [docs/app_android.md](docs/app_android.md).
+- O app Android é um APK enviado aos usuários (sem Play Store), gerado no computador com `deploy\gerar-apk.ps1` na pasta `apk\`. O código novo chega por atualização automática servida pela própria API (`/api/updates`, publicações em `/opt/effex-trade/updates`), publicada com `deploy\atualizar-app.ps1`. APK novo (parte nativa) o `gerar-apk.ps1` também publica no servidor, e do build 3 em diante o próprio app oferece instalar: [docs/app_android.md](docs/app_android.md).
 - A imagem da API instala a fonte DejaVu: a faixa de data e hora das fotos precisa de uma fonte no sistema.
 
 Ainda pendente:

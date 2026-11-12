@@ -89,7 +89,7 @@ RAG. **Não mude fuso, firewall nem portas.**
 | Código da API (a versão anterior fica em `api.anterior`) | `/opt/effex-trade/api` |
 | Painel montado | `/opt/effex-trade/web` |
 | Fotos | `/opt/effex-trade/uploads` |
-| Atualizações do app (enviadas por `deploy\atualizar-app.ps1`, veja [app_android.md](app_android.md)) | `/opt/effex-trade/updates` |
+| Atualizações do app (enviadas por `deploy\atualizar-app.ps1`) e APKs (por `deploy\publicar-apk.ps1`, em `updates/apk/android`); veja [app_android.md](app_android.md) | `/opt/effex-trade/updates` |
 | Segredos da API: `DATABASE_URL`, `JWT_SECRET`, `SYNC_KEY`, `CORS_ORIGIN`, `TRUST_PROXY`, `TZ_APP` (e `OSRM_URL`, o servidor de rotas) | `/opt/effex-trade/api.env` |
 | Servidor de rotas: mapa (`dados/atual`) e `preparar-mapa.sh` (veja [Servidor de rotas](#servidor-de-rotas-osrm)) | `/opt/effex-trade/osrm` |
 | Senha do banco | `/opt/effex-trade/banco.env` |

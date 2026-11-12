@@ -3,7 +3,8 @@
 O app dos promotores, vendedores e supervisores é instalado por um arquivo **APK**, sem Play Store. Só Android: iPhone
 não é atendido. O APK é gerado neste computador, e o código novo (telas, regras, textos) chega sozinho aos celulares
 pelas **atualizações automáticas**, servidas pela própria API do sistema. Não há conta em serviço externo. APK novo só
-é preciso quando muda a parte nativa do app.
+é preciso quando muda a parte nativa do app, e a partir do build 3 ele também chega pelo próprio app: o app avisa "Nova
+versão do app" e a pessoa toca em **Atualizar agora** e em **Instalar** (veja [APK novo pelo app](#apk-novo-pelo-app)).
 
 A primeira parte deste guia é a rotina de quem distribui o app. A [parte técnica](#parte-técnica) é para quem mexe no
 código ou no servidor.
@@ -23,20 +24,26 @@ de senhas): sem ela, nenhum APK novo instala por cima do antigo. Veja [Chave de 
 **A cada APK:**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File deploy\gerar-apk.ps1
+powershell -ExecutionPolicy Bypass -File deploy\gerar-apk.ps1 -Mensagem "o que mudou"
 ```
 
 O arquivo sai em `apk\EFFEX-Trade-<versão>-<build>.apk`, por exemplo `apk\EFFEX-Trade-0.1.0-1.apk`. O número do build
 sobe sozinho a cada APK. O primeiro build baixa o resto do SDK (alguns GB) e leva de 20 a 40 minutos; os seguintes,
-bem menos.
+bem menos. A mensagem (opcional) aparece no aviso de versão nova do app.
 
-Envie o arquivo aos usuários pelo WhatsApp (como documento) ou por um link do Google Drive, junto com a mensagem abaixo.
+No fim, ele publica o APK no servidor: quem tem o app a partir do build 3 recebe o aviso no próprio app. Com
+`-SemPublicar`, ele só gera (para publicar depois, veja [APK novo pelo app](#apk-novo-pelo-app)).
+
+Só quem ainda não tem o app, ou está no build 1 ou 2, precisa receber o app: mande o link
+**https://effextrade.maisvida.cloud/api/updates/apk/android/baixar** (sempre leva ao APK mais recente) ou o arquivo pelo
+WhatsApp (como documento), junto com a mensagem abaixo.
 
 ## Mensagem para os usuários
 
 > **Instalar o EFFEX Trade (só Android)**
 >
-> 1. Toque no arquivo **EFFEX-Trade-….apk** que você recebeu (no Drive: Baixar e depois abrir).
+> 1. Abra no celular o link que você recebeu e, quando terminar de baixar, toque em **Abrir** (ou toque no arquivo
+>    **EFFEX-Trade-….apk**, se recebeu o arquivo).
 > 2. Se aparecer que o celular não pode instalar apps desta fonte, toque em **Configurações**, ative **Permitir
 >    desta fonte** e volte.
 > 3. Toque em **Instalar**. Se o Play Protect avisar que não reconhece o app, toque em **Mais detalhes** e em
@@ -47,10 +54,13 @@ Envie o arquivo aos usuários pelo WhatsApp (como documento) ou por um link do G
 > 6. Promotor: em Configurações > Apps > EFFEX Trade > Bateria, escolha **Sem restrições** (nos celulares Samsung e
 >    Xiaomi, isso impede que o envio da localização pare com a tela desligada).
 >
-> O app se atualiza sozinho. Para atualizar na hora: tela **Conta** > **Buscar atualização**.
+> O app se atualiza sozinho. Para atualizar na hora: tela **Conta** > **Buscar atualização**. Quando o app avisar
+> **Nova versão do app**, toque em **Atualizar agora** e, na tela do Android, em **Instalar**. Na primeira vez, o
+> Android pede para permitir que o EFFEX Trade instale apps: ative **Permitir desta fonte**, volte e toque em
+> **Atualizar agora** de novo. Depois de instalar, toque em **Abrir**.
 
-Para atualizar o APK (quando houver um novo), basta instalar o arquivo novo por cima do antigo: não precisa
-desinstalar, e o login continua.
+Quem está no build 1 ou 2 instala o build mais recente por cima, pelo link ou pelo arquivo: não precisa desinstalar, e o
+login continua. Do build 3 em diante, o APK novo chega pelo próprio app.
 
 ## Atualizações
 
@@ -88,12 +98,37 @@ menos uma vez antes da primeira atualização.
 
 Na dúvida, rode o `atualizar-app.ps1`: ele compara a parte nativa (o "runtime") com a dos APKs da pasta `apk\`.
 
-Com um APK novo: gere, envie a todos e só então publique atualizações. As atualizações publicadas depois vão só para o
-APK novo; quem ficar com o antigo continua funcionando com o último código que recebeu. A API precisa continuar
-aceitando o app antigo até todos instalarem o novo.
+Com um APK novo: gere (ele já publica) e só então publique atualizações. As atualizações publicadas depois vão só para o
+APK novo; quem ainda não instalou o novo continua funcionando com o último código que recebeu, e o aviso de versão nova
+continua aparecendo. A API precisa continuar aceitando o app antigo até todos instalarem o novo.
 
 Para mudar a versão mostrada no app (ex.: 0.1.0 → 0.2.0), mude `version` em `apps/mobile/app.json` antes de gerar o
 APK.
+
+### APK novo pelo app
+
+A partir do build 3, quando há no servidor um APK de build maior que o instalado, o app avisa numa folha **Nova versão do
+app**, ao abrir e ao voltar para ele (no máximo a cada 30 minutos). O aviso só aparece nas telas de abas e no login,
+nunca no meio de um atendimento. **Fechar** esconde o aviso por 4 horas; a tela **Conta** mostra o botão o tempo todo.
+
+1. **Atualizar agora** baixa o APK (cerca de 50 MB: o aviso pede o Wi-Fi) e confere o tamanho e o MD5.
+2. O Android abre a tela de instalação: tocar em **Instalar** (ou **Atualizar**). Na primeira vez, ele pede para
+   permitir que o EFFEX Trade instale apps: **Permitir desta fonte**, voltar e tocar em **Atualizar agora** de novo (o
+   APK já baixado não é baixado outra vez).
+3. O Android fecha o app e instala; tocar em **Abrir**. Login, dados e posições ainda não enviadas continuam, e o envio da
+   localização do promotor volta quando o app abre.
+
+Fora da Play Store o Android sempre pede o toque em **Instalar**: não existe atualização de APK sem nenhum toque.
+
+Para publicar um APK já gerado (o envio do `gerar-apk.ps1` falhou, ou ele foi gerado com `-SemPublicar`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\publicar-apk.ps1 -Mensagem "o que mudou"
+```
+
+Ele pega o APK de build maior da pasta `apk\` (ou o de `-Apk caminho`), confere a assinatura e lê a versão e o build de
+dentro do APK. Não troca um build que já está no servidor por outro arquivo. Não dá para voltar a um build menor (o
+Android não instala por cima um build mais antigo): para desfazer, corrija e gere um build novo.
 
 ### Desfazer uma atualização ruim
 
@@ -120,7 +155,10 @@ celulares recebem isso como uma atualização qualquer.
 | Atualização automática e botão (no app) | `apps/mobile/src/lib/updates.ts`, `apps/mobile/src/features/AppVersionCard.tsx` |
 | Servidor das atualizações (protocolo expo-updates v1) | `apps/api/src/routes/updates.ts` (`/updates/manifest`) e `apps/api/src/app.ts` (`/updates/files/`) |
 | Publicações no VPS (montada só para leitura na API, `UPDATES_DIR`) | `/opt/effex-trade/updates/android/<runtime>/<publicação>/` |
-| Scripts | `deploy/preparar-android.ps1`, `deploy/gerar-apk.ps1`, `deploy/atualizar-app.ps1`, `deploy/montar-atualizacao.mjs`, `deploy/app-comum.ps1` |
+| APK novo pelo app (no app) | `apps/mobile/src/lib/apkUpdate.ts`, `apps/mobile/src/features/ApkUpdate.tsx` |
+| Servidor dos APKs | `apps/api/src/routes/updates.ts` (`/updates/apk/android` e o link fixo `/updates/apk/android/baixar`) |
+| APKs publicados no VPS (ficam os 3 builds mais recentes) | `/opt/effex-trade/updates/apk/android/<build>/` (o `.apk` e o `info.json`) |
+| Scripts | `deploy/preparar-android.ps1`, `deploy/gerar-apk.ps1`, `deploy/publicar-apk.ps1`, `deploy/atualizar-app.ps1`, `deploy/montar-atualizacao.mjs`, `deploy/app-comum.ps1` |
 | Chave de assinatura | `Documentos\EFFEX Trade - chave do app` (`effex-trade.jks` e `chave.properties`) |
 | APKs gerados (fora do git) | `apk/` |
 | Cópia usada no build (cache, pode ser apagada) | `C:\effex-apk` |
@@ -136,7 +174,9 @@ biblioteca no nome dos arquivos intermediários. Por isso a cópia fica num cami
 `-Pexpo.android.cmakeObjectPathMax=250`, para o CMake trocar a parte longa desses nomes por um hash (o Expo usa 1024,
 que só funciona com caminho longo habilitado no Windows). Antes, ele calcula
 o runtime no projeto e grava esse mesmo valor no APK (`EXPO_UPDATES_FINGERPRINT_OVERRIDE`); no fim, confere o runtime
-gravado (`assets/fingerprint`) e a assinatura (`apksigner`). Se o build falhar, o número do build volta.
+gravado (`assets/fingerprint`), a assinatura (`apksigner`) e o build (`aapt2`). Se o build falhar, o número do build
+volta. Depois ele chama o `publicar-apk.ps1`; se só a publicação falhar, o APK e o número do build ficam, e basta rodar o
+`publicar-apk.ps1`.
 
 ### Como a atualização funciona
 
@@ -148,6 +188,14 @@ Cada publicação fica numa pasta própria, com nome começando pela data e hora
 `manifest.json` (ou o `directive.json`, na volta ao código do APK), o código, as imagens e o `publicacao.json` (mensagem,
 data e quem publicou, só para consulta). O script extrai numa pasta com ponto no início, que a API ignora, e só então
 renomeia, então o celular nunca vê uma publicação pela metade. Ficam as 15 mais recentes de cada runtime.
+
+O APK novo segue outro caminho. `GET /api/updates/apk/android` devolve o build mais recente publicado (do `info.json`:
+build, versão, runtime, tamanho, MD5, SHA-256 e mensagem), ou `204` se não há nenhum. O app compara com o build instalado
+(`versionCode`), baixa de `/api/updates/files/apk/android/<build>/...` para o cache e confere tamanho e MD5. Então abre o
+instalador do Android (`ACTION_VIEW` com o endereço `content://` do expo-file-system, pelo expo-intent-launcher, e a
+permissão `REQUEST_INSTALL_PACKAGES`). O Android só instala por cima se a chave for a mesma do app instalado. O APK
+baixado é apagado quando o app fica em dia. O `publicar-apk.ps1` envia para uma pasta com ponto, que a API ignora, e só
+então renomeia.
 
 O APK e as atualizações não leem arquivos `.env`: o endereço da API fica no código. O `.env` local continua valendo no
 Expo Go, e a tela de login ainda permite trocar o servidor.
@@ -188,6 +236,8 @@ Referência: https://developer.android.com/developer-verification
 - Não renomeie `LOCATION_TASK` (`src/lib/tracking.ts`): o Android guarda a tarefa de localização por esse nome.
 - Não peça permissões de SMS, leitura de notificações ou acessibilidade: o Play Protect bloqueia APK instalado fora de
   loja que as pede.
+- Não tire a permissão `REQUEST_INSTALL_PACKAGES` (`app.json`) nem o `expo-intent-launcher`: sem eles o app não instala
+  o APK novo, e todos voltam a precisar receber o arquivo.
 - Não rode `npx expo prebuild` em `apps/mobile`: o build usa a cópia em `C:\effex-apk`, e os scripts param se
   `apps/mobile/android` existir.
 - Novas telas de fluxo (onde reiniciar perderia uma foto ou texto) ficam fora de `SAFE_ROUTES` em
@@ -200,6 +250,8 @@ Referência: https://developer.android.com/developer-verification
 | Problema | O que fazer |
 |---|---|
 | "App não instalado" ao instalar por cima | O APK é mais antigo que o instalado (build menor) ou foi assinado com outra chave. Use o APK mais novo de `apk\`. |
+| O app não avisa "Nova versão do app" | Só a partir do build 3. Abra `https://effextrade.maisvida.cloud/api/updates/apk/android` no navegador: deve mostrar o build novo (senão, rode `publicar-apk.ps1`). O aviso só aparece nas abas e some por 4 horas no Fechar; a tela Conta mostra sempre. |
+| "Atualizar agora" baixa, mas não instala | Se o Android pediu "Permitir desta fonte", ative, volte e toque em Atualizar agora de novo. "App não instalado": APK de outra chave. |
 | Conta mostra "Ativo só com o app aberto" | A localização não está em "Permitir o tempo todo": Configurações > Apps > EFFEX Trade > Permissões > Localização. |
 | A posição para de chegar com a tela desligada | Bateria do app em "Sem restrições" (passo 6 da mensagem). |
 | `gerar-apk.ps1`: "Android SDK não preparado" ou "Chave de assinatura não encontrada" | Rode `preparar-android.ps1`; se o app já foi distribuído, restaure antes a cópia da pasta da chave. |

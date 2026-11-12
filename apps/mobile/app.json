@@ -32,7 +32,10 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 2
+      "permissions": [
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ],
+      "versionCode": 3
     },
     "web": {
       "favicon": "./assets/favicon.png"

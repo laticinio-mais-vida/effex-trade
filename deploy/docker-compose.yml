@@ -2,7 +2,7 @@
 #   api/      código da API (enviado por deploy/publicar.ps1)     api.env    segredos da API (só no servidor)
 #   web/      painel já montado (apps/admin/dist)                 banco.env  senha do banco (só no servidor)
 #   uploads/  fotos                                               deploy/    esta pasta
-#   updates/  atualizações do app (enviadas por deploy/atualizar-app.ps1)
+#   updates/  atualizações do app (enviadas por deploy/atualizar-app.ps1) e APKs (apk/android, por deploy/publicar-apk.ps1)
 #   osrm/     servidor de rotas: mapa (dados/) e preparar-mapa.sh
 # Nenhuma porta é publicada: o Caddy do app-promotoria (rede app-promotoria_estoque_network) faz o HTTPS de
 # effextrade.maisvida.cloud e encaminha /api/* para effex_api:3333 e o resto para effex_web:80. O banco e o servidor de
@@ -21,7 +21,7 @@ services:
       UPDATES_DIR: /data/updates
     volumes:
       - ../uploads:/data/uploads
-      - ../updates:/data/updates:ro  # a API só lê; quem grava é o atualizar-app.ps1, pelo ssh
+      - ../updates:/data/updates:ro  # a API só lê; quem grava são o atualizar-app.ps1 e o publicar-apk.ps1, pelo ssh
     mem_limit: 512m
     depends_on:
       banco:

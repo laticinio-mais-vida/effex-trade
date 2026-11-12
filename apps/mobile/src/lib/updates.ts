@@ -16,7 +16,7 @@ const CHECK_EVERY_MS = 30 * 60_000
 /** Tempo mínimo em segundo plano para reiniciar sozinho: a volta da câmera leva segundos. */
 const APPLY_AFTER_BACKGROUND_MS = 15 * 60_000
 /** Abas e login, onde reiniciar não perde nada. Visita, encerramento e pedidos ficam de fora (foto em envio, texto digitado). */
-const SAFE_ROUTES = new Set([
+export const SAFE_ROUTES = new Set([
   '/',
   '/login',
   '/promotor',
