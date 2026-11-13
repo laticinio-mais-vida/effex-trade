@@ -30,6 +30,7 @@ import {
   visitStatusInfo,
 } from '@/lib/format'
 import { distanceMeters, getPreciseLocation, getQuickLocation, LocationError, type CurrentLocation } from '@/lib/location'
+import { shrinkPhoto } from '@/lib/photo'
 import { borders, colors, elevated, sizes, space, type } from '@/lib/theme'
 import type { CheckinResult, Photo, PhotoType, Visit, VisitStep, VisitTask } from '@/lib/types'
 import { useQuery } from '@/lib/useQuery'
@@ -56,9 +57,10 @@ async function takePicture(): Promise<Asset | null> {
     Alert.alert('Câmera bloqueada', 'Permita o uso da câmera nas configurações do celular para registrar as fotos.')
     return null
   }
-  const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.6, allowsEditing: false, exif: false })
+  // Qualidade 1: a câmera só copia o arquivo, sem recomprimir a foto inteira; quem reduz e comprime é o shrinkPhoto
+  const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1, allowsEditing: false, exif: false })
   if (result.canceled || !result.assets?.[0]) return null
-  return result.assets[0]
+  return shrinkPhoto(result.assets[0])
 }
 
 /**
