@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import { parseCsv } from '../format'
-import type { Paged, Product } from '../types'
+import { fmtDate, fmtDateTime, parseCsv } from '../format'
+import type { ErpSyncStatus, Paged, Product } from '../types'
 import { Empty, ErrorBox, Field, Loading, Modal, PageHead, Pager } from '../ui'
 
 const PAGE_SIZE = 50
@@ -26,7 +26,7 @@ export function ProductsPage() {
   const [debounced, setDebounced] = useState('')
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<Product | 'new' | null>(null)
-  const [importing, setImporting] = useState<'produtos' | 'mix' | null>(null)
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -38,28 +38,37 @@ export function ProductsPage() {
 
   const query = useQuery({
     queryKey: ['products', debounced, page],
-    queryFn: () => api<Paged<Product>>('/admin/products', { query: { search: debounced, page, pageSize: PAGE_SIZE } }),
+    queryFn: () => api<Paged<Product> & { erpActive: boolean }>('/admin/products', { query: { search: debounced, page, pageSize: PAGE_SIZE } }),
   })
+  const sync = useQuery({ queryKey: ['erp-sync'], queryFn: () => api<ErpSyncStatus>('/admin/clients/sync-status') })
+  const sales = sync.data?.sales
+  // Depois que os produtos vêm do ERP, o cadastro e a importação manuais fecham (como os clientes)
+  const manual = query.data ? !query.data.erpActive : false
 
   return (
     <div>
       <PageHead
         title="Produtos e mix"
-        description="O mix é o que cada cliente compra. No atendimento, o promotor marca os produtos que aparecem nas fotos de depois; o que é do mix e não aparece, ele confirma como ruptura."
+        description="O mix é o que cada cliente compra: os produtos das vendas dele nos últimos 2 meses, que chegam do ERP com a sincronização dos clientes. No atendimento, o promotor marca os produtos que aparecem nas fotos de depois; o que é do mix e não aparece, ele confirma como ruptura."
         actions={
-          <>
-            <button className="btn" onClick={() => setImporting('mix')}>
-              Importar mix dos clientes
-            </button>
-            <button className="btn" onClick={() => setImporting('produtos')}>
-              Importar produtos
-            </button>
-            <button className="btn primary" onClick={() => setEditing('new')}>
-              Novo produto
-            </button>
-          </>
+          manual ? (
+            <>
+              <button className="btn" onClick={() => setImporting(true)}>
+                Importar produtos
+              </button>
+              <button className="btn primary" onClick={() => setEditing('new')}>
+                Novo produto
+              </button>
+            </>
+          ) : undefined
         }
       />
+      {query.data?.erpActive && (
+        <p className="small muted" style={{ margin: 'calc(var(--esp-2) * -1) 0 var(--esp-4)' }}>
+          {sales ? `Mix das vendas de ${fmtDate(sales.from)} a ${fmtDate(sales.to)}, atualizado em ${fmtDateTime(sales.at)}. ` : ''}
+          Código e nome vêm do ERP. Desative o produto que o promotor não deve procurar na gôndola (ex.: vendido só para o balcão): ele sai do mix de todos os clientes.
+        </p>
+      )}
       <div className="toolbar">
         <Field label="Buscar">
           <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nome, código, marca ou categoria" style={{ minWidth: 280 }} />
@@ -67,7 +76,13 @@ export function ProductsPage() {
       </div>
       {query.isLoading && <Loading />}
       <ErrorBox error={query.error} />
-      {query.data && query.data.items.length === 0 && <Empty>Nenhum produto cadastrado. Importe o catálogo ou cadastre o primeiro produto.</Empty>}
+      {query.data && query.data.items.length === 0 && (
+        <Empty>
+          {debounced
+            ? 'Nenhum produto encontrado.'
+            : 'Nenhum produto cadastrado. Os produtos e o mix chegam com as vendas, quando a sincronização dos clientes com o ERP roda no computador da empresa (sync\\sincronizar-clientes.bat).'}
+        </Empty>
+      )}
       {query.data && query.data.items.length > 0 && (
         <div className="panel table-wrap">
           <table className="data">
@@ -87,6 +102,11 @@ export function ProductsPage() {
                   <td className="num">{p.code}</td>
                   <td>
                     <strong>{p.name}</strong>
+                    {p.erpId != null && (
+                      <span className="chip" title={`Produto vindo do ERP (código interno ${p.erpId})`} style={{ marginLeft: 'var(--esp-2)' }}>
+                        ERP
+                      </span>
+                    )}
                   </td>
                   <td>{p.brand ?? <span className="muted">—</span>}</td>
                   <td>{p.category ?? <span className="muted">—</span>}</td>
@@ -100,14 +120,14 @@ export function ProductsPage() {
       )}
       {query.data && <Pager page={page} pageSize={PAGE_SIZE} total={query.data.total} onPage={setPage} />}
       {editing && <ProductForm product={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
-      {importing === 'produtos' && <ImportProducts onClose={() => setImporting(null)} />}
-      {importing === 'mix' && <ImportMix onClose={() => setImporting(null)} />}
+      {importing && <ImportProducts onClose={() => setImporting(false)} />}
     </div>
   )
 }
 
 function ProductForm({ product, onClose }: { product: Product | null; onClose: () => void }) {
   const qc = useQueryClient()
+  const fromErp = product?.erpId != null
   const [form, setForm] = useState({
     code: product?.code ?? '',
     name: product?.name ?? '',
@@ -140,22 +160,27 @@ function ProductForm({ product, onClose }: { product: Product | null; onClose: (
         </>
       }
     >
+      {fromErp && (
+        <p className="small muted" style={{ margin: '0 0 var(--esp-3)' }}>
+          Código e nome vêm do ERP (código interno {product!.erpId}): altere lá e rode a sincronização. Aqui mudam a marca, a categoria e a situação.
+        </p>
+      )}
       <div className="form-grid">
         <Field label="Código no ERP">
-          <input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+          <input className="input" value={form.code} disabled={fromErp} onChange={(e) => setForm({ ...form, code: e.target.value })} />
         </Field>
         <Field label="Marca">
           <input className="input" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} />
         </Field>
         <Field label="Nome do produto" className="full">
-          <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex.: Iogurte Morango 170g" />
+          <input className="input" value={form.name} disabled={fromErp} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex.: Iogurte Morango 170g" />
         </Field>
         <Field label="Categoria" className="full">
           <input className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
         </Field>
         <label className="check full">
           <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
-          Produto ativo (inativos não aparecem para o promotor nem entram no contraste de ruptura)
+          Produto ativo (desativado, ele sai do mix de todos os clientes: não aparece para o promotor nem entra no contraste de ruptura)
         </label>
       </div>
       <ErrorBox error={save.error} />
@@ -208,85 +233,6 @@ function ImportProducts({ onClose }: { onClose: () => void }) {
         {run.data && (
           <div className="alert ok">
             {run.data.created} produtos cadastrados e {run.data.updated} atualizados.
-          </div>
-        )}
-        <ErrorBox error={run.error} />
-      </div>
-    </Modal>
-  )
-}
-
-type MixClient = { id: string | null; name: string | null; legalName: string | null; city: string | null; state: string | null }
-const mixClientKey = (c: MixClient) => c.id ?? [c.name, c.legalName, c.city, c.state].join('|').toLowerCase()
-
-function ImportMix({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient()
-  const [rows, setRows] = useState<{ client: MixClient; productCode: string }[]>([])
-  const [problem, setProblem] = useState<string | null>(null)
-  const run = useMutation({
-    mutationFn: () =>
-      api<{ clients: number; rows: number; unknownClients: string[]; unknownProducts: string[] }>('/admin/mix/import', { method: 'POST', body: { rows } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['products'] })
-      qc.invalidateQueries({ queryKey: ['client-mix'] })
-    },
-  })
-  const onFile = async (file: File) => {
-    run.reset()
-    const { header, rows } = readTable(await file.text())
-    const byId = header.includes('cliente_id')
-    const missing = [...(byId ? [] : ['nome_fantasia', 'cidade', 'uf'].filter((c) => !header.includes(c))), ...(header.includes('produto_codigo') ? [] : ['produto_codigo'])]
-    setProblem(missing.length ? `Faltam colunas: ${missing.join(', ')}${byId ? '' : ' (ou use a coluna cliente_id)'}.` : null)
-    setRows(
-      missing.length
-        ? []
-        : rows
-            .filter((r) => r.produto_codigo && (r.cliente_id || r.nome_fantasia || r.razao_social))
-            .map((r) => ({
-              client: { id: r.cliente_id || null, name: r.nome_fantasia || null, legalName: r.razao_social || null, city: r.cidade || null, state: r.uf || null },
-              productCode: r.produto_codigo!,
-            })),
-    )
-  }
-  const clients = new Set(rows.map((r) => mixClientKey(r.client))).size
-  return (
-    <Modal
-      title="Importar mix dos clientes"
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn" onClick={onClose}>
-            {run.data ? 'Fechar' : 'Cancelar'}
-          </button>
-          {!run.data && (
-            <button className="btn primary" disabled={rows.length === 0 || run.isPending} onClick={() => run.mutate()}>
-              Importar mix de {clients} clientes
-            </button>
-          )}
-        </>
-      }
-    >
-      <div className="stack">
-        <p style={{ margin: 0 }}>
-          Uma linha para cada produto que o cliente compra no período. Para cada cliente que aparece na planilha, o mix anterior é trocado pelo da planilha; os demais clientes não mudam.
-        </p>
-        <code className="small" style={{ background: 'var(--fundo)', padding: 'var(--esp-3)', borderRadius: 'var(--raio-selo)' }}>nome_fantasia;cidade;uf;produto_codigo</code>
-        <p className="small muted" style={{ margin: 0 }}>
-          Com dois clientes de mesmo nome fantasia na cidade, inclua a coluna razao_social para desempatar. Também dá para usar a coluna cliente_id no lugar de
-          nome_fantasia, cidade e uf (o id está na planilha baixada em Clientes).
-        </p>
-        <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
-        {problem && <div className="alert">{problem}</div>}
-        {rows.length > 0 && !run.data && (
-          <p style={{ margin: 0 }}>
-            {rows.length} linhas lidas, {clients} clientes.
-          </p>
-        )}
-        {run.data && (
-          <div className={`alert ${run.data.unknownClients.length || run.data.unknownProducts.length ? '' : 'ok'}`}>
-            Mix atualizado em {run.data.clients} clientes ({run.data.rows} produtos no total).
-            {run.data.unknownClients.length > 0 && <div>Clientes não encontrados: {run.data.unknownClients.slice(0, 20).join(', ')}{run.data.unknownClients.length > 20 ? '…' : ''}</div>}
-            {run.data.unknownProducts.length > 0 && <div>Produtos não encontrados: {run.data.unknownProducts.slice(0, 20).join(', ')}{run.data.unknownProducts.length > 20 ? '…' : ''}</div>}
           </div>
         )}
         <ErrorBox error={run.error} />

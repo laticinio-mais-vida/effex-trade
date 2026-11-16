@@ -439,7 +439,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
         </div>
       </div>
       <ErrorBox error={save.error} />
-      {client && <ClientMix clientId={client.id} />}
+      {client && <ClientMix clientId={client.id} fromErp={client.erpId != null} />}
       {client?.erpId != null && <ClientErpSales clientId={client.id} />}
     </Modal>
   )
@@ -483,7 +483,7 @@ function ClientErpSales({ clientId }: { clientId: string }) {
                 <tr key={p.erpId}>
                   <td>
                     {p.name}
-                    <div className="small muted">código {p.erpId} no ERP</div>
+                    <div className="small muted">código {p.code ?? p.erpId} no ERP</div>
                   </td>
                   <td className="r">{fmtQuantity(p.quantity, p.unit)}</td>
                   <td className="r">{fmtMoney(p.value)}</td>
@@ -528,8 +528,11 @@ function ClientErpSales({ clientId }: { clientId: string }) {
   )
 }
 
-/** Mix do cliente: produtos que ele compra. Base do contraste de ruptura no atendimento. */
-function ClientMix({ clientId }: { clientId: string }) {
+/**
+ * Mix do cliente: produtos que ele compra, base do contraste de ruptura no atendimento. No cliente do ERP vem das vendas
+ * dos últimos 2 meses e muda a cada sincronização (só leitura); no cliente fora do ERP é editado aqui.
+ */
+function ClientMix({ clientId, fromErp }: { clientId: string; fromErp: boolean }) {
   const qc = useQueryClient()
   const query = useQuery({ queryKey: ['client-mix', clientId], queryFn: () => api<(ProductRef & { active: boolean })[]>(`/admin/clients/${clientId}/mix`) })
   const save = useMutation({
@@ -538,23 +541,35 @@ function ClientMix({ clientId }: { clientId: string }) {
   })
   const mix = query.data ?? []
   const ids = mix.map((p) => p.id)
+  const inactive = mix.filter((p) => !p.active).length
   return (
     <section className="stack" style={{ gap: 'var(--esp-3)', marginTop: 'var(--esp-5)', paddingTop: 'var(--esp-4)', borderTop: '1px solid var(--divisoria)' }}>
       <div>
-        <h3>Mix do cliente ({mix.length} produtos)</h3>
+        <h3>Mix do cliente ({mix.length - inactive} produtos)</h3>
         <p className="muted small" style={{ margin: 'var(--esp-1) 0 0' }}>
-          Produtos que este cliente compra. Os que não aparecerem nas fotos de depois serão confirmados pelo promotor como ruptura. Também dá para importar o mix de todos os clientes em Produtos e mix.
+          {fromErp
+            ? 'Os produtos que este cliente comprou nos últimos 2 meses, pelas vendas do ERP: a sincronização refaz o mix a cada envio. '
+            : 'Produtos que este cliente compra (cliente fora do ERP: o mix é editado aqui). '}
+          Os que não aparecerem nas fotos de depois o promotor confirma como ruptura.
+          {inactive > 0 && ' Os apagados estão desativados em Produtos e mix e ficam de fora.'}
         </p>
       </div>
-      <ProductPicker exclude={ids} onPick={(p) => save.mutate([...ids, p.id])} />
+      {!fromErp && <ProductPicker exclude={ids} onPick={(p) => save.mutate([...ids, p.id])} />}
       {query.isLoading && <Loading />}
       <div className="btn-row" style={{ gap: 'var(--esp-2)' }}>
         {mix.map((p) => (
-          <span key={p.id} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--esp-2)', padding: '3px var(--esp-1) 3px var(--esp-2)', opacity: p.active ? 1 : 0.6 }}>
+          <span
+            key={p.id}
+            className="chip"
+            title={p.active ? undefined : 'Produto desativado em Produtos e mix: fora do contraste de ruptura'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--esp-2)', padding: fromErp ? '3px var(--esp-2)' : '3px var(--esp-1) 3px var(--esp-2)', opacity: p.active ? 1 : 0.6 }}
+          >
             {p.code} · {p.name}
-            <button className="btn icon small" style={{ width: 22, minHeight: 22 }} aria-label={`Tirar ${p.name} do mix`} onClick={() => save.mutate(ids.filter((id) => id !== p.id))}>
-              ✕
-            </button>
+            {!fromErp && (
+              <button className="btn icon small" style={{ width: 22, minHeight: 22 }} aria-label={`Tirar ${p.name} do mix`} onClick={() => save.mutate(ids.filter((id) => id !== p.id))}>
+                ✕
+              </button>
+            )}
           </span>
         ))}
         {query.data && mix.length === 0 && <span className="muted small">Nenhum produto no mix: o promotor não terá rupturas a confirmar neste cliente.</span>}

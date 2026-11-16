@@ -8,7 +8,7 @@ import { parse, zDate } from '../lib/validate'
 import { syncErpClients } from '../services/erp-sync'
 
 /**
- * Recebe os clientes do ERP, com as vendas dos últimos 2 meses, mandados pelo computador da empresa
+ * Recebe os clientes do ERP, com as vendas dos últimos 2 meses (que montam o catálogo e o mix), mandados pelo computador da empresa
  * (sync/sincronizar-clientes.bat). Não usa login: o pacote vem assinado com HMAC-SHA256 da hora do envio e do hash do
  * corpo, com a SYNC_KEY que só o servidor e o sync/config.ini conhecem (o mesmo esquema do BI Mais Vida). A chave
  * nunca trafega.
@@ -28,11 +28,11 @@ const zText = z.string().max(500).nullish()
 /** Código do ERP (coluna INTEGER do Firebird) */
 const zErpCode = z.number().int().nonnegative().max(2_147_483_647)
 
-/** Vendas dos últimos 2 meses (services/erp-sales.ts). Período e datas são conferidos lá. */
+/** Vendas dos últimos 2 meses (services/erp-sales.ts), base do catálogo e do mix (services/erp-mix.ts). Período e datas são conferidos lá. */
 const syncSales = z.object({
   from: zDate,
   to: zDate,
-  products: z.array(z.object({ erpId: zErpCode, name: zText, unit: zText })).max(100_000),
+  products: z.array(z.object({ erpId: zErpCode, code: zText, name: zText, unit: zText })).max(100_000),
   list: z
     .array(
       z.object({

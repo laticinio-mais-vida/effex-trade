@@ -10,7 +10,8 @@ export type RequestStatus = 'PENDENTE' | 'APROVADA' | 'NEGADA' | 'CANCELADA'
 export type Ref = { id: string; name: string }
 
 export type ProductRef = { id: string; code: string; name: string; brand: string | null }
-export type Product = ProductRef & { category: string | null; active: boolean; mixClients: number }
+/** erpId: código interno no ERP (PRODUTOS.ID_PRODUTO); com ele, código e nome vêm do ERP. mixClients: clientes com o produto no mix */
+export type Product = ProductRef & { category: string | null; active: boolean; erpId: number | null; mixClients: number }
 
 /** Cidade atendida pelo usuário; sem cidade = a UF inteira. */
 export type Area = { state: string; city: string | null }
@@ -85,7 +86,8 @@ export type ClientSales = {
   total: number
   lastDate: string | null
   /** Do maior valor para o menor */
-  products: { erpId: number; name: string; unit: string | null; quantity: number; value: number; purchases: number; lastDate: string }[]
+  /** code: o código do produto no catálogo (PRODUTOS.CODIGO), o mesmo do mix */
+  products: { erpId: number; code: string | null; name: string; unit: string | null; quantity: number; value: number; purchases: number; lastDate: string }[]
   /** Da mais recente para a mais antiga */
   sales: { id: number; date: string; invoice: string | null; total: number; items: { erpId: number; name: string; unit: string | null; quantity: number; value: number }[] }[]
 }

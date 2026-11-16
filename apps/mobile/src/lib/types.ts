@@ -45,7 +45,7 @@ export interface Product {
   brand: string | null
 }
 
-/** Produto na lista de identificação: só os do mix do cliente (todos inMix); sem mix cadastrado vem o catálogo inteiro. */
+/** Produto na lista de identificação: só os do mix do cliente (todos inMix: o que ele comprou nos últimos 2 meses, pelo ERP); sem mix vem o catálogo inteiro. */
 export interface ProductOption extends Product {
   category: string | null
   inMix: boolean

@@ -1,21 +1,22 @@
 import { prisma, type Prisma } from '../db'
 import { fromDbDate, toDbDate } from '../lib/dates'
 import { badRequest } from '../lib/errors'
+import type { ErpProduct } from './erp-mix'
 
 /**
  * Vendas de cada cliente, vindas do ERP. O computador da empresa manda, no mesmo pacote dos clientes (pasta sync/), as
  * notas de venda a cliente não canceladas de 2 meses até o último dia com venda na cópia do banco, com os produtos de
  * cada uma. A cada envio as vendas guardadas são trocadas pelas do pacote: é uma cópia só leitura do ERP. Pacote sem
  * as vendas (a leitura delas falhou no computador, ou a sincronização é da versão anterior) mantém as do envio anterior.
- * Os produtos ficam com o código, o nome e a unidade do ERP, sem ligação com o catálogo de produtos e o mix.
+ * Os produtos das vendas guardadas formam o catálogo e o mix dos clientes (src/services/erp-mix.ts).
  */
 
 export type ErpSalesInput = {
   /** Primeiro e último dia do período (AAAA-MM-DD) */
   from: string
   to: string
-  /** Produtos que aparecem nas vendas (cadastro PRODUTOS do ERP) */
-  products: { erpId: number; name?: string | null; unit?: string | null }[]
+  /** Produtos que aparecem nas vendas (cadastro PRODUTOS do ERP). code: PRODUTOS.CODIGO (a sincronização anterior não manda) */
+  products: { erpId: number; code?: string | null; name?: string | null; unit?: string | null }[]
   list: {
     /** VENDAS.ID_VENDA */
     erpId: number
@@ -41,7 +42,8 @@ const realDate = (date: string) => {
 
 type SaleRow = { id: number; clientErpId: number; date: string; invoice: string | null; total: number }
 type ItemRow = { saleId: number; productErpId: number; productName: string; unit: string | null; quantity: number; value: number }
-export type NormalizedSales = { from: string; to: string; sales: SaleRow[]; items: ItemRow[] }
+/** products: os que aparecem nos itens, com o código do ERP (sem ele, o código interno) e o nome */
+export type NormalizedSales = { from: string; to: string; sales: SaleRow[]; items: ItemRow[]; products: ErpProduct[] }
 
 /** Confere o pacote e monta as linhas, sem gravar. O mesmo produto duas vezes numa nota vira uma linha, somada. */
 export function normalizeSales(input: ErpSalesInput): NormalizedSales {
@@ -50,7 +52,7 @@ export function normalizeSales(input: ErpSalesInput): NormalizedSales {
   if (toDbDate(to).getTime() - toDbDate(from).getTime() > MAX_PERIOD_DAYS * 86_400_000) {
     throw badRequest(`O período das vendas passa de ${MAX_PERIOD_DAYS} dias (${from} a ${to}).`, 'PERIODO_INVALIDO')
   }
-  const products = new Map(input.products.map((p) => [p.erpId, { name: clean(p.name, 200), unit: clean(p.unit, 20) }]))
+  const products = new Map(input.products.map((p) => [p.erpId, { code: clean(p.code, 40), name: clean(p.name, 200), unit: clean(p.unit, 20) }]))
   const seen = new Set<number>()
   const sales: SaleRow[] = []
   const items: ItemRow[] = []
@@ -87,7 +89,11 @@ export function normalizeSales(input: ErpSalesInput): NormalizedSales {
     }
     sales.push({ id: s.erpId, clientErpId: s.clientErpId, date: s.date, invoice: clean(s.invoice, 40), total: round(total, 2) })
   }
-  return { from, to, sales, items }
+  const sold = [...new Set(items.map((i) => i.productErpId))].map((erpId) => {
+    const p = products.get(erpId)
+    return { erpId, code: p?.code ?? String(erpId), name: p?.name ?? `Produto ${erpId}` }
+  })
+  return { from, to, sales, items, products: sold }
 }
 
 /**
@@ -111,6 +117,7 @@ export async function replaceSales(tx: Prisma.TransactionClient, input: Normaliz
     sales.push({ id: s.id, clientId, date: s.date, invoice: s.invoice, total: s.total })
   }
   const items = input.items.filter((i) => kept.has(i.saleId))
+  const sold = new Set(items.map((i) => i.productErpId))
 
   await tx.erpSaleItem.deleteMany({})
   await tx.erpSale.deleteMany({})
@@ -143,6 +150,8 @@ export async function replaceSales(tx: Prisma.TransactionClient, input: Normaliz
     /** Vendas de clientes fora do cadastro, que ficaram de fora */
     skipped: input.sales.length - sales.length,
     unknownClients: [...unknownClients],
+    /** Produtos das vendas guardadas: o catálogo do mix */
+    products: input.products.filter((p) => sold.has(p.erpId)),
   }
 }
 
@@ -182,13 +191,16 @@ export async function clientSales(clientId: string) {
       }
     }
   }
+  // Código do produto no catálogo (o PRODUTOS.CODIGO): o mesmo que aparece no mix
+  const catalog = await prisma.product.findMany({ where: { erpId: { in: [...products.keys()] } }, select: { erpId: true, code: true } })
+  const codeOf = new Map(catalog.map((p) => [p.erpId!, p.code]))
   return {
     period,
     count: sales.length,
     total: round(sales.reduce((sum, s) => sum + s.total, 0), 2),
     lastDate: sales[0] ? fromDbDate(sales[0].date) : null,
     products: [...products.values()]
-      .map((p) => ({ ...p, quantity: round(p.quantity, 3), value: round(p.value, 2) }))
+      .map((p) => ({ ...p, code: codeOf.get(p.erpId) ?? null, quantity: round(p.quantity, 3), value: round(p.value, 2) }))
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name)),
     sales: sales.map((s) => ({
       id: s.id,

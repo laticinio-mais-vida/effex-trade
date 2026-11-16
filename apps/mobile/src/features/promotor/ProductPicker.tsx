@@ -36,7 +36,8 @@ export function ProductPicker({
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
   const [items, setItems] = useState<ProductOption[]>([])
-  const [loading, setLoading] = useState(false)
+  // Começa carregando: na primeira abertura a lista vazia não pode passar por catálogo vazio antes da busca sair
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -109,7 +110,7 @@ export function ProductPicker({
             style={styles.input}
             autoCorrect={false}
           />
-          {noMix ? <Banner tone="warning" text="O mix deste cliente não está cadastrado: mostrando todos os produtos." /> : null}
+          {noMix ? <Banner tone="warning" text="Este cliente está sem mix (compras dos últimos 2 meses no ERP): mostrando todos os produtos." /> : null}
           {error ? <Banner tone="danger" text={error} /> : null}
         </View>
         <FlatList
@@ -117,14 +118,22 @@ export function ProductPicker({
           keyExtractor={(p) => p.id}
           contentContainerStyle={{ padding: space.lg, gap: space.sm }}
           keyboardShouldPersistTaps="handled"
+          // No Android o Modal não encolhe com o teclado, que cobre o botão de enviar: rolar a lista fecha o teclado
+          keyboardDismissMode="on-drag"
           ListHeaderComponent={
             !debounced && !noMix && mixCount > 0 ? <Muted style={{ marginBottom: space.xs }}>{mixCount} produtos que este cliente compra</Muted> : undefined
           }
           ListEmptyComponent={
             loading ? (
               <ActivityIndicator color={colors.marinho} style={{ marginTop: space.xl }} />
+            ) : error ? undefined : debounced ? (
+              <Muted style={{ textAlign: 'center', marginTop: space.xl }}>Nenhum produto encontrado para "{debounced}". Tente outra parte do nome ou o código.</Muted>
             ) : (
-              <Muted style={{ textAlign: 'center', marginTop: space.xl }}>Nenhum produto encontrado.</Muted>
+              // Catálogo vazio: não há o que marcar, e com a sequência obrigatória a foto de depois não sai
+              <Banner
+                tone="warning"
+                text={`Nenhum produto cadastrado para marcar. Avise o supervisor: os produtos chegam do ERP, com a sincronização dos clientes.${required ? ' Enquanto isso, cancele e use "Não consigo fazer as fotos: pedir dispensa", no fim da tela do atendimento.' : ''}`}
+              />
             )
           }
           renderItem={({ item }) => (

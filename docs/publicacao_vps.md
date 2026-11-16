@@ -16,12 +16,17 @@ Os clientes vêm da **cópia do banco do ERP**, a mesma que o BI Mais Vida lê
 2. A janela mostra o resumo, por exemplo:
 
    ```
-   11073 clientes no ERP (3141 ativos). Cópia do banco de 29/10/2026 às 08:58.
-   10149 vendas de 11/09/2026 a 11/11/2026: 2482 clientes, 51712 itens, R$ 12.492.643,80.
+   11121 clientes no ERP (3143 ativos, 2198 deles com localização). Cópia do banco de 16/11/2026 às 08:43.
+   10296 vendas de 16/09/2026 a 16/11/2026: 2498 clientes, 52614 itens, R$ 12.570.191,86.
    Sincronização concluída:
-     12 novos, 3 alterados, 1 inativados, 0 reativados
-     Vendas de 11/09/2026 a 11/11/2026 guardadas: 10149 vendas de 2482 clientes
+     12 novos, 47 alterados, 39 inativados, 4 reativados
+     Vendas de 16/09/2026 a 16/11/2026 guardadas: 10296 vendas de 2498 clientes
+     Produtos das vendas no catálogo: 29 (29 novos, 0 alterados)
+     Mix (o que cada cliente comprou no período): 2498 clientes, 18200 produtos no total, 18200 entraram e 0 saíram
    ```
+
+   Os produtos e o mix acima são os da primeira sincronização que monta o mix, quando tudo entra. Nas seguintes, os
+   números de novos, alterados, entraram e saíram mostram só o que mudou desde o envio anterior.
 
 3. Aperte uma tecla para fechar. Não precisa deixar nada aberto.
 
@@ -35,11 +40,19 @@ O que acontece no site:
 | Cliente reativado | Volta a ficar ativo |
 | Latitude e longitude (campos LATITUDADE e LONGITUDE do cadastro do cliente; sem elas, as de entrega) | Viram a localização do cliente, enquanto ninguém a corrigir no EFFEX |
 | Vendas dos últimos 2 meses (notas de venda a cliente não canceladas, com os produtos) | Aparecem no cadastro do cliente, em Clientes; a cada sincronização o período inteiro é trocado |
+| Produto vendido no período (código CODIGO e nome do cadastro PRODUTOS) | Entra em Produtos e mix; código e nome mudam igual |
+| O que cada cliente comprou no período | Vira o mix dele: os produtos que o promotor procura nas fotos de depois. O que é do mix e não aparece, ele confirma como ruptura |
 
 **Vendas:** o período vai de 2 meses antes até o último dia com venda na cópia do banco (com a cópia de hoje, até
 hoje). O valor é o de cada item na nota, sem descontar devoluções, como o faturamento do BI Mais Vida. No painel, em
 Clientes, a linha "Atualizado do ERP em …" mostra o período guardado, e o cadastro de cada cliente do ERP mostra o que
-ele comprou (por produto e nota a nota). As vendas não mudam o mix do cliente.
+ele comprou (por produto e nota a nota) e o mix.
+
+**Mix:** é refeito a cada sincronização com o que cada cliente comprou no período: produto que o cliente deixou de
+comprar sai, produto novo entra. Não há mais importação de mix nem cadastro de produto pelo painel: tudo vem do ERP.
+O produto que o promotor não deve procurar na gôndola (ex.: queijo de 4 kg vendido para o balcão) se **desativa no
+painel, em Produtos e mix**: ele sai do mix de todos os clientes na hora, e a sincronização não o reativa. Se a leitura
+das vendas falhar, o mix fica como estava.
 
 **Localização:** vem do ERP, mas pode ser corrigida no painel, em Clientes (no mapa, um por um, ou pela planilha, vários
 de uma vez). **Depois de corrigida no EFFEX, a sincronização não a muda mais**, mesmo que o ERP mande outra. O resumo da
@@ -52,7 +65,7 @@ essas no painel, senão o check-in do promotor nesses clientes cai fora da cerca
 
 Nome, razão social, cidade, UF e situação dos clientes do ERP ficam travados no painel: para mudar, mude no ERP e
 sincronize de novo. Também não dá para cadastrar cliente pelo painel: cadastre no ERP. A sincronização nunca mexe nos
-roteiros, no mix ou nas visitas.
+roteiros nem nas visitas.
 
 O painel mostra em Clientes: "Atualizado do ERP em … (cópia do banco de …)". Cada execução também fica anotada em
 `sync\sincronizar.log`.
@@ -71,6 +84,8 @@ A janela mostra `NÃO SINCRONIZOU:` e o motivo.
 | `falta a senha do banco` / `falta a chave` | O `sync\config.ini` está incompleto (modelo em `sync\config.exemplo.ini`). |
 | `Atenção: as vendas não foram lidas (...)` | Os clientes foram assim mesmo, e o site continua com as vendas do envio anterior. O motivo vem entre parênteses (ex.: uma tabela de vendas mudou no ERP): mande para quem cuida do sistema. |
 | `o servidor não guardou as vendas` | O site ainda está na versão anterior, que aceita o pacote mas ignora as vendas. Publique a versão nova (`deploy\publicar.ps1`) e rode de novo. |
+| `o servidor não montou o mix dos clientes` | O site ainda está na versão que guarda as vendas mas não monta o mix. Publique a versão nova (`deploy\publicar.ps1`) e rode de novo. |
+| `Aviso: ... produto(s) com código repetido no ERP` | Dois produtos com o mesmo CODIGO no ERP: o segundo entra no EFFEX com o código interno junto (ex.: `A71007-33`). A sincronização foi feita; se for engano no ERP, corrija lá. |
 | `A venda ... fora do período` / `aparece duas vezes` | Erro na leitura das vendas: nada foi gravado (nem os clientes). Mande a mensagem para quem cuida do sistema. |
 
 ---

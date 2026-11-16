@@ -195,7 +195,7 @@ model ErpSale {
 }
 
 /// Produto de uma venda do ERP (LISTAVENDA), um por produto na nota. Código, nome e unidade são os do cadastro de
-/// produtos do ERP (PRODUTOS) no dia do envio, sem ligação com o catálogo de produtos e o mix do EFFEX.
+/// produtos do ERP (PRODUTOS) no dia do envio. O produto do catálogo é o de mesmo código interno (Product.erpId).
 model ErpSaleItem {
   saleId       Int
   sale         ErpSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
@@ -461,11 +461,16 @@ model Photo {
 
 model Product {
   id        String   @id @default(cuid())
-  code      String   @unique // código no ERP
+  /// Código do produto. Nos que vêm do ERP, o PRODUTOS.CODIGO (ex.: A51000)
+  code      String   @unique
   name      String
   brand     String?
   category  String?
+  /// Desligado no painel, o produto sai do mix de todos os clientes (contraste de ruptura) e da lista do promotor.
+  /// A sincronização com o ERP não mexe nisso
   active    Boolean  @default(true)
+  /// Código interno no ERP (PRODUTOS.ID_PRODUTO). Com ele, código e nome vêm do ERP (só leitura no painel)
+  erpId     Int?     @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -474,7 +479,8 @@ model Product {
   ruptures      VisitRupture[]
 }
 
-/// Mix do cliente: produtos que ele compra no período (fonte: planilha/ERP, a definir)
+/// Mix do cliente: produtos que ele compra. Nos clientes do ERP, os que ele comprou no período das vendas (últimos 2
+/// meses), refeito pela sincronização a cada envio com vendas (src/services/erp-mix.ts)
 model ClientProduct {
   clientId  String
   client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)

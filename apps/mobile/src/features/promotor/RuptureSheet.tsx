@@ -57,7 +57,9 @@ export function RuptureSheet({ visible, visitId, onClose, onConfirmed }: { visib
         <>
           {info.confirmedAt ? <Banner tone="success" text={`Ruptura confirmada às ${formatTime(info.confirmedAt)}.`} /> : null}
           {!info.hasMix ? (
-            <Text style={styles.text}>O mix deste cliente (produtos que ele compra) ainda não foi cadastrado, então não há o que contrastar. Confirme para seguir.</Text>
+            <Text style={styles.text}>
+              Este cliente está sem mix (os produtos que ele comprou nos últimos 2 meses, pelas vendas do ERP), então não há o que contrastar. Confirme para seguir.
+            </Text>
           ) : missing.length === 0 ? (
             <Text style={styles.text}>Todos os {info.mixSize} produtos que o cliente compra aparecem nas fotos de depois. Nenhuma ruptura.</Text>
           ) : (

@@ -3,6 +3,7 @@ import { cityKey, UFS } from '../lib/cities'
 import { toDbDate } from '../lib/dates'
 import { badRequest, conflict } from '../lib/errors'
 import { clientMatcher, erpOwnsLocation, samePoint, unlocated } from './clients'
+import { syncErpMix } from './erp-mix'
 import { normalizeSales, replaceSales, type ErpSalesInput } from './erp-sales'
 
 /**
@@ -13,8 +14,9 @@ import { normalizeSales, replaceSales, type ErpSalesInput } from './erp-sales'
  * - código que sumiu do ERP: o cliente fica inativo.
  * Localização: a do ERP entra e é atualizada enquanto ninguém a editar no painel (ou pela planilha); depois disso a
  * editada vale e a sincronização não a muda mais. Coordenada vazia no ERP não apaga a que o cliente já tem.
- * No mesmo pacote vêm as vendas dos últimos 2 meses, gravadas na mesma transação (src/services/erp-sales.ts).
- * Mix, roteiros e visitas nunca são tocados.
+ * No mesmo pacote vêm as vendas dos últimos 2 meses, gravadas na mesma transação (src/services/erp-sales.ts), e com elas
+ * o catálogo de produtos e o mix de cada cliente do ERP: o que ele comprou no período (src/services/erp-mix.ts).
+ * Roteiros e visitas nunca são tocados.
  */
 
 export type ErpClientInput = {
@@ -214,6 +216,8 @@ async function run(input: SyncInput, meta: { sentAt: Date; ip?: string }) {
       if (absent.length) await tx.client.updateMany({ where: { id: { in: absent.map((c) => c.id) } }, data: { active: false } })
       // Depois dos clientes: as vendas dos clientes novos já encontram o cadastro
       const salesResult = sales ? await replaceSales(tx, sales) : null
+      // Sem as vendas no pacote, ficam o catálogo e o mix do envio anterior
+      const mix = salesResult ? await syncErpMix(tx, salesResult.products) : null
       const count = await tx.client.count({ where: { AND: [{ erpId: { not: null }, active: true }, unlocated] } })
       await tx.erpSync.create({
         data: {
@@ -233,7 +237,7 @@ async function run(input: SyncInput, meta: { sentAt: Date; ip?: string }) {
           ip: meta.ip ?? null,
         },
       })
-      return { unlocated: count, sales: salesResult }
+      return { unlocated: count, sales: salesResult, mix }
     },
     { maxWait: 10_000, timeout: 120_000 },
   )
@@ -241,6 +245,10 @@ async function run(input: SyncInput, meta: { sentAt: Date; ip?: string }) {
   const unknown = saved.sales?.unknownClients ?? []
   if (unknown.length) {
     warnings.push(`${saved.sales!.skipped} venda(s) de ${unknown.length} cliente(s) fora do cadastro de clientes ficaram de fora (códigos ${codes(unknown)})`)
+  }
+  const repeated = saved.mix?.products.repeated ?? []
+  if (repeated.length) {
+    warnings.push(`${repeated.length} produto(s) com código repetido no ERP ficaram no catálogo com o código interno junto (${repeated.slice(0, 10).join(', ')}${repeated.length > 10 ? '…' : ''})`)
   }
 
   return {
@@ -264,6 +272,16 @@ async function run(input: SyncInput, meta: { sentAt: Date; ip?: string }) {
       clients: saved.sales.clients,
       items: saved.sales.items,
       skipped: saved.sales.skipped,
+    },
+    /** Mix dos clientes do ERP depois do envio (null: o pacote veio sem as vendas, e ficou o mix anterior) */
+    mix: saved.mix && {
+      /** Clientes do ERP com algum produto no mix, e o total de pares cliente x produto */
+      clients: saved.mix.clients,
+      rows: saved.mix.rows,
+      /** Pares que entraram e que saíram neste envio */
+      added: saved.mix.added,
+      removed: saved.mix.removed,
+      products: { total: saved.mix.products.total, created: saved.mix.products.created, updated: saved.mix.products.updated, linked: saved.mix.products.linked },
     },
     warnings,
   }

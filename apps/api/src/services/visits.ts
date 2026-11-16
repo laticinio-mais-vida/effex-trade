@@ -266,8 +266,9 @@ export async function getDayForPromotor(promotorId: string, date: string) {
 }
 
 /**
- * Produtos para identificar nas fotos de depois: só os que o cliente compra (mix).
- * Sem mix cadastrado, mostra o catálogo inteiro para não travar o atendimento.
+ * Produtos para identificar nas fotos de depois: só os que o cliente compra (mix: nos clientes do ERP, o que ele comprou
+ * nos últimos 2 meses). Sem mix (cliente sem compras no período, ou fora do ERP), mostra o catálogo inteiro para não
+ * travar o atendimento.
  */
 export async function listProductsForVisit(promotorId: string, visitId: string | undefined, search: string | undefined) {
   let mixIds = new Set<string>()
@@ -872,7 +873,10 @@ export async function addPhoto(
 
 export async function setPhotoProducts(promotorId: string, photoId: string, productIds: string[]) {
   const settings = await getSettings(promotorId)
-  const photo = await prisma.photo.findUnique({ where: { id: photoId }, include: { visit: { include: { workDay: true } } } })
+  const photo = await prisma.photo.findUnique({
+    where: { id: photoId },
+    include: { visit: { include: { workDay: true } }, products: { select: { productId: true } } },
+  })
   if (!photo || photo.visit.promotorId !== promotorId) throw notFound('Foto')
   assertInProgress(photo.visit)
   assertNotOnLunch(photo.visit.workDay)
@@ -880,8 +884,13 @@ export async function setPhotoProducts(promotorId: string, photoId: string, prod
   if (settings.enforceVisitSequence && !photo.visit.photosWaived && productIds.length === 0) {
     throw ruleViolation('Marque ao menos um produto que aparece na foto.', 'PRODUTOS_NAO_IDENTIFICADOS')
   }
-  const ids = await assertProducts(productIds)
-  await assertProductsInMix(photo.visit.clientId, ids)
+  // Só os produtos novos na foto são conferidos. Os já marcados continuam valendo mesmo que tenham saído do mix (a
+  // sincronização com o ERP refaz o mix) ou sido desativados no meio do atendimento: o promotor não os vê mais na lista
+  // para desmarcar, e a foto não pode ficar sem salvar por causa deles
+  const ids = [...new Set(productIds)]
+  const marked = new Set(photo.products.map((p) => p.productId))
+  const added = await assertProducts(ids.filter((id) => !marked.has(id)))
+  await assertProductsInMix(photo.visit.clientId, added)
   const updated = await prisma.$transaction(async (tx) => {
     await tx.photoProduct.deleteMany({ where: { photoId } })
     await tx.photoProduct.createMany({ data: ids.map((productId) => ({ photoId, productId })) })

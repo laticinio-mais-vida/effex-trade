@@ -672,16 +672,12 @@ check('supervisor marcou auditoria incorreta', r.status === 200 && r.data.review
 
 console.log('Painel: produtos, mix, relatórios, regras e PDF')
 r = await call(admin, 'GET', '/admin/products')
-check('catálogo de produtos', r.status === 200 && r.data.items.length > 0, r.data)
-r = await call(admin, 'POST', '/admin/mix/import', {
-  rows: [
-    { client: { id: first.client.id }, productCode: 'P001' },
-    { client: { name: 'Cliente Inexistente', city: 'Salvador', state: 'BA' }, productCode: 'P001' },
-  ],
-})
-check('importação de mix (com cliente desconhecido)', r.status === 200 && r.data.clients === 1 && r.data.unknownClients.includes('Cliente Inexistente (Salvador - BA)'), r.data)
+check('catálogo de produtos (ainda sem os do ERP)', r.status === 200 && r.data.items.length > 0 && r.data.erpActive === false, r.data)
+const p001 = (await call(admin, 'GET', '/admin/products?search=P001')).data.items[0]
+r = await call(admin, 'PUT', `/admin/clients/${first.client.id}/mix`, { productIds: [p001.id] })
+check('mix editado à mão em cliente fora do ERP', r.status === 200 && r.data.count === 1, r.data)
 r = await call(admin, 'GET', `/admin/clients/${first.client.id}/mix`)
-check('mix substituído pelo do arquivo', r.status === 200 && r.data.length === 1 && r.data[0].code === 'P001', r.data)
+check('mix do cliente fora do ERP trocado', r.status === 200 && r.data.length === 1 && r.data[0].code === 'P001', r.data)
 r = await call(admin, 'GET', '/admin/reports/visits')
 check('relatório com resumo por promotor', r.status === 200 && r.data.summary.length >= 3, r.data.summary)
 check('relatório mostra encerramento automático e rupturas', r.data.rows.some((x: any) => x.autoClosed) && r.data.rows.some((x: any) => x.ruptures.length > 0))
@@ -985,11 +981,17 @@ else {
     from: addDays(hoje, -61),
     to: hoje,
     products: [
-      { erpId: 32, name: 'QUEIJO MUSSARELA  4KG', unit: 'KG' },
-      { erpId: 25, name: 'MANTEIGA 200G', unit: 'UND' },
+      { erpId: 32, code: 'A71007', name: 'QUEIJO MUSSARELA  4KG', unit: 'KG' },
+      { erpId: 25, code: ' A51000 ', name: 'MANTEIGA 200G', unit: 'UND' },
     ],
     list,
   })
+  const mixOf = async (clientId: string) => ((await call(admin, 'GET', `/admin/clients/${clientId}/mix`)).data as any[]).map((p) => p.code).sort().join(',')
+  const codeOf = async (erpId: number) => ((await call(admin, 'GET', '/admin/products?pageSize=200')).data.items as any[]).find((p) => p.erpId === erpId)?.code
+  // Cadastrado à mão antes de os produtos virem do ERP, com o código do ERP: a sincronização adota este cadastro
+  r = await call(admin, 'POST', '/admin/products', { code: 'A51000', name: 'Manteiga cadastrada à mão' })
+  check('produto cadastrado à mão antes do ERP', r.status === 200, r.data)
+  const manteigaId = r.data.id
   const v1 = {
     erpId: 700001,
     clientErpId: 900002,
@@ -1016,11 +1018,24 @@ else {
       r.data.warnings.some((w: string) => w.includes('999999')),
     r.data,
   )
+  check(
+    'produtos das vendas entram no catálogo (o cadastrado à mão com o mesmo código é adotado) e montam o mix',
+    r.data.mix?.products.total === 2 && r.data.mix.products.created === 1 && r.data.mix.products.linked === 1 && r.data.mix.clients === 1 && r.data.mix.rows === 2,
+    r.data.mix,
+  )
   let c = await byErp(900001)
   check('cliente vinculado mantém a localização que já tinha (do painel)', c?.name === 'Mercado Ribeira' && c.latitude === -12.917 && c.locationSource === 'PAINEL', c)
+  check('cliente vinculado ao ERP sem compras no período fica sem mix (sai o do cadastro)', (await mixOf(c.id)) === '', await mixOf(c.id))
   c = await byErp(900002)
   check('cliente novo recebe a localização do ERP', c?.latitude === -12.96 && c.locationSource === 'ERP', c)
   const novoId = c.id
+  check('mix do cliente do ERP: os produtos que ele comprou', (await mixOf(novoId)) === 'A51000,A71007', await mixOf(novoId))
+  r = await call(admin, 'GET', '/admin/products?search=A51000')
+  check(
+    'produto adotado: o mesmo cadastro, com o código e o nome do ERP',
+    r.data.erpActive === true && r.data.items.length === 1 && r.data.items[0].id === manteigaId && r.data.items[0].erpId === 25 && r.data.items[0].name === 'MANTEIGA 200G',
+    r.data,
+  )
   const salesOf = async () => (await call(admin, 'GET', `/admin/clients/${novoId}/sales`)).data
   let s = await salesOf()
   const queijo = s.products?.find((p: any) => p.erpId === 32)
@@ -1035,6 +1050,7 @@ else {
   check('reenvio igual não muda nada', r.status === 200 && r.data.created === 0 && r.data.updated === 0 && r.data.located === 0 && r.data.unchanged === 4, r.data)
   s = await salesOf()
   check('pacote sem as vendas mantém as do envio anterior', r.data.sales === null && s.count === 2, { r: r.data, s })
+  check('pacote sem as vendas mantém o mix', r.data.mix === null && (await mixOf(novoId)) === 'A51000,A71007', r.data)
   r = await sync({ clients: base }, { at: sentAt })
   check('pacote repetido recusado', r.status === 409 && r.data.code === 'ENVIO_REPETIDO', r.data)
 
@@ -1050,6 +1066,7 @@ else {
   r = await syncDirect({ clients: base, sales: vendas([v2]) })
   s = await salesOf()
   check('novo envio troca as vendas do período inteiro', r.status === 200 && s.count === 1 && s.total === 40.25, { r: r.data, s })
+  check('o mix acompanha as vendas: sai o produto que o cliente não comprou mais', r.data.mix?.removed === 1 && (await mixOf(novoId)) === 'A51000', r.data.mix)
   r = await syncDirect({ clients: base, sales: vendas([{ ...v1, date: addDays(hoje, -90) }]) })
   check('venda fora do período recusada', r.status === 400 && r.data.code === 'VENDA_FORA_DO_PERIODO', r.data)
   r = await syncDirect({ clients: base, sales: vendas([v1, v1]) })
@@ -1058,6 +1075,44 @@ else {
   check('período de vendas longo demais recusado', r.status === 400 && r.data.code === 'PERIODO_INVALIDO', r.data)
   s = await salesOf()
   check('envio recusado não mexe nas vendas', s.count === 1, s)
+
+  // Produto do ERP no painel
+  r = await call(admin, 'PATCH', `/admin/products/${manteigaId}`, { name: 'Outro nome' })
+  check('nome de produto do ERP não muda pelo painel', r.status === 409 && r.data.code === 'CAMPO_DO_ERP', r.data)
+  r = await call(admin, 'PATCH', `/admin/products/${manteigaId}`, { code: 'A51000', name: 'MANTEIGA 200G', category: 'Manteigas', active: false })
+  check('produto do ERP: categoria e situação mudam pelo painel', r.status === 200 && r.data.category === 'Manteigas' && r.data.active === false, r.data)
+  r = await call(admin, 'GET', `/admin/clients/${novoId}/mix`)
+  check('produto desativado continua no mix, marcado como inativo (fica fora na leitura)', r.data.length === 1 && r.data[0].active === false, r.data)
+  await call(admin, 'PATCH', `/admin/products/${manteigaId}`, { active: true })
+  r = await call(admin, 'POST', '/admin/products', { code: 'X1', name: 'Produto Manual' })
+  check('cadastro manual de produto fechado depois do ERP', r.status === 409 && r.data.code === 'PRODUTO_PELO_ERP', r.data)
+  r = await call(admin, 'POST', '/admin/products/import', { products: [{ code: 'X1', name: 'Produto Manual' }] })
+  check('importação de produtos fechada depois do ERP', r.status === 409 && r.data.code === 'PRODUTO_PELO_ERP', r.data)
+  r = await call(admin, 'PUT', `/admin/clients/${novoId}/mix`, { productIds: [] })
+  check('mix de cliente do ERP não é editado à mão', r.status === 409 && r.data.code === 'MIX_PELO_ERP', r.data)
+
+  // Código repetido e troca de códigos no ERP: o envio não pode falhar por causa da unicidade do código
+  const v3 = { erpId: 700004, clientErpId: 900002, date: addDays(hoje, -2), invoice: '055900', items: [{ product: 33, quantity: 1, value: 50 }] }
+  const comCodigos = (c25: string, c33: string): ErpSalesInput => ({
+    ...vendas([v2, v3]),
+    products: [
+      { erpId: 25, code: c25, name: 'MANTEIGA 200G', unit: 'UND' },
+      { erpId: 33, code: c33, name: 'QUEIJO MUSSARELA FATIADA 4KG', unit: 'KG' },
+    ],
+  })
+  r = await syncDirect({ clients: base, sales: comCodigos('A51000', 'A71007') })
+  check(
+    'código repetido no ERP: o produto novo fica com o código interno junto, com aviso',
+    r.status === 200 && (await codeOf(33)) === 'A71007-33' && (await codeOf(32)) === 'A71007' && r.data.warnings.some((w: string) => w.includes('A71007-33')),
+    r.data,
+  )
+  await syncDirect({ clients: base, sales: comCodigos('B1', 'B2') })
+  r = await syncDirect({ clients: base, sales: comCodigos('B2', 'B1') })
+  check('dois produtos trocam de código no ERP', r.status === 200 && (await codeOf(25)) === 'B2' && (await codeOf(33)) === 'B1', r.data)
+  check('mix com os dois produtos comprados', (await mixOf(novoId)) === 'B1,B2', await mixOf(novoId))
+  // Volta às vendas de antes: o resto do teste conta com elas
+  r = await syncDirect({ clients: base, sales: vendas([v2]) })
+  check('código do ERP volta a valer no catálogo', r.status === 200 && (await codeOf(25)) === 'A51000' && (await mixOf(novoId)) === 'A51000', r.data)
   r = await call(admin, 'GET', '/admin/clients/sync-status')
   check('situação mostra o período das vendas guardadas', r.data.sales?.from === addDays(hoje, -61) && r.data.sales.to === hoje && r.data.sales.total === 1, r.data)
   r = await call(supervisor, 'GET', `/admin/clients/${novoId}/sales`)

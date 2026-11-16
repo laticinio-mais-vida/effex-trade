@@ -7,8 +7,10 @@ mesmo esquema do BI Mais Vida). A chave fica no config.ini e na SYNC_KEY do serv
 O servidor cadastra os clientes novos, atualiza os que mudaram e inativa os que saíram do ERP. A localização
 (latitude e longitude) também vem do ERP, até alguém editá-la no painel ou pela planilha: a editada não muda mais.
 As vendas são as notas de venda a cliente não canceladas de MESES_VENDAS meses até o último dia com venda na cópia do
-banco, com os produtos de cada uma; a cada envio o servidor troca o período inteiro. Se a leitura das vendas falhar, os
-clientes vão assim mesmo e o servidor fica com as vendas do envio anterior.
+banco, com os produtos de cada uma; a cada envio o servidor troca o período inteiro. Com elas o servidor monta o
+catálogo de produtos (código e nome do ERP) e o mix de cada cliente: os produtos que ele comprou no período, que o
+promotor procura nas fotos de depois para apontar a ruptura. Se a leitura das vendas falhar, os clientes vão assim
+mesmo e o servidor fica com as vendas, o catálogo e o mix do envio anterior.
 
 Uso: dois cliques em sincronizar-clientes.bat, ou: python sincronizar.py [--forcar]
 """
@@ -36,19 +38,20 @@ CONSULTA = ("SELECT ID_CLIENTE, NOME, RAZAOSOCIAL, CIDADE, ESTADO, INATIVO, LATI
             "LATITUDEENTREGA, LONGITUDEENTREGA FROM CLIENTES")
 # Vendas: as notas de venda não canceladas a cliente (a venda a funcionário, fornecedor ou produtor tem outro
 # TIPOCLIENTE e usa o código do cadastro deles, não o de CLIENTES), com o total de cada produto na nota. O valor é o
-# VALORTOTALITEM, o mesmo do faturamento no BI Mais Vida, sem descontar devoluções. Nome e unidade vêm de PRODUTOS
+# VALORTOTALITEM, o mesmo do faturamento no BI Mais Vida, sem descontar devoluções. Nome, unidade e código (CODIGO, o
+# que aparece no ERP, como A51000; o ID_PRODUTO é o código interno) vêm de PRODUTOS
 MESES_VENDAS = 2
 # O período termina no último dia com venda na cópia, e não na data do arquivo: a cópia nova é gravada por cima da
 # anterior e o Windows mantém a data de criação dela
 CONSULTA_ULTIMA_VENDA = ("SELECT MAX(v.DATA) FROM VENDAS v "
                          "WHERE v.DATA < ? AND v.DATACANCELAMENTO IS NULL AND v.TIPOCLIENTE = 'CLIENTE'")
 CONSULTA_VENDAS = ("SELECT v.ID_VENDA, CAST(v.DATA AS DATE), v.ID_CLIENTE, v.NOTAFISCAL, l.ID_ITEM, p.NOME, p.UNIDADE, "
-                   "SUM(l.QUANTIDADE), SUM(l.VALORTOTALITEM) "
+                   "p.CODIGO, SUM(l.QUANTIDADE), SUM(l.VALORTOTALITEM) "
                    "FROM VENDAS v JOIN LISTAVENDA l ON l.ID_VENDA = v.ID_VENDA "
                    "LEFT JOIN PRODUTOS p ON p.ID_PRODUTO = l.ID_ITEM "
                    "WHERE v.DATA >= ? AND v.DATA < ? AND v.DATACANCELAMENTO IS NULL AND v.TIPOCLIENTE = 'CLIENTE' "
                    "AND l.ID_ITEM IS NOT NULL "
-                   "GROUP BY 1, 2, 3, 4, 5, 6, 7")
+                   "GROUP BY 1, 2, 3, 4, 5, 6, 7, 8")
 # Cópia do banco mais velha que isso ganha um aviso (a sincronização segue)
 DIAS_COPIA_VELHA = 2
 
@@ -136,7 +139,7 @@ def ler_vendas(bd, hoje: dt.date) -> dict:
     ate = dt.datetime.combine(fim + dt.timedelta(days=1), dt.time())
     vendas: dict[int, dict] = {}
     produtos: dict[int, dict] = {}
-    for id_venda, data, id_cliente, nota, id_produto, nome, unidade, quantidade, valor in bd.consulta(CONSULTA_VENDAS, (de, ate)):
+    for id_venda, data, id_cliente, nota, id_produto, nome, unidade, codigo, quantidade, valor in bd.consulta(CONSULTA_VENDAS, (de, ate)):
         if id_cliente is None or int(id_cliente) <= 0:
             continue
         venda = vendas.get(id_venda)
@@ -145,7 +148,8 @@ def ler_vendas(bd, hoje: dt.date) -> dict:
                                         "date": dia(data).isoformat(), "invoice": texto(nota, 40), "items": []}
         venda["items"].append({"product": int(id_produto), "quantity": round(float(quantidade or 0), 3),
                                "value": round(float(valor or 0), 2)})
-        produtos.setdefault(int(id_produto), {"erpId": int(id_produto), "name": texto(nome, 200), "unit": texto(unidade, 20)})
+        produtos.setdefault(int(id_produto), {"erpId": int(id_produto), "code": texto(codigo, 40), "name": texto(nome, 200),
+                                              "unit": texto(unidade, 20)})
     return {"from": inicio.isoformat(), "to": fim.isoformat(), "products": list(produtos.values()),
             "list": list(vendas.values())}
 
@@ -272,9 +276,21 @@ def main() -> int:
     if r.get("unlocated"):
         print(f"  {r['unlocated']} clientes ativos ainda sem localização: preencha no painel, em Clientes")
     s = r.get("sales")
+    m = r.get("mix")
     if s:
         print(f"  Vendas de {data_br(s['from'])} a {data_br(s['to'])} guardadas: {s['total']} vendas de {s['clients']} clientes")
         resumo_vendas = f"{s['total']} vendas de {data_br(s['from'])} a {data_br(s['to'])}"
+        if m:
+            p = m["products"]
+            ligados = f", {p['linked']} ligados aos já cadastrados" if p["linked"] else ""
+            print(f"  Produtos das vendas no catálogo: {p['total']} ({p['created']} novos, {p['updated']} alterados{ligados})")
+            print(f"  Mix (o que cada cliente comprou no período): {m['clients']} clientes, {m['rows']} produtos no total, "
+                  f"{m['added']} entraram e {m['removed']} saíram")
+            resumo_vendas += f"; mix de {m['clients']} clientes ({m['rows']} produtos)"
+        else:
+            # Servidor que guarda as vendas mas ainda não monta o mix
+            print("  Aviso: o servidor não montou o mix dos clientes. Ele ainda está na versão anterior: publique a versão nova da API.")
+            resumo_vendas += "; mix não montado pelo servidor"
     elif vendas is not None:
         # Servidor ainda na versão anterior: ele aceita o pacote e ignora as vendas
         print("  Aviso: o servidor não guardou as vendas. Ele ainda está na versão anterior: publique a versão nova da API.")
