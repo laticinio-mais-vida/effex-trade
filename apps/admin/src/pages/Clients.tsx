@@ -435,7 +435,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
               )}
             </MapContainer>
           </div>
-          <span className="muted small">Clique no mapa ou arraste o marcador até a porta da loja. A área amarela é a cerca eletrônica do check-in ({radius} m, em Regras).</span>
+          <span className="muted small">Clique no mapa ou arraste o marcador até a porta da loja. O círculo é a cerca eletrônica do check-in ({radius} m, em Regras).</span>
         </div>
       </div>
       <ErrorBox error={save.error} />

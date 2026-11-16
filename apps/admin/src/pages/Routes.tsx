@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import L from 'leaflet'
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { MapContainer, Marker, Polyline, TileLayer, useMap } from 'react-leaflet'
+import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { api } from '../api'
 import { cssVar } from '../css'
 import { areaLabel, DEFAULT_MODULES, distanceModeLabel, fmtDate, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
@@ -21,7 +21,7 @@ import {
   withType,
 } from '../routeFrequency'
 import { distanceMeters, pathMeters, suggestOrder } from '../routeOrder'
-import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, RouteSkip, Task, TodayRouteUpdate, VisitModule } from '../types'
+import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, RouteSkip, SettingsResponse, Task, TodayRouteUpdate, VisitModule } from '../types'
 import { ClientPicker, Empty, ErrorBox, Field, Loading, Modal, PageHead, Tabs, useLookups } from '../ui'
 import { TaskForm } from './Tasks'
 
@@ -32,16 +32,27 @@ const ofDay = (d: number) => `${d === 0 || d === 6 ? 'do' : 'da'} ${dayName(d)}`
 const listDays = (days: number[]) => new Intl.ListFormat('pt-BR').format(days.map(dayName))
 type DayFrequencyMap = Partial<Record<number, Frequency>>
 const fmtKm = (meters: number) => `${fmtNumber(meters / 1000, 1)} km`
+const fmtMeters = (meters: number) => (meters < 1000 ? `${Math.round(meters)} m` : fmtKm(meters))
+/** Abaixo disto o ponto não mudou de verdade (um clique no próprio marcador) */
+const MIN_MOVE_METERS = 1
 const sameRoute = (a: RouteClient[], b: RouteClient[]) =>
   a.length === b.length &&
   a.every((c, i) => c.id === b[i]!.id && sameFrequency(c.frequency, b[i]!.frequency) && c.modules.join() === b[i]!.modules.join())
 const onlyActivities = (modules: VisitModule[]) => modules.length === 1 && modules[0] === 'ATIVIDADES'
 
-function Fit({ clients }: { clients: LocatedClient[] }) {
+/** Zoom ao ajustar a geolocalização: nível de rua, para marcar a porta da loja e ver a cerca. */
+const FOCUS_ZOOM = 17
+
+/**
+ * Enquadra os clientes do dia. Com `focus` (cliente com a geolocalização em ajuste), aproxima nele; ao terminar o
+ * ajuste, volta a enquadrar o dia. Arrastar o ponto não reenquadra (a chave muda só com os clientes e o foco).
+ */
+function Fit({ clients, focus }: { clients: LocatedClient[]; focus: LocatedClient | null }) {
   const map = useMap()
-  const key = clients.map((c) => c.id).join()
+  const key = `${clients.map((c) => c.id).join()}|${focus?.id ?? ''}`
   useEffect(() => {
-    if (clients.length) map.fitBounds(L.latLngBounds(clients.map((c) => [c.latitude, c.longitude])), { padding: [30, 30], maxZoom: 15 })
+    if (focus) map.setView([focus.latitude, focus.longitude], Math.max(map.getZoom(), FOCUS_ZOOM))
+    else if (clients.length) map.fitBounds(L.latLngBounds(clients.map((c) => [c.latitude, c.longitude])), { padding: [30, 30], maxZoom: 15 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, map])
   return null
@@ -67,6 +78,29 @@ function useDistances(list: LocatedClient[]) {
     return i != null && j != null ? query.data!.meters[i]![j]! : distanceMeters(a, b)
   }
   return { dist, source: query.data?.source ?? 'linha_reta', loading: query.isFetching }
+}
+
+/** Clique no mapa leva para lá o ponto do cliente em ajuste. */
+function PickPoint({ onPick }: { onPick: (latitude: number, longitude: number) => void }) {
+  useMapEvents({ click: (e) => onPick(e.latlng.lat, e.latlng.lng) })
+  return null
+}
+
+/** Botão do balão do pino: fecha o balão e começa o ajuste da localização. */
+function AdjustLocationButton({ onClick }: { onClick: () => void }) {
+  const map = useMap()
+  return (
+    <button
+      type="button"
+      className="btn small"
+      onClick={() => {
+        map.closePopup()
+        onClick()
+      }}
+    >
+      Ajustar geolocalização
+    </button>
+  )
 }
 
 export function RoutesPage() {
@@ -111,6 +145,9 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const [newTaskFor, setNewTaskFor] = useState<Pick<Client, 'id' | 'name'> | null>(null)
   const [suggested, setSuggested] = useState<{ weekday: number; before: number; after: number } | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
+  /** Cliente com a localização em ajuste no mapa: o ponto novo só é gravado depois de confirmado. */
+  const [adjusting, setAdjusting] = useState<{ client: RouteClient; latitude: number; longitude: number } | null>(null)
+  const [confirmingLocation, setConfirmingLocation] = useState(false)
   const listRef = useRef<HTMLOListElement>(null)
   const focusAfterMove = useRef<string | null>(null)
 
@@ -124,6 +161,38 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const incomplete = dirtyDays.flatMap((d) => listOf(d).filter((c) => frequencyError(c.frequency)).map((c) => `${c.name} (${dayName(d)})`))
   const outsideCount = new Set(WEEK_ORDER.flatMap((d) => listOf(d).filter((c) => c.outsideArea).map((c) => c.id))).size
   const suggestion = suggested?.weekday === weekday && Math.abs(suggested.after - km) < 1 ? suggested : null
+  // Ajuste só vale enquanto o cliente está no dia mostrado
+  const adjust = adjusting && list.some((c) => c.id === adjusting.client.id) ? adjusting : null
+  const moved = adjust ? distanceMeters(adjust.client, adjust) : 0
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<SettingsResponse>('/admin/settings'), enabled: !!adjust })
+  // Raio da cerca deste promotor (exceção dele em Regras ou a regra geral)
+  const radius = Number(
+    settings.data?.overrides.find((o) => o.promotor.id === promotorId)?.values.geofenceRadiusMeters ?? settings.data?.values.geofenceRadiusMeters ?? 150,
+  )
+  const pointOf = (c: RouteClient): [number, number] => (adjust?.client.id === c.id ? [adjust.latitude, adjust.longitude] : [c.latitude, c.longitude])
+  const stopAdjusting = () => {
+    setAdjusting(null)
+    setConfirmingLocation(false)
+    saveLocation.reset()
+  }
+  /** Grava só a localização do cliente (a mesma alteração do cadastro em Clientes), separada do roteiro. */
+  const saveLocation = useMutation({
+    mutationFn: (p: { id: string; latitude: number; longitude: number }) =>
+      api<Client>(`/admin/clients/${p.id}`, { method: 'PATCH', body: { latitude: p.latitude, longitude: p.longitude } }),
+    onSuccess: (client) => {
+      // O roteiro ainda não salvo guarda uma cópia do cliente: leva o ponto novo para ela também
+      setDrafts((prev) => {
+        const next: typeof prev = {}
+        for (const [d, l] of Object.entries(prev)) {
+          next[Number(d)] = l?.map((c) => (c.id === client.id ? { ...c, latitude: client.latitude!, longitude: client.longitude!, locationSource: client.locationSource } : c))
+        }
+        return next
+      })
+      setAdjusting(null)
+      setConfirmingLocation(false)
+      for (const key of ['route', 'route-distances', 'clients', 'client-search', 'map']) qc.invalidateQueries({ queryKey: [key] })
+    },
+  })
 
   /** Troca a lista de um ou mais dias; o dia que volta a ficar igual ao salvo deixa de contar como alteração. */
   const setDays = (changes: [number, RouteClient[]][]) =>
@@ -356,7 +425,10 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
         <>
           <Tabs
             value={String(weekday)}
-            onChange={(v) => setWeekday(Number(v))}
+            onChange={(v) => {
+              setWeekday(Number(v))
+              stopAdjusting()
+            }}
             options={WEEK_ORDER.map((d) => ({ value: String(d), label: `${weekdayLabel[d]} (${listOf(d).length})${drafts[d] ? ' •' : ''}` }))}
           />
           <div className="cols-2">
@@ -508,19 +580,87 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                 )}
               </div>
             </section>
-            <section className="panel" style={{ height: 460, overflow: 'hidden' }}>
+            <section className="panel route-map" style={{ height: 460, overflow: 'hidden' }}>
+              {adjust ? (
+                <div className="map-overlay map-adjust" role="region" aria-label={`Ajustar geolocalização de ${adjust.client.name}`}>
+                  <strong>Ajustar geolocalização: {adjust.client.name}</strong>
+                  <span className="muted">Arraste o pino ou clique no mapa na porta da loja. O círculo é a cerca do check-in ({radius} m).</span>
+                  {moved >= MIN_MOVE_METERS && <span>Novo ponto a {fmtMeters(moved)} do atual (o círculo tracejado).</span>}
+                  <div className="btn-row">
+                    <button type="button" className="btn small" onClick={stopAdjusting}>
+                      Cancelar
+                    </button>
+                    <button type="button" className="btn small primary" disabled={moved < MIN_MOVE_METERS} onClick={() => setConfirmingLocation(true)}>
+                      Salvar localização
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                list.length > 0 && (
+                  <div className="map-overlay map-hint">
+                    <span className="muted">Clique num pino para ajustar a geolocalização.</span>
+                  </div>
+                )
+              )}
               <MapContainer center={[-12.97, -38.48]} zoom={12} style={{ height: '100%' }}>
                 <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <Fit clients={list} />
-                {list.length > 1 && <Polyline positions={list.map((c) => [c.latitude, c.longitude] as [number, number])} pathOptions={{ color: cssVar('--marinho'), weight: 2, opacity: 0.5 }} />}
-                {list.map((c, i) => (
-                  <Marker
-                    key={c.id}
-                    position={[c.latitude, c.longitude]}
-                    icon={L.divIcon({ className: '', html: `<div class="pin EM_ATENDIMENTO">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] })}
-                    title={c.name}
-                  />
-                ))}
+                <Fit clients={list} focus={adjust?.client ?? null} />
+                {list.length > 1 && <Polyline positions={list.map(pointOf)} pathOptions={{ color: cssVar('--marinho'), weight: 2, opacity: 0.5 }} />}
+                {adjust && (
+                  <>
+                    <PickPoint onPick={(latitude, longitude) => setAdjusting({ ...adjust, latitude, longitude })} />
+                    <Circle
+                      center={[adjust.latitude, adjust.longitude]}
+                      radius={radius}
+                      pathOptions={{ color: cssVar('--marinho'), weight: 1, fillColor: cssVar('--marinho'), fillOpacity: 0.12 }}
+                    />
+                    {moved >= MIN_MOVE_METERS && (
+                      <Marker
+                        position={[adjust.client.latitude, adjust.client.longitude]}
+                        interactive={false}
+                        icon={L.divIcon({ className: '', html: '<div class="pin antigo"></div>', iconSize: [26, 26], iconAnchor: [13, 13] })}
+                      />
+                    )}
+                  </>
+                )}
+                {list.map((c, i) => {
+                  const moving = adjust?.client.id === c.id
+                  return (
+                    <Marker
+                      key={c.id}
+                      position={pointOf(c)}
+                      draggable={moving}
+                      zIndexOffset={moving ? 1000 : 0}
+                      icon={L.divIcon({ className: '', html: `<div class="pin ${moving ? 'marinho' : 'EM_ATENDIMENTO'}">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] })}
+                      title={c.name}
+                      eventHandlers={
+                        moving
+                          ? {
+                              dragend: (e) => {
+                                const p = (e.target as L.Marker).getLatLng()
+                                setAdjusting({ ...adjust!, latitude: p.lat, longitude: p.lng })
+                              },
+                            }
+                          : {}
+                      }
+                    >
+                      {!adjust && (
+                        <Popup>
+                          <div className="stack" style={{ gap: 'var(--esp-2)' }}>
+                            <span>
+                              <strong>
+                                {i + 1}. {c.name}
+                              </strong>
+                              <br />
+                              {[c.city, c.state].filter(Boolean).join(' - ')}
+                            </span>
+                            <AdjustLocationButton onClick={() => setAdjusting({ client: c, latitude: c.latitude, longitude: c.longitude })} />
+                          </div>
+                        </Popup>
+                      )}
+                    </Marker>
+                  )
+                })}
               </MapContainer>
             </section>
           </div>
@@ -552,6 +692,22 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
           }}
         />
       )}
+      {confirmingLocation && adjust && (
+        <ConfirmLocationModal
+          client={adjust.client}
+          point={adjust}
+          moved={moved}
+          radius={radius}
+          routeDirty={dirty}
+          saving={saveLocation.isPending}
+          error={saveLocation.error}
+          onConfirm={() => saveLocation.mutate({ id: adjust.client.id, latitude: adjust.latitude, longitude: adjust.longitude })}
+          onBack={() => {
+            setConfirmingLocation(false)
+            saveLocation.reset()
+          }}
+        />
+      )}
       {editingDays && (
         <ClientDaysModal client={editingDays} initial={frequenciesOf(editingDays.id)} onApply={(days) => applyDays(editingDays, days)} onClose={() => setEditingDays(null)} />
       )}
@@ -578,6 +734,66 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
         </div>
       )}
     </>
+  )
+}
+
+/** Confirmação da localização ajustada no mapa do roteiro, com o que muda ao gravar. */
+function ConfirmLocationModal({
+  client,
+  point,
+  moved,
+  radius,
+  routeDirty,
+  saving,
+  error,
+  onConfirm,
+  onBack,
+}: {
+  client: RouteClient
+  point: { latitude: number; longitude: number }
+  moved: number
+  radius: number
+  routeDirty: boolean
+  saving: boolean
+  error: unknown
+  onConfirm: () => void
+  onBack: () => void
+}) {
+  const fromErp = client.erpId != null && client.locationSource !== 'PAINEL'
+  return (
+    <Modal
+      title="Confirmar nova localização"
+      onClose={onBack}
+      footer={
+        <>
+          <button className="btn" disabled={saving} onClick={onBack}>
+            Voltar ao mapa
+          </button>
+          <button className="btn primary" disabled={saving} onClick={onConfirm}>
+            {saving ? 'Salvando…' : 'Confirmar localização'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <span>
+          <strong>{client.name}</strong> passa para{' '}
+          <span className="num">
+            {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}
+          </span>
+          , a {fmtMeters(moved)} de onde estava.
+        </span>
+        <span>
+          A cerca do check-in ({radius} m) passa a valer no ponto novo na hora, também nos atendimentos de hoje e para todos os promotores que atendem este
+          cliente.
+        </span>
+        {fromErp && (
+          <span>A localização deste cliente veio do ERP. Corrigida aqui, passa a valer a sua, e a sincronização com o ERP não a muda mais.</span>
+        )}
+        {routeDirty && <span className="muted">A localização é gravada sozinha: as alterações do roteiro continuam esperando “Salvar roteiro”.</span>}
+        <ErrorBox error={error} />
+      </div>
+    </Modal>
   )
 }
 

@@ -1080,6 +1080,16 @@ textarea.input {
   left: var(--esp-3);
   right: auto;
 }
+/* Mapa do roteiro: barra do ajuste da geolocalização e a dica para achar o ajuste */
+.route-map {
+  position: relative;
+}
+.map-overlay.map-adjust {
+  max-width: 320px;
+}
+.map-overlay.map-hint {
+  padding: var(--esp-2) var(--esp-3);
+}
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -1130,6 +1140,11 @@ textarea.input {
 }
 .pin.marinho {
   background: var(--marinho);
+}
+/* Onde o cliente estava, enquanto a geolocalização é ajustada */
+.pin.antigo {
+  border: 2px dashed var(--neutro);
+  background: transparent;
 }
 /* Promotor: círculo marinho com borda branca; apagado quando está sem sinal */
 .person {
