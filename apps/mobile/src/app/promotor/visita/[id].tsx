@@ -87,9 +87,10 @@ function formatMeta(meta: Record<string, unknown>) {
 
 
 /**
- * Passo do atendimento. Concluído: uma linha só ("Fachada · 20:57"), que abre a foto ao tocar. Atual: cartão em
- * destaque, sem botão próprio (o botão fica na barra fixa). Pendente: número e título; com a sequência obrigatória
- * desligada, mantém o próprio botão (children).
+ * Passo do atendimento. Concluído: uma linha só ("Fachada · 20:57"), que abre a foto ao tocar, e embaixo dela o
+ * doneContent (as miniaturas, quando o passo tem várias fotos). Atual: cartão em destaque, sem botão próprio (o botão
+ * fica na barra fixa). Pendente: número e título; com a sequência obrigatória desligada, mantém o próprio botão
+ * (children).
  */
 function Step({
   n,
@@ -98,6 +99,7 @@ function Step({
   detail,
   onPressDone,
   doneAction,
+  doneContent,
   children,
 }: {
   n: number
@@ -106,27 +108,31 @@ function Step({
   detail?: string
   onPressDone?: () => void
   doneAction?: ReactNode
+  doneContent?: ReactNode
   children?: ReactNode
 }) {
   if (state === 'done') {
     // A linha abre a foto; a ação ao lado ("+ outra") é um botão à parte, não dentro dela
     return (
-      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.xs }}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onPressDone}
-          disabled={!onPressDone}
-          style={({ pressed }) => [{ flex: 1, minHeight: sizes.toque, flexDirection: 'row', alignItems: 'center', gap: space.md }, pressed && styles.pressed]}
-        >
-          <View style={localStyles.doneCircle}>
-            <Ionicons name="checkmark" size={sizes.iconeComTexto} color={colors.feito} />
-          </View>
-          <Text style={[styles.text, { flex: 1 }]} numberOfLines={2}>
-            {title}
-            {detail ? <Text style={styles.muted}> · {detail}</Text> : null}
-          </Text>
-        </Pressable>
-        {doneAction}
+      <Card style={{ paddingVertical: space.xs }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onPressDone}
+            disabled={!onPressDone}
+            style={({ pressed }) => [{ flex: 1, minHeight: sizes.toque, flexDirection: 'row', alignItems: 'center', gap: space.md }, pressed && styles.pressed]}
+          >
+            <View style={localStyles.doneCircle}>
+              <Ionicons name="checkmark" size={sizes.iconeComTexto} color={colors.feito} />
+            </View>
+            <Text style={[styles.text, { flex: 1 }]} numberOfLines={2}>
+              {title}
+              {detail ? <Text style={styles.muted}> · {detail}</Text> : null}
+            </Text>
+          </Pressable>
+          {doneAction}
+        </View>
+        {doneContent ? <View style={{ paddingBottom: space.sm }}>{doneContent}</View> : null}
       </Card>
     )
   }
@@ -778,6 +784,8 @@ export default function VisitaScreen() {
                 detail={beforePhotos.length > 0 ? `${beforePhotos.length} foto(s) · ${formatTime(beforePhotos[0]!.takenAt)}` : 'Como a gôndola estava ao chegar'}
                 onPressDone={beforePhotos[0] ? () => setViewing(beforePhotos[0]!) : undefined}
                 doneAction={canBefore ? addMore('+ outra', () => void capture('ANTES')) : undefined}
+                // A linha só abre a primeira foto: com mais de uma, as miniaturas dão acesso às outras
+                doneContent={beforePhotos.length > 1 ? thumbs(beforePhotos) : undefined}
               >
                 {thumbs(beforePhotos)}
                 {ownButton('ANTES') ? (
@@ -797,6 +805,9 @@ export default function VisitaScreen() {
                 }
                 onPressDone={afterPhotos[0] ? () => setViewing(afterPhotos[0]!) : undefined}
                 doneAction={addMore('+ outra', captureAfter, !canAfter)}
+                // Sempre à vista: é tocando na foto de depois que se corrige os produtos dela (a confirmação de ruptura manda
+                // o promotor fazer isso)
+                doneContent={thumbs(afterPhotos)}
               >
                 {thumbs(afterPhotos)}
                 {afterWithoutProducts > 0 ? <Banner tone="warning" text={`${afterWithoutProducts} foto(s) de depois sem produtos marcados. Toque na foto e use "Editar produtos".`} /> : null}
