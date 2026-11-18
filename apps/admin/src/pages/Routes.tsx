@@ -160,6 +160,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const dirty = dirtyDays.length > 0
   const incomplete = dirtyDays.flatMap((d) => listOf(d).filter((c) => frequencyError(c.frequency)).map((c) => `${c.name} (${dayName(d)})`))
   const outsideCount = new Set(WEEK_ORDER.flatMap((d) => listOf(d).filter((c) => c.outsideArea).map((c) => c.id))).size
+  const inactiveCount = new Set(WEEK_ORDER.flatMap((d) => listOf(d).filter((c) => !c.active).map((c) => c.id))).size
   const suggestion = suggested?.weekday === weekday && Math.abs(suggested.after - km) < 1 ? suggested : null
   // Ajuste só vale enquanto o cliente está no dia mostrado
   const adjust = adjusting && list.some((c) => c.id === adjusting.client.id) ? adjusting : null
@@ -402,6 +403,12 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
           roteiro ou inclua a cidade no cadastro do promotor; enquanto isso, o dia com eles não pode ser salvo.
         </div>
       )}
+      {inactiveCount > 0 && (
+        <div className="alert">
+          {inactiveCount === 1 ? '1 cliente do roteiro está inativo e não entra' : `${inactiveCount} clientes do roteiro estão inativos e não entram`} nos dias do
+          promotor. Se for reativado, volta sozinho ao roteiro; se não for mais atendido, tire-o do roteiro.
+        </div>
+      )}
       {todayUpdate && <TodayUpdateNotice update={todayUpdate} onClose={() => setTodayUpdate(null)} />}
 
       {adding && (
@@ -505,6 +512,11 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                               {c.name}
                               <div className="small muted">{[c.city, c.state].filter(Boolean).join(' - ')}</div>
                               {c.outsideArea && <div className="small" style={{ color: 'var(--nao-feito)' }}>Fora das cidades do promotor</div>}
+                              {!c.active && (
+                                <div className="small" style={{ color: 'var(--nao-feito)' }}>
+                                  {c.erpId != null ? 'Inativo no ERP' : 'Cliente inativo'}: não entra nos dias do promotor
+                                </div>
+                              )}
                               <button
                                 type="button"
                                 className={`freq-chip${c.frequency.type === 'SEMANAL' && isDefaultStructure(c.modules) ? '' : ' custom'}${frequencyError(c.frequency) ? ' bad' : ''}`}
