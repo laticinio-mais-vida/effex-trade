@@ -155,6 +155,8 @@ export interface CheckinResult extends Visit {
   autoClosedVisits?: { visitId: string; clientName: string; checkoutAt: string }[]
   /** Preenchido quando esta abertura foi a volta do almoço. */
   lunchEndedAt?: string | null
+  /** Desvios de tempo do momento e limites para as notificações. */
+  timing?: Timing
 }
 
 export interface DayRules {
@@ -329,6 +331,8 @@ export interface SupervisorContest extends ContestInfo {
 }
 
 export interface SupervisorSummary {
+  /** Desvios de tempo da equipe ainda sem ciente */
+  pendingTimeFlags?: number
   pendingRequests: number
   pendingVendorAudits: number
   /** Contestações de fotos esperando decisão (API antiga não manda) */
@@ -379,4 +383,110 @@ export interface ScheduledVisit {
   createdAt: string
   /** Visita do dia, quando o dia já foi gerado (hoje). */
   visit: { id: string; status: VisitStatus } | null
+}
+
+// ---------- Relatório de tempos (supervisor) ----------
+export type TimeRowState = 'FEITA' | 'EM_ATENDIMENTO' | 'JUSTIFICADA' | 'PENDENTE' | 'NAO_FEITA'
+
+export interface TimeOccurrence {
+  date: string
+  rowId: string
+  /** ROTEIRO = tempo no cliente; DESLOCAMENTO = trajeto até o cliente */
+  kind: 'ROTEIRO' | 'DESLOCAMENTO'
+  direction: 'ACIMA' | 'ABAIXO'
+  clientName: string
+  city: string | null
+  from: string | null
+  to: string | null
+  valueSeconds: number
+  baseSeconds: number
+  diffSeconds: number
+  ratio: number
+  /** Sem visitas suficientes do próprio grupo: comparado com a média geral */
+  fallback: boolean
+  reliable: boolean
+  veryShort: boolean
+  /** Registro na hora do evento: justificativa do promotor e ciente do supervisor */
+  flag: { id: string; justification: string | null; justifiedAt: string | null; acknowledgedAt: string | null } | null
+}
+
+export interface TimeLiveAlert {
+  kind: 'ATENDIMENTO_LONGO' | 'DESLOCAMENTO_LONGO'
+  clientName: string | null
+  city: string | null
+  since: string
+  elapsedSeconds: number
+  baseSeconds: number
+  fallback: boolean
+}
+
+export interface TimeNotVisited {
+  date: string
+  rowId: string
+  clientName: string
+  city: string | null
+  state: TimeRowState
+  reason: string | null
+  comment: string | null
+}
+
+export interface TimePromotorDay {
+  key: string
+  id: string | null
+  name: string
+  supervisor: string | null
+  total: number
+  visited: number
+  inProgress: number
+  pending: number
+  notVisited: number
+  clientSeconds: number
+  travelSeconds: number
+  firstCheckin: string | null
+  lastCheckout: string | null
+  outsideDay: number
+  occurrences: TimeOccurrence[]
+  notVisitedList: TimeNotVisited[]
+  live: TimeLiveAlert[]
+}
+
+export interface TimeReport {
+  date: string
+  dateTo: string
+  source: 'EFFEX' | 'TRADEPRO' | 'MISTO' | null
+  isToday: boolean
+  generatedAt: string
+  baseline: { from: string; to: string; observations: number } | null
+  promotores: TimePromotorDay[]
+  warnings: string[]
+}
+
+/** Desvio de tempo novo, devolvido no check-in e no check-out para avisar o promotor na hora. */
+export interface TimingFlag {
+  id: string
+  kind: 'ROTEIRO' | 'DESLOCAMENTO'
+  clientName: string
+  city: string | null
+  valueSeconds: number
+  baseSeconds: number
+  diffSeconds: number
+}
+
+/** Desvios novos e os limites para agendar a notificação com o app minimizado. */
+export interface Timing {
+  flags: TimingFlag[]
+  /** Atendimento aberto: daqui a quantos segundos ele passa do tempo normal no cliente */
+  stayLimit: { visitId: string; clientName: string; afterSeconds: number; baseSeconds: number } | null
+  /** Depois da saída: daqui a quantos segundos o deslocamento passa do normal */
+  travelLimit: { afterSeconds: number; baseSeconds: number } | null
+}
+
+/** O dia do próprio promotor no relatório de tempos. */
+export interface PromotorTimeView {
+  date: string
+  isToday: boolean
+  source: 'EFFEX' | 'TRADEPRO' | null
+  generatedAt: string
+  warnings: string[]
+  day: TimePromotorDay | null
 }

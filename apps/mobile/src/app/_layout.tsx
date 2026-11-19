@@ -10,7 +10,11 @@ import { navigationTheme } from '@/components/navigation'
 import { ApkUpdatePrompt } from '@/features/ApkUpdate'
 import { AuthProvider } from '@/lib/auth'
 import { colors, fonts } from '@/lib/theme'
+import { setupTimeNotifications } from '@/lib/timing'
 import { AutoUpdates } from '@/lib/updates'
+
+// Avisos de tempo acima do normal aparecem também com o app aberto
+setupTimeNotifications()
 
 // A tela de abertura fica até a fonte carregar, para o app não aparecer um instante com a letra do sistema
 SplashScreen.preventAutoHideAsync().catch(() => {})

@@ -6,6 +6,7 @@ import { dayClosed, useDay } from '@/features/promotor/DayContext'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { getQuickLocation } from '@/lib/location'
 import { borders, colors, elevated, space } from '@/lib/theme'
+import { cancelTimeAlerts } from '@/lib/timing'
 import { flushQueue, stopTracking } from '@/lib/tracking'
 
 type Entry = { reasonId: string | null; text: string }
@@ -75,6 +76,7 @@ export default function EncerrarRoteiro() {
         },
       })
       await stopTracking()
+      void cancelTimeAlerts()
       await reload()
       Alert.alert('Roteiro encerrado', 'Bom descanso!', [{ text: 'OK', onPress: () => router.back() }])
     } catch (e) {

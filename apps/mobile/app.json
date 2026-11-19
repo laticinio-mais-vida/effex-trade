@@ -35,7 +35,7 @@
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
-      "versionCode": 4
+      "versionCode": 5
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -78,6 +78,12 @@
       ],
       "expo-font",
       [
+        "expo-notifications",
+        {
+          "color": "#061D39"
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
@@ -87,7 +93,8 @@
             ]
           }
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": false

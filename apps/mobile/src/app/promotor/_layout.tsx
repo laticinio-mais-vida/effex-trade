@@ -1,11 +1,18 @@
 import { Redirect, Stack } from 'expo-router'
+import { useEffect } from 'react'
 import { stackOptions } from '@/components/navigation'
 import { LoadingView } from '@/components/ui'
 import { DayProvider } from '@/features/promotor/DayContext'
+import { TimingPrompt } from '@/features/promotor/TimingPrompt'
 import { useAuth } from '@/lib/auth'
+import { ensureNotifications } from '@/lib/timing'
 
 export default function PromotorLayout() {
   const { status, user } = useAuth()
+  // Pede a permissão de notificações logo na entrada, para o aviso de tempo funcionar com o app minimizado
+  useEffect(() => {
+    if (user?.role === 'PROMOTOR') void ensureNotifications()
+  }, [user?.role])
   if (status === 'loading') return <LoadingView />
   if (!user) return <Redirect href="/login" />
   if (user.role !== 'PROMOTOR') return <Redirect href="/" />
@@ -22,6 +29,7 @@ export default function PromotorLayout() {
         <Stack.Screen name="ordem" options={{ title: 'Alterar ordem' }} />
         <Stack.Screen name="encerrar" options={{ title: 'Encerrar roteiro' }} />
       </Stack>
+      <TimingPrompt />
     </DayProvider>
   )
 }

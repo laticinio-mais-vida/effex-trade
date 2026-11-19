@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, ApiError, getToken, setToken, setUnauthorizedHandler } from './api'
 import { loadApiUrl } from './config'
+import { unregisterPush } from './push'
 import { clearTrackingData, flushQueue, stopTracking } from './tracking'
 import type { Role, User } from './types'
 
@@ -21,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
 
   const logout = useCallback(async () => {
+    await unregisterPush()
     await flushQueue()
     await stopTracking()
     await clearTrackingData()

@@ -32,7 +32,8 @@ import {
 import { distanceMeters, getPreciseLocation, getQuickLocation, LocationError, type CurrentLocation } from '@/lib/location'
 import { shrinkPhoto } from '@/lib/photo'
 import { borders, colors, elevated, sizes, space, type } from '@/lib/theme'
-import type { CheckinResult, Photo, PhotoType, Visit, VisitStep, VisitTask } from '@/lib/types'
+import { applyTiming } from '@/lib/timing'
+import type { CheckinResult, Photo, PhotoType, Timing, Visit, VisitStep, VisitTask } from '@/lib/types'
 import { useQuery } from '@/lib/useQuery'
 import { stepLine, visitSteps, type StepKey } from '@/lib/visitSteps'
 
@@ -356,6 +357,7 @@ export default function VisitaScreen() {
     }
     await refreshAll()
     notifyCheckin(result)
+    void applyTiming(result.timing, 'checkin')
   }
 
   /**
@@ -418,8 +420,9 @@ export default function VisitaScreen() {
     try {
       // GPS falhando não trava o check-out; a API recusa se a regra exigir a cerca no check-out
       const loc = await getPreciseLocation().catch(() => getQuickLocation())
-      await api(`/promotor/visits/${visit!.id}/checkout`, { body: { ...(loc ?? {}), notes: notes.trim() || undefined } })
+      const out = await api<{ timing?: Timing }>(`/promotor/visits/${visit!.id}/checkout`, { body: { ...(loc ?? {}), notes: notes.trim() || undefined } })
       await refreshAll()
+      void applyTiming(out.timing, 'checkout')
       Alert.alert('Atendimento finalizado', 'Bom trabalho! Siga para o próximo cliente.', [{ text: 'OK', onPress: () => router.back() }])
     } catch (e) {
       handleError(e, 'Check-out não realizado')

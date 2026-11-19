@@ -187,3 +187,17 @@ export function todayLocal() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+
+/** Tempo absoluto em segundos: HH:MM:SS */
+export function formatHms(seconds: number) {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(Math.floor(seconds / 3600))}:${p(Math.floor((seconds % 3600) / 60))}:${p(Math.floor(seconds % 60))}`
+}
+
+/** Tempo curto em segundos: 2h58 (ou 12min abaixo de 1 h) */
+export function formatShort(seconds: number) {
+  return seconds >= 3600 ? `${Math.floor(seconds / 3600)}h${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}` : `${Math.round(seconds / 60)}min`
+}
+
+/** Diferença curta e com sinal: +1h49, -32min */
+export const formatDiff = (seconds: number) => `${seconds < 0 ? '-' : '+'}${formatShort(Math.abs(seconds))}`

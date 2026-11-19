@@ -8,6 +8,7 @@ import { api, ApiError, errorMessage } from '@/lib/api'
 import { formatLongDate, formatMinutes, formatTime, minutesSince, placeOf } from '@/lib/format'
 import { getQuickLocation } from '@/lib/location'
 import { colors, space, type } from '@/lib/theme'
+import { cancelTravelAlert } from '@/lib/timing'
 import type { Visit } from '@/lib/types'
 import { stepLine, stepTitles, visitSteps } from '@/lib/visitSteps'
 
@@ -83,6 +84,8 @@ export default function MeuDia() {
           try {
             const loc = await getQuickLocation()
             await api('/promotor/lunch/start', { body: loc ? { latitude: loc.latitude, longitude: loc.longitude } : {} })
+            // O almoço não conta no deslocamento: some o aviso de deslocamento acima do normal
+            void cancelTravelAlert()
             await reload()
           } catch (e) {
             if (e instanceof ApiError && ['ROTEIRO_NAO_INICIADO', 'ALMOCO_JA_FEITO', 'ATENDIMENTO_EM_ANDAMENTO', 'ALMOCO_DESATIVADO', 'EM_ALMOCO', 'ROTEIRO_ENCERRADO'].includes(e.code ?? '')) {
