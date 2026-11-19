@@ -1731,3 +1731,38 @@ textarea.input {
     animation: none !important;
   }
 }
+
+/* Nome clicável dentro de tabela (ex.: filtrar por promotor) */
+.linklike {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--marinho);
+  text-align: left;
+  cursor: pointer;
+}
+.linklike:hover {
+  text-decoration: underline;
+}
+
+/* Seção que recolhe e expande pela seta no título */
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--esp-2);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.section-toggle h2 {
+  margin: 0;
+}
+.section-body {
+  margin-top: var(--esp-3);
+}

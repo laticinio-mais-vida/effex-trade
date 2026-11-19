@@ -19,6 +19,7 @@ type Filters = { search: string; state: string; city: string; located: Located; 
 type Form = {
   name: string
   legalName: string
+  document: string
   city: string
   state: string
   latitude: string
@@ -27,7 +28,7 @@ type Form = {
   geofenceExempt: boolean
 }
 
-const emptyForm: Form = { name: '', legalName: '', city: '', state: 'BA', latitude: '', longitude: '', active: true, geofenceExempt: false }
+const emptyForm: Form = { name: '', legalName: '', document: '', city: '', state: 'BA', latitude: '', longitude: '', active: true, geofenceExempt: false }
 
 const toNumber = (v: string) => Number(v.trim().replace(',', '.'))
 /** "-12.9714, -38.5014" (copiado do Google Maps) ou "-12,9714; -38,5014" */
@@ -84,7 +85,7 @@ export function ClientsPage() {
       downloadCsv(
         f.located === 'sem' ? 'clientes-sem-localizacao.csv' : 'clientes.csv',
         EXPORT_COLUMNS,
-        clients.map((c) => [c.id, c.erpId, c.legalName, c.name, c.city, c.state, c.latitude, c.longitude, locationOrigin(c)]),
+        clients.map((c) => [c.id, c.erpId, c.legalName, c.name, c.city, c.state, c.latitude, c.longitude, c.document, locationOrigin(c)]),
       ),
   })
 
@@ -285,6 +286,7 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
       ? {
           name: client.name,
           legalName: client.legalName ?? '',
+          document: client.document ?? '',
           city: client.city ?? '',
           state: client.state ?? 'BA',
           latitude: client.latitude != null ? String(client.latitude) : '',
@@ -316,8 +318,8 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
     mutationFn: () => {
       const point = hasPoint ? { latitude: lat, longitude: lng } : {}
       const body = fromErp
-        ? { ...point, geofenceExempt: form.geofenceExempt }
-        : { name: form.name, legalName: form.legalName || null, city: form.city, state: form.state, ...point, active: form.active, geofenceExempt: form.geofenceExempt }
+        ? { ...point, document: form.document, geofenceExempt: form.geofenceExempt }
+        : { name: form.name, legalName: form.legalName || null, document: form.document, city: form.city, state: form.state, ...point, active: form.active, geofenceExempt: form.geofenceExempt }
       return client ? api(`/admin/clients/${client.id}`, { method: 'PATCH', body }) : api('/admin/clients', { method: 'POST', body })
     },
     onSuccess: () => {
@@ -363,6 +365,9 @@ function ClientForm({ client, onClose }: { client: Client | null; onClose: () =>
           </Field>
           <Field label="Razão social" className="full">
             <input className="input" value={form.legalName} readOnly={fromErp} onChange={(e) => set({ legalName: e.target.value })} />
+          </Field>
+          <Field label="CPF/CNPJ" className="full">
+            <input className="input" inputMode="numeric" placeholder="Só números ou com pontuação" value={form.document} onChange={(e) => set({ document: e.target.value })} />
           </Field>
           <Field label="Cidade">
             <input className="input" list="client-form-cities" value={form.city} readOnly={fromErp} onChange={(e) => set({ city: e.target.value })} />
@@ -579,13 +584,13 @@ function ClientMix({ clientId, fromErp }: { clientId: string; fromErp: boolean }
   )
 }
 
-const IMPORT_COLUMNS = ['id', 'razao_social', 'nome_fantasia', 'cidade', 'uf', 'latitude', 'longitude']
+const IMPORT_COLUMNS = ['id', 'razao_social', 'nome_fantasia', 'cidade', 'uf', 'latitude', 'longitude', 'cpf_cnpj']
 /** A planilha baixada também traz o código do ERP e a origem da localização (só para conferência: a importação os ignora). */
 const EXPORT_COLUMNS = ['id', 'codigo_erp', ...IMPORT_COLUMNS.slice(1), 'origem_localizacao']
 const locationOrigin = (c: Client) => (c.latitude == null ? '' : c.locationSource === 'ERP' ? 'ERP' : 'painel')
 
 /** Cabeçalho sem acento, minúsculo e com _ ("Razão Social" = razao_social); aceita nomes alternativos. */
-const HEADER_ALIASES: Record<string, string> = { fantasia: 'nome_fantasia', nome: 'nome_fantasia', estado: 'uf', lat: 'latitude', lng: 'longitude', lon: 'longitude' }
+const HEADER_ALIASES: Record<string, string> = { cnpj: 'cpf_cnpj', cpf: 'cpf_cnpj', documento: 'cpf_cnpj', fantasia: 'nome_fantasia', nome: 'nome_fantasia', estado: 'uf', lat: 'latitude', lng: 'longitude', lon: 'longitude' }
 const headerKey = (h: string) => {
   const k = h
     .trim()
@@ -606,8 +611,17 @@ type ImportRow = {
   state: string | null
   latitude: number | null
   longitude: number | null
+  document: string | null
 }
 type ImportResult = { created: number; updated: number; located: number; problems: { line: number; message: string }[] }
+
+/** CPF/CNPJ da planilha só com dígitos; o Excel come os zeros à esquerda (CNPJ de 13 dígitos, CPF de 10), que voltam aqui. */
+function readDocument(text: string) {
+  const digits = text.replace(/\D/g, '')
+  if (!digits) return { value: null, valid: true }
+  const padded = digits.length === 13 ? digits.padStart(14, '0') : digits.length === 10 ? digits.padStart(11, '0') : digits
+  return padded.length === 11 || padded.length === 14 ? { value: padded, valid: true } : { value: null, valid: false }
+}
 
 /** Converte e confere as linhas da planilha; as com problema ficam de fora, com o motivo. */
 function readRows(table: string[][]) {
@@ -629,8 +643,10 @@ function readRows(table: string[][]) {
     const state = r.uf ? r.uf.toUpperCase() : null
     const name = r.nome_fantasia || null
     const legalName = r.razao_social || null
-    const message =
-      (latitude == null) !== (longitude == null)
+    const doc = readDocument(r.cpf_cnpj ?? '')
+    const message = !doc.valid
+      ? `CPF/CNPJ "${r.cpf_cnpj}" inválido (CPF tem 11 dígitos e CNPJ, 14)`
+      : (latitude == null) !== (longitude == null)
         ? 'latitude e longitude precisam vir juntas'
         : latitude != null && (!validLat(latitude) || !validLng(longitude!))
           ? `latitude/longitude inválidas (${latText}; ${lngText})`
@@ -640,7 +656,7 @@ function readRows(table: string[][]) {
               ? 'sem id, informe o nome fantasia (ou a razão social), a cidade e a UF'
               : null
     if (message) problems.push({ line, message })
-    else rows.push({ line, id: r.id || null, name, legalName, city: r.cidade || null, state, latitude, longitude })
+    else rows.push({ line, id: r.id || null, name, legalName, city: r.cidade || null, state, latitude, longitude, document: doc.value })
   }
   const missing = header.includes('id') || ['cidade', 'uf'].every((c) => header.includes(c)) ? null : 'a planilha precisa da coluna id ou das colunas cidade e uf'
   return { rows, problems, missing }

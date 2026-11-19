@@ -36,6 +36,8 @@ export type Client = {
   name: string
   /** Razão social */
   legalName: string | null
+  /** CPF/CNPJ, só dígitos */
+  document: string | null
   city: string | null
   state: string | null
   /** Sem localização o cliente não entra em roteiro */
@@ -458,4 +460,74 @@ export type TodayRouteUpdate = {
   /** Saíram do roteiro mas continuam no dia como estão (já atendidos, justificados, em atendimento ou visita pontual) */
   kept: Ref[]
   reordered: boolean
+}
+
+// ---------- Relatório de tempos ----------
+export type TimeRowState = 'FEITA' | 'EM_ATENDIMENTO' | 'JUSTIFICADA' | 'PENDENTE' | 'NAO_FEITA'
+
+export type TimeOccurrence = {
+  /** Dia (AAAA-MM-DD) em que aconteceu */
+  date: string
+  rowId: string
+  /** ROTEIRO = tempo no cliente; DESLOCAMENTO = trajeto até o cliente */
+  kind: 'ROTEIRO' | 'DESLOCAMENTO'
+  direction: 'ACIMA' | 'ABAIXO'
+  clientName: string
+  city: string | null
+  from: string | null
+  to: string | null
+  valueSeconds: number
+  baseSeconds: number
+  diffSeconds: number
+  ratio: number
+  /** Sem observações suficientes do próprio grupo: comparado com a mediana geral */
+  fallback: boolean
+  reliable: boolean
+  veryShort: boolean
+  /** Registro na hora do evento: justificativa do promotor e ciente do supervisor */
+  flag: { id: string; justification: string | null; justifiedAt: string | null; acknowledgedAt: string | null } | null
+}
+
+export type TimeLiveAlert = {
+  kind: 'ATENDIMENTO_LONGO' | 'DESLOCAMENTO_LONGO'
+  clientName: string | null
+  city: string | null
+  since: string
+  elapsedSeconds: number
+  baseSeconds: number
+  fallback: boolean
+}
+
+export type TimeNotVisited = { date: string; rowId: string; clientName: string; city: string | null; state: TimeRowState; reason: string | null; comment: string | null }
+
+export type TimePromotorDay = {
+  key: string
+  id: string | null
+  name: string
+  supervisor: string | null
+  total: number
+  visited: number
+  inProgress: number
+  pending: number
+  notVisited: number
+  clientSeconds: number
+  travelSeconds: number
+  firstCheckin: string | null
+  lastCheckout: string | null
+  outsideDay: number
+  occurrences: TimeOccurrence[]
+  notVisitedList: TimeNotVisited[]
+  live: TimeLiveAlert[]
+}
+
+export type TimeReport = {
+  date: string
+  /** Último dia (igual a `date` no relatório de um dia só) */
+  dateTo: string
+  source: 'EFFEX' | 'TRADEPRO' | 'MISTO' | null
+  isToday: boolean
+  generatedAt: string
+  baseline: { from: string; to: string; observations: number } | null
+  promotores: TimePromotorDay[]
+  warnings: string[]
 }

@@ -6,6 +6,8 @@ import {
   barChartOutline,
   chatbubblesOutline,
   checkmarkDoneOutline,
+  chevronDown,
+  chevronForward,
   clipboardOutline,
   close,
   cubeOutline,
@@ -16,6 +18,7 @@ import {
   optionsOutline,
   peopleOutline,
   storefrontOutline,
+  timerOutline,
   todayOutline,
   trailSignOutline,
 } from 'ionicons/icons'
@@ -26,6 +29,8 @@ const icons = {
   'bar-chart-outline': barChartOutline,
   'chatbubbles-outline': chatbubblesOutline,
   'checkmark-done-outline': checkmarkDoneOutline,
+  'chevron-down': chevronDown,
+  'chevron-forward': chevronForward,
   'clipboard-outline': clipboardOutline,
   close,
   'cube-outline': cubeOutline,
@@ -36,6 +41,7 @@ const icons = {
   'options-outline': optionsOutline,
   'people-outline': peopleOutline,
   'storefront-outline': storefrontOutline,
+  'timer-outline': timerOutline,
   'today-outline': todayOutline,
   'trail-sign-outline': trailSignOutline,
 }

@@ -192,3 +192,17 @@ export function parseCsv(text: string) {
   if (row.some((c) => c.trim() !== '')) rows.push(row)
   return rows
 }
+
+/** Tempo absoluto em segundos: HH:MM:SS */
+export function fmtHms(seconds: number) {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(Math.floor(seconds / 3600))}:${p(Math.floor((seconds % 3600) / 60))}:${p(Math.floor(seconds % 60))}`
+}
+
+/** Tempo curto em segundos: 2h58 (ou 12min abaixo de 1 h) */
+export function fmtShort(seconds: number) {
+  return seconds >= 3600 ? `${Math.floor(seconds / 3600)}h${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}` : `${Math.round(seconds / 60)}min`
+}
+
+/** Diferença curta e com sinal: +1h49, -32min */
+export const fmtDiff = (seconds: number) => `${seconds < 0 ? '-' : '+'}${fmtShort(Math.abs(seconds))}`

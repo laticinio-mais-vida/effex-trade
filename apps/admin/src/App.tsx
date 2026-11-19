@@ -13,6 +13,7 @@ import { PhotosPage } from './pages/Photos'
 import { ProductsPage } from './pages/Products'
 import { ReasonsPage } from './pages/Reasons'
 import { ReportsPage } from './pages/Reports'
+import { TimesPage } from './pages/Times'
 import { RequestsPage } from './pages/Requests'
 import { RoutesPage } from './pages/Routes'
 import { SettingsPage } from './pages/Settings'
@@ -32,6 +33,7 @@ const groups: { title: string; links: NavItem[] }[] = [
       { to: '/mapa', label: 'Mapa', icon: 'map-outline' },
       { to: '/liberacoes', label: 'Liberações', icon: 'key-outline', badge: 'requests' },
       { to: '/relatorios', label: 'Relatórios', icon: 'bar-chart-outline' },
+      { to: '/tempos', label: 'Tempos de roteiro', icon: 'timer-outline' },
       { to: '/fotos', label: 'Avaliar fotos', icon: 'images-outline' },
       { to: '/correcoes', label: 'Auditorias dos vendedores', icon: 'checkmark-done-outline' },
       { to: '/contestacoes', label: 'Contestações', icon: 'chatbubbles-outline', badge: 'contests' },
@@ -112,6 +114,7 @@ export function App() {
           <Route path="/mapa" element={<MapPage />} />
           <Route path="/liberacoes" element={<RequestsPage />} />
           <Route path="/relatorios" element={<ReportsPage />} />
+          <Route path="/tempos" element={<TimesPage />} />
           <Route path="/fotos" element={<PhotosPage />} />
           <Route path="/correcoes" element={<AuditErrorsPage />} />
           <Route path="/contestacoes" element={<ContestsPage />} />
