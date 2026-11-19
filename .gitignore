@@ -15,3 +15,7 @@ __pycache__/
 apk/
 *.jks
 *.keystore
+
+# Conta de serviço do Firebase (push): segredo, só no servidor
+*firebase-adminsdk*.json
+firebase-conta-de-servico.json

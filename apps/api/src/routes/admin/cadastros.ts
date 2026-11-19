@@ -65,10 +65,19 @@ function normalizeAreas(areas: z.infer<typeof zArea>[]) {
   })
 }
 
-/** Cadastro do cliente: nome fantasia, razão social, cidade, UF e localização. */
+/** CPF (11) ou CNPJ (14 dígitos); aceita pontuação, guarda só os dígitos. Vazio apaga. */
+const zDocument = z
+  .string()
+  .trim()
+  .transform((v) => v.replace(/\D/g, ''))
+  .refine((v) => v === '' || v.length === 11 || v.length === 14, 'CPF deve ter 11 dígitos e CNPJ, 14')
+  .transform((v) => v || null)
+
+/** Cadastro do cliente: nome fantasia, razão social, CPF/CNPJ, cidade, UF e localização. */
 const clientFields = {
   name: z.string().trim().min(2, 'informe o nome fantasia').max(200),
   legalName: z.string().trim().max(200).nullish(),
+  document: zDocument.nullish(),
   city: zCity,
   state: zUf,
   latitude: zLat.optional(),
@@ -96,6 +105,8 @@ const importRow = z.object({
   id: zId.nullish(),
   name: z.string().trim().max(200).nullish(),
   legalName: z.string().trim().max(200).nullish(),
+  /** Vazio mantém o atual */
+  document: zDocument.nullish(),
   city: zCity.nullish(),
   state: zUf.nullish(),
   latitude: zLat.nullish(),
@@ -340,9 +351,11 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
       }
     }
     // Cliente do ERP: só a localização e a dispensa da cerca mudam aqui (e a localização mudada a sincronização não muda mais)
-    const { latitude: _lat, longitude: _lng, geofenceExempt, ...fields } = body
+    const { latitude: _lat, longitude: _lng, geofenceExempt, document, ...fields } = body
     const data = {
       ...(client.erpId != null ? {} : fields),
+      // O CPF/CNPJ não vem do ERP: pode ser preenchido aqui mesmo nos clientes do ERP
+      ...(document !== undefined ? { document } : {}),
       ...panelLocation(client, body),
       ...geofenceExemptData(client.geofenceExempt, geofenceExempt, req.user.sub),
     }
@@ -392,20 +405,22 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
       }
       // Localização igual à atual não muda nada; diferente passa a ser do painel (a sincronização não muda mais)
       const location = panelLocation('client' in found ? found.client : {}, coords)
+      // CPF/CNPJ vazio na planilha mantém o atual
+      const documentData = row.document ? { document: row.document } : {}
       if ('client' in found && found.client.erpId != null) {
-        // Cliente do ERP: nome, cidade e UF da planilha são ignorados (vêm da sincronização)
-        if (location.latitude == null) continue
-        matcher.add(await prisma.client.update({ where: { id: found.client.id }, data: location }))
+        // Cliente do ERP: nome, cidade e UF da planilha são ignorados (vêm da sincronização); só a localização e o CPF/CNPJ entram
+        if (location.latitude == null && !row.document) continue
+        matcher.add(await prisma.client.update({ where: { id: found.client.id }, data: { ...location, ...documentData } }))
         updated++
-        withLocation++
+        if (location.latitude != null) withLocation++
         continue
       }
       const names = { ...(row.name ? { name: row.name } : {}), ...(row.legalName ? { legalName: row.legalName } : {}) }
       const place = { ...(row.city ? { city: row.city } : {}), ...(row.state ? { state: row.state } : {}) }
       const saved =
         'client' in found
-          ? await prisma.client.update({ where: { id: found.client.id }, data: withCityKey({ ...names, ...place, ...location }) })
-          : await prisma.client.create({ data: withCityKey({ name: (row.name || row.legalName)!, legalName: row.legalName || null, city: row.city!, state: row.state!, ...location }) })
+          ? await prisma.client.update({ where: { id: found.client.id }, data: withCityKey({ ...names, ...place, ...documentData, ...location }) })
+          : await prisma.client.create({ data: withCityKey({ name: (row.name || row.legalName)!, legalName: row.legalName || null, city: row.city!, state: row.state!, ...documentData, ...location }) })
       matcher.add(saved)
       if ('client' in found) updated++
       else created++

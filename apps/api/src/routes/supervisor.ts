@@ -20,6 +20,9 @@ import { areaWhere, clientScope, loadAreas, promotorScope } from '../services/sc
 import { zModules } from '../services/visit-structure'
 import { serializeClient, serializePhoto, serializeVisit } from '../services/serializers'
 import { getSettings, routeOrderEnforced } from '../services/settings'
+import { acknowledgeFlag, pendingTimeFlags } from '../services/time-flags'
+import { rangeFromQuery, timeReportRange, timeScopeFor } from '../services/time-report'
+import { timeReportFile } from '../services/time-report-file'
 import { ensureWorkDay } from '../services/workdays'
 
 /** Vendedores visíveis para o supervisor (admin vê todos). */
@@ -55,14 +58,35 @@ export async function supervisorRoutes(app: FastifyInstance) {
 
   app.get('/summary', async (req) => {
     await checkLunchAlerts()
-    const [pendingRequests, pendingVendorAudits, openAlerts, pendingContests] = await Promise.all([
+    const [pendingRequests, pendingVendorAudits, openAlerts, pendingContests, pendingTimes] = await Promise.all([
       prisma.permissionRequest.count({ where: { status: 'PENDENTE', date: toDbDate(todayIn()), promotor: promotorScope(req.user) } }),
       prisma.photoAudit.count({ where: { review: null, auditor: vendedorScope(req.user) } }),
       prisma.alert.count({ where: { acknowledgedAt: null, promotor: promotorScope(req.user) } }),
       pendingContestsCount(req.user),
+      pendingTimeFlags(req.user),
     ])
-    return { pendingRequests, pendingVendorAudits, openAlerts, pendingContests }
+    return { pendingRequests, pendingVendorAudits, openAlerts, pendingContests, pendingTimeFlags: pendingTimes }
   })
+
+  /** Relatório de tempos do dia (tempo em cliente e deslocamento fora da média) dos promotores da equipe. */
+  app.get('/time-report', async (req) => {
+    const q = parse(z.object({ date: zDate.optional(), from: zDate.optional(), to: zDate.optional() }), req.query)
+    const { from, to } = rangeFromQuery(q)
+    return timeReportRange(from, to, await timeScopeFor(req.user))
+  })
+
+  /** PDF ou JPEG do relatório de tempos: de um promotor (`promotor`) ou consolidado da equipe. */
+  app.get('/time-report/file', async (req, reply) => {
+    const q = parse(z.object({ date: zDate.optional(), from: zDate.optional(), to: zDate.optional(), promotor: z.string().trim().max(200).optional(), format: z.enum(['pdf', 'jpeg']).default('pdf') }), req.query)
+    const { from, to } = rangeFromQuery(q)
+    const report = await timeReportRange(from, to, await timeScopeFor(req.user))
+    if (q.promotor) report.promotores = report.promotores.filter((p) => p.key === q.promotor || p.id === q.promotor)
+    const file = await timeReportFile(report, { individual: !!q.promotor, format: q.format })
+    return reply.header('Content-Type', file.contentType).header('Content-Disposition', `attachment; filename="${file.name}"`).send(file.buffer)
+  })
+
+  /** Ciente num desvio de tempo da equipe. */
+  app.post('/time-flags/:id/ack', async (req) => acknowledgeFlag(req.user, parse(zIdParam, req.params).id))
 
   /** Alertas da equipe (ex.: almoço acima do limite). "abertos" = ainda sem "ciente". */
   app.get('/alerts', async (req) => {

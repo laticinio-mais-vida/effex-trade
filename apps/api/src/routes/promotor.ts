@@ -14,6 +14,7 @@ import {
   serializeRequest,
 } from '../services/permissions'
 import { clientSearch, located } from '../services/clients'
+import { justifyFlag, processTimeEvents, promotorTimeView } from '../services/time-flags'
 import { contestBodySchema, createContest, listRejectedForPromotor } from '../services/contests'
 import { clientScope } from '../services/scope'
 import { serializeClient } from '../services/serializers'
@@ -54,6 +55,11 @@ const zFormLocation = z.object({
   mocked: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
   takenAt: z.iso.datetime({ offset: true }).optional(),
 })
+
+/** Junta ao resultado do check-in/check-out os desvios de tempo do momento e os limites para as notificações do app. */
+async function withTiming<T extends object>(promotorId: string, event: 'checkin' | 'checkout', result: T) {
+  return { ...result, timing: await processTimeEvents(promotorId, event) }
+}
 
 export async function promotorRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireRole('PROMOTOR'))
@@ -120,9 +126,9 @@ export async function promotorRoutes(app: FastifyInstance) {
     if (req.isMultipart()) {
       const { fields, file } = await readImageForm(req)
       const { takenAt, ...loc } = parse(zFormLocation, fields)
-      return checkin(req.user.sub, id, loc, file ? { ...file, takenAt: takenAt ? new Date(takenAt) : undefined } : null)
+      return withTiming(req.user.sub, 'checkin', await checkin(req.user.sub, id, loc, file ? { ...file, takenAt: takenAt ? new Date(takenAt) : undefined } : null))
     }
-    return checkin(req.user.sub, id, parse(zLocation, req.body), null)
+    return withTiming(req.user.sub, 'checkin', await checkin(req.user.sub, id, parse(zLocation, req.body), null))
   })
 
   /** Reabre um cliente já atendido hoje (mesmo formato do check-in: localização + foto da fachada). */
@@ -131,14 +137,26 @@ export async function promotorRoutes(app: FastifyInstance) {
     if (req.isMultipart()) {
       const { fields, file } = await readImageForm(req)
       const { takenAt, ...loc } = parse(zFormLocation, fields)
-      return reopenVisit(req.user.sub, id, loc, file ? { ...file, takenAt: takenAt ? new Date(takenAt) : undefined } : null)
+      return withTiming(req.user.sub, 'checkin', await reopenVisit(req.user.sub, id, loc, file ? { ...file, takenAt: takenAt ? new Date(takenAt) : undefined } : null))
     }
-    return reopenVisit(req.user.sub, id, parse(zLocation, req.body), null)
+    return withTiming(req.user.sub, 'checkin', await reopenVisit(req.user.sub, id, parse(zLocation, req.body), null))
   })
 
   app.post('/visits/:id/checkout', async (req) => {
     const { notes, ...loc } = parse(zOptionalLocation.and(z.object({ notes: z.string().max(2000).optional() })), req.body)
-    return checkout(req.user.sub, parse(zIdParam, req.params).id, toLocation(loc), notes)
+    return withTiming(req.user.sub, 'checkout', await checkout(req.user.sub, parse(zIdParam, req.params).id, toLocation(loc), notes))
+  })
+
+  /** Seu dia no relatório de tempos: resumo, desvios acima da média (com a sua justificativa) e o que está em andamento. */
+  app.get('/time-report', async (req) => {
+    const q = parse(z.object({ date: zDate.optional() }), req.query)
+    return promotorTimeView(req.user.sub, q.date ?? todayIn())
+  })
+
+  /** Explicar um desvio de tempo (o supervisor vê). */
+  app.post('/time-flags/:id/justify', async (req) => {
+    const body = parse(z.object({ text: z.string().max(1000) }), req.body)
+    return justifyFlag(req.user.sub, parse(zIdParam, req.params).id, body.text)
   })
 
   /** Conclui uma atividade extra que não exige foto. */

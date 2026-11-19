@@ -30,5 +30,7 @@ export const env = {
   /** Origens liberadas no CORS, separadas por vírgula (ex.: https://effextrade.maisvida.cloud). Vazio: qualquer origem. */
   corsOrigins: list(process.env.CORS_ORIGIN),
   /** true atrás de proxy (Caddy): o IP de quem acessa vem do X-Forwarded-For, para o limite de tentativas de login. */
+  /** Conta de serviço do Firebase (JSON ou caminho do arquivo) para o push ao supervisor. Vazia: push desligado. */
+  fcmServiceAccount: process.env.FCM_SERVICE_ACCOUNT?.trim() || null,
   trustProxy: process.env.TRUST_PROXY === 'true',
 }

@@ -27,6 +27,8 @@ export function serializeClient(client: Client & { geofenceExemptBy?: { name: st
     name: client.name,
     /** Razão social */
     legalName: client.legalName,
+    /** CPF/CNPJ (só dígitos) */
+    document: client.document,
     city: client.city,
     state: client.state,
     latitude: client.latitude,

@@ -126,6 +126,9 @@ model User {
   contests          PhotoContest[]      @relation("ContestPromotor")
   contestsDecided   PhotoContest[]      @relation("ContestDecider")
   clientsGeofenceExempt Client[]        @relation("ClientGeofenceExempt")
+  timeFlags             TimeFlag[]          @relation("TimeFlagPromotor")
+  timeFlagsAcked        TimeFlag[]          @relation("TimeFlagAck")
+  pushDevices           PushDevice[]
 }
 
 /// Cidade (ou UF inteira, sem cidade) atendida por promotor, vendedor ou supervisor: só os clientes dela aparecem para ele
@@ -155,6 +158,8 @@ model Client {
   active    Boolean  @default(true)
   /// Código no ERP (CLIENTES.ID_CLIENTE). Com código, nome, razão social, cidade, UF e situação vêm do ERP (só leitura no painel)
   erpId     Int?     @unique
+  /// CPF/CNPJ só com dígitos. Identifica o cliente no relatório de tempos (as medianas do TradePro casam por ele)
+  document  String?
   /// Dispensado da cerca eletrônica (painel: administrador, ou supervisor nas cidades dele): check-in, check-out e volta do
   /// almoço nele valem de qualquer lugar. Guarda quem dispensou e quando; a sincronização com o ERP não mexe nisso
   geofenceExempt     Boolean   @default(false)
@@ -173,6 +178,7 @@ model Client {
   erpSales        ErpSale[]
 
   @@index([state, cityKey])
+  @@index([document])
 }
 
 /// Venda do ERP dos últimos 2 meses (VENDAS: nota de venda a cliente, não cancelada). Chega junto com os clientes na
@@ -390,6 +396,7 @@ model Visit {
   taskCompletions TaskCompletion[]
   sessions        VisitSession[]
   scheduledVisit  ScheduledVisit?
+  timeFlags       TimeFlag[]
 
   @@index([date, promotorId])
   @@index([clientId, date])
@@ -712,4 +719,88 @@ model PromotorSetting {
   updatedAt  DateTime @updatedAt
 
   @@id([promotorId, key])
+}
+
+/// Histórico de visitas importado de outro sistema (TradePro): uma linha por cliente do roteiro de um promotor num dia.
+/// Serve de base para as medianas do relatório de tempos até o EFFEX ter histórico próprio; dia que já existe nas visitas do
+/// EFFEX vale o do EFFEX. Reimportar o mesmo arquivo troca as linhas do período (idempotente).
+model TimeHistory {
+  id             String    @id @default(cuid())
+  /// De onde veio (hoje: TRADEPRO)
+  source         String
+  date           DateTime  @db.Date
+  /// Nome do promotor como no sistema de origem, sem o sufixo entre parênteses e em maiúsculas
+  promotorName   String
+  /// Promotor do EFFEX, quando o nome casa com um só usuário
+  promotorId     String?
+  supervisorName String?
+  /// CPF/CNPJ só com dígitos: a chave do cliente nas medianas
+  clientKey      String
+  clientName     String
+  city           String?
+  /// Cliente do EFFEX, quando o CPF/CNPJ casa com o cadastro
+  clientId       String?
+  checkinAt      DateTime?
+  checkoutAt     DateTime?
+  /// Permanência no cliente e deslocamento até ele (inclui parada e espera, sem o almoço), em segundos; 0 = sem visita
+  clientSeconds  Int       @default(0)
+  travelSeconds  Int       @default(0)
+  /// Status do roteiro na origem, motivo e comentário de quem não visitou
+  status         String?
+  reason         String?
+  comment        String?
+  importedAt     DateTime  @default(now())
+
+  @@index([date])
+  @@index([clientKey, date])
+  @@index([promotorName, clientKey])
+  @@index([source, date])
+}
+
+/// Desvio de tempo registrado na hora em que acontece (relatório de tempos): tempo no cliente ou deslocamento acima da média
+/// do histórico (o promotor é avisado e pode justificar) ou, só para o supervisor, tempo muito curto. Um por visita e tipo.
+model TimeFlag {
+  id             String    @id @default(cuid())
+  visitId        String
+  visit          Visit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  promotorId     String
+  promotor       User      @relation("TimeFlagPromotor", fields: [promotorId], references: [id], onDelete: Cascade)
+  date           DateTime  @db.Date
+  /// ROTEIRO (tempo no cliente) ou DESLOCAMENTO (trajeto até o cliente)
+  kind           String
+  /// ACIMA ou ABAIXO da média
+  direction      String
+  valueSeconds   Int
+  baseSeconds    Int
+  /// Comparado com a média geral (poucas visitas no histórico)
+  fallback       Boolean   @default(false)
+  /// Falso no tempo muito curto: só o supervisor é avisado
+  promotorNotified Boolean @default(true)
+  detectedAt     DateTime  @default(now())
+  /// Explicação do promotor
+  justification  String?
+  justifiedAt    DateTime?
+  /// Supervisor ciente
+  acknowledgedAt DateTime?
+  acknowledgedById String?
+  acknowledgedBy User?     @relation("TimeFlagAck", fields: [acknowledgedById], references: [id])
+
+  @@unique([visitId, kind])
+  @@index([date])
+  @@index([promotorId, date])
+  @@index([acknowledgedAt])
+}
+
+/// Celular com o app aberto por este usuário, para receber notificação push (FCM) mesmo com o app fechado
+model PushDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Token do Firebase Cloud Messaging; muda de dono se outra pessoa entrar no mesmo celular
+  token      String   @unique
+  platform   String   @default("android")
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
 }

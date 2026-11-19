@@ -11,6 +11,9 @@ import { requestInclude, serializeRequest } from '../../services/permissions'
 import { pendingContestsCount } from '../../services/contests'
 import { auditBodySchema, saveAudit } from '../../services/photo-audits'
 import { visitReport } from '../../services/reports'
+import { rangeFromQuery, timeReportRange, timeScopeFor } from '../../services/time-report'
+import { acknowledgeFlag } from '../../services/time-flags'
+import { timeReportFile } from '../../services/time-report-file'
 import { assertAdmin, inAreas, promotorScope } from '../../services/scope'
 import { serializePhoto } from '../../services/serializers'
 import {
@@ -346,5 +349,35 @@ export async function adminOperacaoRoutes(app: FastifyInstance) {
       .header('Content-Type', 'application/pdf')
       .header('Content-Disposition', `attachment; filename="correcoes-auditoria-${from}-a-${to}.pdf"`)
       .send(pdf)
+  })
+  // ---------------- Relatório de tempos ----------------
+  const timeQuery = z.object({
+    /** Um dia só; ou o período `from` a `to` (até 31 dias) */
+    date: zDate.optional(),
+    from: zDate.optional(),
+    to: zDate.optional(),
+    /** Promotor do relatório: o id do usuário ou, no histórico ainda sem usuário, "n:NOME" */
+    promotor: z.string().trim().max(200).optional(),
+  })
+
+  async function loadTimeReport(user: AuthUser, query: unknown) {
+    const q = parse(timeQuery, query)
+    const { from, to } = rangeFromQuery(q)
+    const report = await timeReportRange(from, to, await timeScopeFor(user))
+    if (q.promotor) report.promotores = report.promotores.filter((p) => p.key === q.promotor || p.id === q.promotor)
+    return { report, promotor: q.promotor }
+  }
+
+  app.get('/time-report', async (req) => (await loadTimeReport(req.user, req.query)).report)
+
+  /** Ciente num desvio de tempo (supervisor: da equipe dele; administrador: qualquer um). */
+  app.post('/time-flags/:id/ack', async (req) => acknowledgeFlag(req.user, parse(zIdParam, req.params).id))
+
+  /** PDF ou JPEG do dia: individual com `promotor`, consolidado sem. */
+  app.get('/time-report/pdf', async (req, reply) => {
+    const { report, promotor } = await loadTimeReport(req.user, req.query)
+    const { format } = parse(z.object({ format: z.enum(['pdf', 'jpeg']).default('pdf') }), req.query)
+    const file = await timeReportFile(report, { individual: !!promotor, format })
+    return reply.header('Content-Type', file.contentType).header('Content-Disposition', `attachment; filename="${file.name}"`).send(file.buffer)
   })
 }

@@ -35,7 +35,10 @@ PASTA = Path(__file__).resolve().parent
 ROTA = "/sync/clientes"
 # LATITUDADE (assim mesmo, no ERP) e LONGITUDE são a localização do cliente; a de entrega só entra quando ela falta
 CONSULTA = ("SELECT ID_CLIENTE, NOME, RAZAOSOCIAL, CIDADE, ESTADO, INATIVO, LATITUDADE, LONGITUDE, "
-            "LATITUDEENTREGA, LONGITUDEENTREGA FROM CLIENTES")
+            "LATITUDEENTREGA, LONGITUDEENTREGA{documento} FROM CLIENTES")
+# O CPF/CNPJ é a chave do cliente no relatório de tempos. O nome da coluna em CLIENTES é descoberto no próprio banco (a
+# primeira que combina, nesta ordem); sem nenhuma, os clientes vão sem o documento e o envio segue com um aviso
+COLUNAS_DOCUMENTO = ("CNPJ", "CPFCNPJ", "CNPJCPF", "CNPJ_CPF", "CPF_CNPJ", "CGC", "CPF")
 # Vendas: as notas de venda não canceladas a cliente (a venda a funcionário, fornecedor ou produtor tem outro
 # TIPOCLIENTE e usa o código do cadastro deles, não o de CLIENTES), com o total de cada produto na nota. O valor é o
 # VALORTOTALITEM, o mesmo do faturamento no BI Mais Vida, sem descontar devoluções. Nome, unidade e código (CODIGO, o
@@ -154,6 +157,16 @@ def ler_vendas(bd, hoje: dt.date) -> dict:
             "list": list(vendas.values())}
 
 
+def achar_coluna_documento(bd) -> str | None:
+    """Coluna de CPF/CNPJ da tabela CLIENTES: uma das conhecidas ou, na falta, a primeira com CNPJ no nome."""
+    nomes = [str(n).strip().upper() for (n,) in bd.consulta(
+        "SELECT RDB$FIELD_NAME FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME = 'CLIENTES'")]
+    for candidata in COLUNAS_DOCUMENTO:
+        if candidata in nomes:
+            return candidata
+    return next((n for n in nomes if "CNPJ" in n), None)
+
+
 def ler_banco(ini: configparser.ConfigParser) -> tuple[list[dict], dict | None, str | None, dt.datetime]:
     """Clientes e vendas da cópia do banco, na mesma transação. Sem as vendas (None), vem o erro da leitura delas."""
     from fb import BancoSomenteLeitura  # só aqui: o fdb e o Firebird só são necessários para ler o banco
@@ -173,7 +186,12 @@ def ler_banco(ini: configparser.ConfigParser) -> tuple[list[dict], dict | None, 
     try:
         with BancoSomenteLeitura(str(arquivo), b.get("usuario", "SYSDBA"), senha, host=b.get("host", "localhost"),
                                  fbclient=b.get("fbclient") or None, codificacao=b.get("codificacao", "cp1252")) as bd:
-            linhas = bd.consulta(CONSULTA)
+            coluna_documento = achar_coluna_documento(bd)
+            if coluna_documento:
+                print(f"CPF/CNPJ dos clientes lido de CLIENTES.{coluna_documento}")
+            else:
+                print("AVISO: não achei a coluna de CPF/CNPJ em CLIENTES: os clientes vão sem o documento.")
+            linhas = bd.consulta(CONSULTA.format(documento=f", {coluna_documento}" if coluna_documento else ""))
             # À parte: se a leitura das vendas falhar (ex.: uma tabela mudou no ERP), os clientes vão assim mesmo
             try:
                 vendas = ler_vendas(bd, dt.date.today())
@@ -183,12 +201,14 @@ def ler_banco(ini: configparser.ConfigParser) -> tuple[list[dict], dict | None, 
         raise Problema(f"falha ao ler o banco: {e}\n  Confira se o serviço 'Firebird Server - DefaultInstance' está rodando "
                        "e se a cópia do banco terminou de ser gravada.") from None
     clientes = []
-    for id_cliente, nome, razao, cidade, uf, inativo, lat, lng, lat_entrega, lng_entrega in linhas:
+    for linha in linhas:
+        id_cliente, nome, razao, cidade, uf, inativo, lat, lng, lat_entrega, lng_entrega = linha[:10]
+        documento = texto(linha[10], 30) if len(linha) > 10 else None
         if id_cliente is None or int(id_cliente) <= 0:
             continue
         p = ponto(lat, lng) or ponto(lat_entrega, lng_entrega)
         clientes.append({"erpId": int(id_cliente), "name": texto(nome, 200), "legalName": texto(razao, 200),
-                         "city": texto(cidade, 120), "state": texto(uf, 20), "active": ativo(inativo),
+                         "city": texto(cidade, 120), "state": texto(uf, 20), "active": ativo(inativo), "document": documento,
                          "latitude": p[0] if p else None, "longitude": p[1] if p else None})
     if not clientes:
         raise Problema("a tabela CLIENTES veio vazia: a cópia do banco está completa?")

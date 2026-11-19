@@ -2,9 +2,9 @@
 FROM node:24-bookworm-slim
 
 # openssl: motor de migrações do Prisma. fontconfig + DejaVu: a faixa de data e hora gravada nas fotos (sharp),
-# sem fonte o texto sai sem letras. tzdata: horário dos logs.
+# sem fonte o texto sai sem letras. tzdata: horário dos logs. poppler-utils: PDF do relatório de tempos em JPEG.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssl ca-certificates fontconfig fonts-dejavu-core tzdata \
+ && apt-get install -y --no-install-recommends openssl ca-certificates fontconfig fonts-dejavu-core tzdata poppler-utils \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -19,6 +19,8 @@ RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npm ci --include=
 
 COPY src ./src
 COPY scripts ./scripts
+# Logo do cliente nos PDFs
+COPY assets ./assets
 
 ENV NODE_ENV=production NODE_OPTIONS=--max-old-space-size=320
 USER node

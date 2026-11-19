@@ -59,6 +59,8 @@ const syncBody = z.object({
         erpId: zErpCode.positive(),
         name: zText,
         legalName: zText,
+        /** CPF/CNPJ do ERP (pontuação é tirada); ausente ou inválido não apaga o que o cliente já tem */
+        document: zText.optional(),
         city: zText,
         state: zText,
         active: z.boolean(),

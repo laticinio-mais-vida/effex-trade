@@ -5,6 +5,7 @@ import { badRequest, conflict } from '../lib/errors'
 import { clientMatcher, erpOwnsLocation, samePoint, unlocated } from './clients'
 import { syncErpMix } from './erp-mix'
 import { normalizeSales, replaceSales, type ErpSalesInput } from './erp-sales'
+import { cleanDocument } from './time-history'
 
 /**
  * Sincronização dos clientes com o ERP. O computador da empresa lê a tabela CLIENTES da cópia do banco (pasta sync/)
@@ -23,6 +24,8 @@ export type ErpClientInput = {
   erpId: number
   name?: string | null
   legalName?: string | null
+  /** CPF/CNPJ do ERP */
+  document?: string | null
   city?: string | null
   state?: string | null
   active: boolean
@@ -44,6 +47,8 @@ type Row = {
   erpId: number
   name: string
   legalName: string | null
+  /** CPF/CNPJ só com dígitos; null: o ERP não trouxe (ou veio inválido) e o cadastro mantém o que tem */
+  document: string | null
   city: string | null
   cityKey: string | null
   state: string | null
@@ -56,6 +61,7 @@ type Current = {
   erpId: number | null
   name: string
   legalName: string | null
+  document: string | null
   city: string | null
   state: string | null
   active: boolean
@@ -93,6 +99,7 @@ function normalize(clients: ErpClientInput[]) {
       erpId: c.erpId,
       name: clean(c.name, 200) ?? legalName ?? `Cliente ${c.erpId}`,
       legalName,
+      document: cleanDocument(c.document),
       city,
       cityKey: city ? cityKey(city) : null,
       state,
@@ -108,7 +115,7 @@ function normalize(clients: ErpClientInput[]) {
   return { rows, seen, warnings }
 }
 
-const fields = (r: Row) => ({ name: r.name, legalName: r.legalName, city: r.city, cityKey: r.cityKey, state: r.state, active: r.active })
+const fields = (r: Row) => ({ name: r.name, legalName: r.legalName, city: r.city, cityKey: r.cityKey, state: r.state, active: r.active, ...(r.document ? { document: r.document } : {}) })
 
 /** O que mudou no ERP desde a última sincronização, fora a localização (null: nada). */
 function diff(c: Current, r: Row): Prisma.ClientUpdateInput | null {
@@ -117,6 +124,8 @@ function diff(c: Current, r: Row): Prisma.ClientUpdateInput | null {
   if (c.legalName !== r.legalName) data.legalName = r.legalName
   if (c.city !== r.city) Object.assign(data, { city: r.city, cityKey: r.cityKey })
   if (c.state !== r.state) data.state = r.state
+  // O documento do ERP vale quando vem; vazio no ERP não apaga o que foi preenchido no painel
+  if (r.document && c.document !== r.document) data.document = r.document
   if (c.active !== r.active) data.active = r.active
   return Object.keys(data).length ? data : null
 }
@@ -149,7 +158,7 @@ async function run(input: SyncInput, meta: { sentAt: Date; ip?: string }) {
   const { rows, seen, warnings } = normalize(input.clients)
   // Sem as vendas no pacote, ficam as guardadas no envio anterior
   const sales = input.sales ? normalizeSales(input.sales) : null
-  const select = { id: true, erpId: true, name: true, legalName: true, city: true, state: true, active: true, latitude: true, longitude: true, locationSource: true }
+  const select = { id: true, erpId: true, name: true, legalName: true, document: true, city: true, state: true, active: true, latitude: true, longitude: true, locationSource: true }
   const [existing, unlinked] = await Promise.all([
     prisma.client.findMany({ where: { erpId: { not: null } }, select }),
     prisma.client.findMany({ where: { erpId: null }, select: { id: true, latitude: true, longitude: true, locationSource: true } }),

@@ -3,6 +3,7 @@ import { prisma } from './db'
 import { env } from './env'
 import { todayIn } from './lib/dates'
 import { checkLunchAlerts } from './services/alerts'
+import { pushEnabled } from './services/push'
 import { computePendingGpsKm } from './services/gps-km'
 import { ensureWorkDaysForAll } from './services/workdays'
 
@@ -27,6 +28,7 @@ const computeGpsKm = () =>
     .catch((error) => app.log.error(error, 'falha ao calcular o km percorrido'))
 const gpsTimer = setInterval(computeGpsKm, 5 * 60_000)
 
+app.log.info(pushEnabled() ? 'push ao supervisor: ligado (Firebase)' : 'push ao supervisor: desligado (sem FCM_SERVICE_ACCOUNT)')
 await app.listen({ port: env.port, host: env.host })
 void computeGpsKm()
 

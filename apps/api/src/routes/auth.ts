@@ -5,6 +5,7 @@ import { requireRole } from '../auth'
 import { prisma } from '../db'
 import { badRequest, HttpError, unauthorized } from '../lib/errors'
 import { parse } from '../lib/validate'
+import { registerDevice, removeDevice } from '../services/push'
 import { serializeUser } from '../services/serializers'
 
 export async function authRoutes(app: FastifyInstance) {
@@ -37,6 +38,20 @@ export async function authRoutes(app: FastifyInstance) {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: req.user.sub } })
     if (!(await bcrypt.compare(body.current, user.passwordHash))) throw badRequest('Senha atual incorreta.')
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(body.next, 10) } })
+    return { ok: true }
+  })
+
+  /** O app (supervisor/admin) registra o celular para receber notificação push; chamado a cada abertura. */
+  app.post('/push-token', { preHandler: requireRole('SUPERVISOR', 'ADMIN') }, async (req) => {
+    const body = parse(z.object({ token: z.string().trim().min(20).max(4096) }), req.body)
+    await registerDevice(req.user.sub, body.token)
+    return { ok: true }
+  })
+
+  /** Ao sair da conta, o celular deixa de receber os avisos dela. */
+  app.post('/push-token/remove', { preHandler: requireRole() }, async (req) => {
+    const body = parse(z.object({ token: z.string().trim().min(1).max(4096) }), req.body)
+    await removeDevice(req.user.sub, body.token)
     return { ok: true }
   })
 }
