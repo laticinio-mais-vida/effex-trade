@@ -134,6 +134,18 @@ A diferença entre os dois mostra desvios e trajetos fora do esperado (inclusive
 
 "Pendentes" em Avaliar fotos são as fotos que quem está no painel ainda não aprovou nem reprovou. As notas de 0 a 10 do painel antigo viraram aprovações de quem deu a nota (a observação virou o texto da aprovação; migração `avaliacao_fotos_aprovar_reprovar`). Auditoria do vendedor já conferida não pode mais ser alterada por ele (`src/services/photo-audits.ts`). Reprovação do vendedor conferida como incorreta não conta mais contra o promotor (não aparece em Recusadas). Contestações: `src/services/contests.ts`.
 
+## Relatório de tempos
+
+Compara o **tempo em cada cliente** e o **deslocamento** (do check-out do cliente anterior ao check-in, sem o almoço) com a **média do histórico** e sinaliza o que foge do normal. A "média" é calculada pela mediana (o valor do meio), para um check-out esquecido por horas não distorcer. Código em `src/services/time-report.ts`.
+
+- **Regra:** a referência são as visitas dos 3 meses anteriores ao dia: tempo em cliente, pela média do cliente (todos os promotores); deslocamento, pela média do promotor naquele cliente. Com menos de 3 visitas no grupo vale a média geral e a linha leva `*`. Sinaliza acima de 2x a média e 15 min acima dela; tempo muito curto (até 1/4 da média e 15 min abaixo) só vai para o supervisor. Visita = tempo no cliente > 0; o resto do roteiro do dia é "não visitado".
+- **Histórico do TradePro:** `npm run importar-historico -- <arquivo.csv|.xlsx>` (colunas do "Relatório de Roteiros"; reimportar o mesmo período troca as linhas). A chave do cliente é o **CPF/CNPJ** (`Client.document`, preenchido pelo painel, pela planilha de clientes ou pela sincronização do ERP, que procura a coluna sozinha). Dia que existe no EFFEX vale o do EFFEX; dias antigos vêm do histórico (`TimeHistory`).
+- **Painel:** Tempos de roteiro (período com data inicial e final, até 31 dias; hoje mostra o acumulado até o último registro, igual ao relatório da tarde do supervisor; PDF e JPEG consolidado ou individual, justificativa do promotor e ciente do supervisor).
+- **Na hora (`src/services/time-flags.ts`):** a cada check-in e check-out a API grava os desvios novos em `TimeFlag` e devolve `timing` na resposta. O promotor é avisado só de tempo **acima** da média, com referência firme (a do próprio cliente; no deslocamento, ao menos a dele), e pode justificar; o supervisor vê a justificativa e dá ciente. O app agenda uma notificação local para o horário em que o atendimento passa do limite (e do deslocamento), mesmo minimizado, e cancela ao sair, ao ir almoçar ou ao encerrar o roteiro.
+- **Push ao supervisor (`src/services/push.ts`):** com o Firebase configurado (`FCM_SERVICE_ACCOUNT`), o supervisor recebe notificação mesmo com o app fechado: desvio de tempo já fechado (acima da média ou muito curto), no momento do check-out ou do check-in que o registra. Sem a configuração, nada é enviado e o resto funciona igual.
+- **App:** supervisor, aba Tempos (equipe, justificativas, ciente, PDF/JPEG para compartilhar); promotor, aba Meu tempo (só o dia dele).
+- **Testar o dia de hoje:** `npm run simular-dia` recria um dia real do histórico como se estivesse acontecendo agora (só em banco local). JPEG exige `poppler-utils` no servidor (já na imagem Docker).
+
 ## Tipos de liberação do supervisor
 
 Ficam em `apps/api/src/services/permissions.ts`, cada um com `validate` (o pedido ainda faz sentido?) e `apply` (o que muda quando aprovado). Hoje: check-in fora da cerca, liberar sem fotos, alterar ordem de atendimento e substituir cliente. Para criar outro, acrescente um item na lista `permissionTypes`; o pedido, a aprovação, o histórico e o relatório já funcionam para ele.
@@ -161,7 +173,7 @@ Publicado em **https://effextrade.maisvida.cloud** (painel) e **https://effextra
 Ainda pendente:
 
 - Fotos: ficam em disco (`UPLOAD_DIR`) e são servidas sem login em `/uploads` (nomes impossíveis de adivinhar). O próximo passo é um storage (S3, R2 ou GCS) com links assinados; a troca fica isolada em `src/services/storage.ts`.
-- App: notificação push dos alertas ao supervisor (hoje ele vê o alerta quando abre o app ou o painel). O APK e as atualizações automáticas já existem ([docs/app_android.md](docs/app_android.md)).
+- App: o push ao supervisor está pronto no código, mas só liga depois de criar o projeto no Firebase e colocar os dois arquivos (passo a passo em [docs/app_android.md](docs/app_android.md#push-ao-supervisor-firebase)). Enquanto isso, ele vê os avisos ao abrir o app ou o painel.
 - App: registrar o pacote `com.effex.trade` no Android Developer Console antes de 2027, quando o Google passa a exigir desenvolvedor verificado também para APK instalado fora de loja (passo a passo em [docs/app_android.md](docs/app_android.md#verificação-de-desenvolvedor-do-google-prazo-2027)).
 - Pontos de GPS (`LocationPing`) não são apagados: com o km percorrido gravado, dá para definir um prazo de guarda (ex.: alguns meses).
 

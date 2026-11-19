@@ -200,6 +200,26 @@ então renomeia.
 O APK e as atualizações não leem arquivos `.env`: o endereço da API fica no código. O `.env` local continua valendo no
 Expo Go, e a tela de login ainda permite trocar o servidor.
 
+### Push ao supervisor (Firebase)
+
+O supervisor recebe notificação com o app fechado quando um desvio de tempo é registrado (tempo acima da média ou muito curto).
+Isso usa o **Firebase Cloud Messaging** do Google, gratuito, e precisa de uma conta Google da empresa. Sem esta
+configuração o app e o sistema funcionam normalmente, só sem o push. Não precisa de cartão nem de Play Store. Uma vez:
+
+1. Em https://console.firebase.google.com crie um projeto (ex.: "EFFEX Trade"; o Google Analytics pode ficar desligado).
+2. No projeto, **Adicionar app > Android**. Nome do pacote: `com.effex.trade`. Baixe o **google-services.json** e salve em
+   `apps\mobile\google-services.json` (pode ir para o git: não é segredo).
+3. Em **Configurações do projeto > Contas de serviço > Gerar nova chave privada**, baixe o JSON. **Esse é secreto**: nunca
+   vai para o git nem para o chat. No servidor, salve em `/opt/effex-trade/firebase-conta-de-servico.json` e coloque no
+   `.env` da API: `FCM_SERVICE_ACCOUNT=/caminho/dentro/do/container/firebase-conta-de-servico.json` (monte o arquivo no
+   container, como já é feito com os uploads), ou cole o JSON inteiro no valor.
+4. Gere o **APK novo** (o google-services.json muda a parte nativa) e publique a API de novo. No log da API aparece
+   `push ao supervisor: ligado (Firebase)`.
+5. Instale o APK no celular do supervisor, entre com o login dele e permita as notificações. O celular se registra sozinho.
+
+Cuidados: Samsung e Xiaomi podem segurar o push com o app "dormindo": em Configurações > Apps > EFFEX Trade > Bateria,
+escolha **Sem restrições**. Se trocar de projeto no Firebase, gere o APK de novo.
+
 ### Chave de assinatura
 
 Criada pelo `preparar-android.ps1` em `Documentos\EFFEX Trade - chave do app`: `effex-trade.jks` (a chave) e
