@@ -1601,6 +1601,60 @@ textarea.input {
   padding-top: var(--esp-3);
   border-top: 1px solid var(--divisoria);
 }
+/* Visita pontual: o cliente entra só numa data, fora do roteiro fixo */
+.add-client-where {
+  display: grid;
+  gap: var(--esp-3);
+  align-content: start;
+  justify-items: start;
+  min-width: 0;
+}
+.add-client-where > .add-client-days,
+.once-fields {
+  justify-self: stretch;
+}
+.once-fields {
+  display: grid;
+  gap: var(--esp-3);
+}
+.once-fields p {
+  margin: 0;
+}
+.once-fields textarea.input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.once-activity {
+  display: grid;
+  gap: var(--esp-2);
+}
+.once-activity .input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.once-summary {
+  margin: 0 0 var(--esp-3);
+}
+.once-list {
+  display: grid;
+  gap: var(--esp-2);
+  padding-top: var(--esp-3);
+  border-top: 1px solid var(--divisoria);
+}
+.once-list h3 {
+  font-size: var(--fs-secundario);
+}
+.once-list p {
+  margin: 0;
+}
+.once-list .route-list li {
+  grid-template-columns: 7.5em 1fr auto;
+}
+.once-date {
+  font-size: var(--fs-secundario);
+  font-weight: 600;
+  color: var(--marinho);
+}
 .client-tasks {
   display: grid;
   gap: var(--esp-2);

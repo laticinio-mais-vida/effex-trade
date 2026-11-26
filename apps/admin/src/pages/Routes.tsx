@@ -4,7 +4,22 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type R
 import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { api } from '../api'
 import { cssVar } from '../css'
-import { areaLabel, DEFAULT_MODULES, distanceModeLabel, fmtDate, fmtNumber, isDefaultStructure, MODULE_ORDER, moduleLabel, recurrenceLabel, structureLabel, today, weekdayLabel } from '../format'
+import {
+  addDays,
+  areaLabel,
+  DEFAULT_MODULES,
+  distanceModeLabel,
+  fmtDate,
+  fmtNumber,
+  isDefaultStructure,
+  MODULE_ORDER,
+  moduleLabel,
+  recurrenceLabel,
+  structureLabel,
+  today,
+  visitStatusLabel,
+  weekdayLabel,
+} from '../format'
 import {
   DAYS_INTERVAL,
   fallsOn,
@@ -21,7 +36,23 @@ import {
   withType,
 } from '../routeFrequency'
 import { distanceMeters, pathMeters, suggestOrder } from '../routeOrder'
-import type { Area, Client, DistanceMode, Frequency, FrequencyType, LocatedClient, Ref, RouteClient, RouteDay, RouteSkip, SettingsResponse, Task, TodayRouteUpdate, VisitModule } from '../types'
+import type {
+  Area,
+  Client,
+  DistanceMode,
+  Frequency,
+  FrequencyType,
+  LocatedClient,
+  Ref,
+  RouteClient,
+  RouteDay,
+  RouteSkip,
+  ScheduledVisit,
+  SettingsResponse,
+  Task,
+  TodayRouteUpdate,
+  VisitModule,
+} from '../types'
 import { ClientPicker, Empty, ErrorBox, Field, Loading, Modal, PageHead, Tabs, useLookups } from '../ui'
 import { TaskForm } from './Tasks'
 
@@ -39,6 +70,10 @@ const sameRoute = (a: RouteClient[], b: RouteClient[]) =>
   a.length === b.length &&
   a.every((c, i) => c.id === b[i]!.id && sameFrequency(c.frequency, b[i]!.frequency) && c.modules.join() === b[i]!.modules.join())
 const onlyActivities = (modules: VisitModule[]) => modules.length === 1 && modules[0] === 'ATIVIDADES'
+/** "qui 27/11 (hoje)" */
+const fmtOnceDay = (date: string) => `${fmtShortDay(date)}${date === today() ? ' (hoje)' : ''}`
+/** Visita pontual: os clientes marcados entram só numa data, fora do roteiro fixo. */
+type OnceInput = { clients: LocatedClient[]; date: string; note?: string; activity?: { title: string; requiresPhoto: boolean } }
 
 /** Zoom ao ajustar a geolocalização: nível de rua, para marcar a porta da loja e ver a cerca. */
 const FOCUS_ZOOM = 17
@@ -129,7 +164,10 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const [weekday, setWeekday] = useState(1)
   const query = useQuery({
     queryKey: ['route', promotorId],
-    queryFn: () => api<{ promotor: Ref & { areas: Area[] }; weekdays: RouteDay[]; skips: RouteSkip[] }>(`/admin/routes/${promotorId}`),
+    queryFn: () =>
+      api<{ promotor: Ref & { areas: Area[] }; weekdays: RouteDay[]; skips: RouteSkip[]; scheduled: ScheduledVisit[]; scheduleDaysAhead: number }>(
+        `/admin/routes/${promotorId}`,
+      ),
   })
   /** Alterações ainda não salvas, por dia da semana; salvar grava todos os dias alterados de uma vez. */
   const [drafts, setDrafts] = useState<Partial<Record<number, RouteClient[]>>>({})
@@ -243,6 +281,57 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
     onSuccess: afterSkipChange,
   })
 
+  /** Visitas pontuais (cliente só numa data, fora do roteiro fixo): gravam na hora, fora do rascunho. */
+  const scheduled = query.data?.scheduled ?? []
+  const scheduleDates = Array.from({ length: (query.data?.scheduleDaysAhead ?? 30) + 1 }, (_, i) => addDays(today(), i))
+  /** Pela regra da API: na data, o cliente já cai no roteiro gravado (e não foi tirado só dela) ou já tem visita pontual. */
+  const onceConflicts = (date: string) => ({
+    inRoute: new Set(
+      WEEK_ORDER.flatMap((d) => savedOf(d).filter((c) => fallsOn(d, c.frequency, date) && !skipDatesOf(c.id).has(date)).map((c) => c.id)),
+    ),
+    scheduled: new Set(scheduled.filter((s) => s.date === date).map((s) => s.client.id)),
+  })
+  const [scheduledNotice, setScheduledNotice] = useState<{ date: string; names: string[] } | null>(null)
+  const schedule = useMutation({
+    mutationFn: async (input: OnceInput & { modules: VisitModule[] }) => {
+      const done: LocatedClient[] = []
+      const failed: { client: LocatedClient; message: string }[] = []
+      // Um de cada vez: na data de hoje, cada um entra no fim da lista do promotor, na ordem em que foi marcado
+      for (const client of input.clients) {
+        try {
+          await api(`/supervisor/promotores/${promotorId}/scheduled-visits`, {
+            method: 'POST',
+            body: { clientId: client.id, date: input.date, note: input.note, modules: input.modules, activity: input.activity },
+          })
+          done.push(client)
+        } catch (e) {
+          failed.push({ client, message: e instanceof Error ? e.message : String(e) })
+        }
+      }
+      return { date: input.date, done, failed }
+    },
+    onSuccess: async (r) => {
+      await Promise.all([qc.invalidateQueries({ queryKey: ['route', promotorId] }), qc.invalidateQueries({ queryKey: ['tasks'] })])
+      if (r.done.length > 0) {
+        setScheduledNotice({ date: r.date, names: r.done.map((c) => c.name) })
+        // Mostra o dia da semana da data, onde a visita pontual aparece
+        setWeekday(weekdayOf(r.date))
+        stopAdjusting()
+      }
+      // Quem não entrou continua marcado, com o motivo
+      if (r.failed.length === 0) setAdding(null)
+      else setAdding((a) => a && { ...a, clients: a.clients.filter((c) => r.failed.some((f) => f.client.id === c.id)) })
+    },
+  })
+  const unschedule = useMutation({
+    mutationFn: (id: string) => api(`/supervisor/scheduled-visits/${id}`, { method: 'DELETE' }),
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ['route', promotorId] }), qc.invalidateQueries({ queryKey: ['tasks'] })]),
+  })
+  const removeScheduled = (s: ScheduledVisit) => {
+    if (!confirm(`Tirar ${s.client.name} do dia ${fmtOnceDay(s.date)} do promotor?`)) return
+    unschedule.mutate(s.id)
+  }
+
   useEffect(() => {
     if (!dirty) return
     const warn = (e: BeforeUnloadEvent) => e.preventDefault()
@@ -295,6 +384,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
   const pick = (found: Client[]) => {
     // A busca já traz só clientes com localização; o filtro garante o tipo
     const picked = found.filter((c): c is LocatedClient => c.latitude != null && c.longitude != null)
+    schedule.reset()
     setAdding((a) => {
       const current = a?.clients ?? []
       const has = (id: string) => current.some((c) => c.id === id)
@@ -410,6 +500,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
         </div>
       )}
       {todayUpdate && <TodayUpdateNotice update={todayUpdate} onClose={() => setTodayUpdate(null)} />}
+      {scheduledNotice && <ScheduledNotice notice={scheduledNotice} onClose={() => setScheduledNotice(null)} />}
 
       {adding && (
         <AddClients
@@ -421,8 +512,17 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
           onRemoveClient={removeFromSelection}
           onToggleDay={toggleAddDay}
           onFrequency={setAddFrequency}
-          onCancel={() => setAdding(null)}
+          onCancel={() => {
+            setAdding(null)
+            schedule.reset()
+          }}
           onConfirm={confirmAdd}
+          weekday={weekday}
+          onceDates={scheduleDates}
+          onceConflicts={onceConflicts}
+          scheduling={schedule.isPending}
+          scheduleFailures={schedule.data?.failed ?? []}
+          onSchedule={(input) => schedule.mutate({ ...input, modules: adding.modules })}
         />
       )}
 
@@ -430,6 +530,28 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
       <ErrorBox error={query.error} />
       {query.data && (
         <>
+          {scheduled.length > 0 && (
+            <div className="skip-list small once-summary">
+              <span className="muted">Visitas pontuais agendadas:</span>
+              {[...new Set(scheduled.map((s) => s.date))].map((date) => {
+                const n = scheduled.filter((s) => s.date === date).length
+                return (
+                  <button
+                    key={date}
+                    type="button"
+                    className="freq-chip custom"
+                    title={`Ver ${ofDay(weekdayOf(date))}, onde aparece a visita pontual`}
+                    onClick={() => {
+                      setWeekday(weekdayOf(date))
+                      stopAdjusting()
+                    }}
+                  >
+                    {fmtOnceDay(date)} · {n === 1 ? '1 cliente' : `${n} clientes`}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <Tabs
             value={String(weekday)}
             onChange={(v) => {
@@ -470,7 +592,7 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                   </div>
                 )}
                 {list.length === 0 ? (
-                  <Empty>Nenhum cliente neste dia. Use “Adicionar cliente”, acima, para incluir.</Empty>
+                  <Empty>Nenhum cliente fixo neste dia. Use “Adicionar clientes”, acima, para incluir toda semana ou só em uma data.</Empty>
                 ) : (
                   <div>
                     <p className="small muted" style={{ margin: '0 0 var(--esp-2)' }}>
@@ -590,6 +712,12 @@ function RouteEditor({ promotorId, onPromotorChange }: { promotorId: string; onP
                     </ol>
                   </div>
                 )}
+                <OnceList
+                  items={scheduled.filter((s) => weekdayOf(s.date) === weekday)}
+                  removing={unschedule.isPending}
+                  error={unschedule.error}
+                  onRemove={removeScheduled}
+                />
               </div>
             </section>
             <section className="panel route-map" style={{ height: 460, overflow: 'hidden' }}>
@@ -943,7 +1071,12 @@ function FrequencyPicker({ weekday, value, onChange, name }: { weekday: number; 
   )
 }
 
-/** Clientes marcados na busca e, para cada dia da semana marcado, a frequência (semanal já vem escolhida). */
+type AddMode = 'semana' | 'data'
+
+/**
+ * Clientes marcados na busca e onde entram: nos dias da semana do roteiro fixo, cada dia com a frequência (semanal já
+ * vem escolhida), ou só em uma data, como visita pontual, que grava na hora, sem esperar o “Salvar roteiro”.
+ */
 function AddClients({
   clients,
   days,
@@ -955,8 +1088,14 @@ function AddClients({
   onFrequency,
   onCancel,
   onConfirm,
+  weekday,
+  onceDates,
+  onceConflicts,
+  scheduling,
+  scheduleFailures,
+  onSchedule,
 }: {
-  clients: Client[]
+  clients: LocatedClient[]
   days: DayFrequencyMap
   modules: VisitModule[]
   onModules: (modules: VisitModule[]) => void
@@ -966,10 +1105,53 @@ function AddClients({
   onFrequency: (d: number, f: Frequency) => void
   onCancel: () => void
   onConfirm: () => void
+  /** Dia da semana aberto: a data sugerida para a visita pontual é a próxima dele */
+  weekday: number
+  /** Datas aceitas para a visita pontual: de hoje até o limite da API */
+  onceDates: string[]
+  onceConflicts: (date: string) => { inRoute: Set<string>; scheduled: Set<string> }
+  scheduling: boolean
+  /** Clientes que a API recusou na última gravação da visita pontual, com o motivo */
+  scheduleFailures: { client: LocatedClient; message: string }[]
+  onSchedule: (input: OnceInput) => void
 }) {
+  const [mode, setMode] = useState<AddMode>('semana')
+  const [date, setDate] = useState(() => onceDates.find((d) => weekdayOf(d) === weekday) ?? onceDates[0] ?? '')
+  const [note, setNote] = useState('')
+  const [activityTitle, setActivityTitle] = useState('')
+  const [activityPhoto, setActivityPhoto] = useState(true)
   const n = clients.length
+  const once = mode === 'data'
   const selected = WEEK_ORDER.filter((d) => days[d])
   const incomplete = selected.some((d) => frequencyError(days[d]!))
+
+  const conflicts = onceConflicts(date)
+  const inRoute = clients.filter((c) => conflicts.inRoute.has(c.id))
+  const alreadyScheduled = clients.filter((c) => conflicts.scheduled.has(c.id))
+  const eligible = clients.filter((c) => !conflicts.inRoute.has(c.id) && !conflicts.scheduled.has(c.id))
+  const withActivity = modules.includes('ATIVIDADES')
+  const title = activityTitle.trim()
+  // Só com atividade extra, a visita precisa de uma: sem ela o promotor iria ao cliente sem nada para fazer
+  const activityError =
+    withActivity && onlyActivities(modules) && !title
+      ? 'Só com atividade extra, escreva a atividade que o promotor vai fazer.'
+      : withActivity && title && title.length < 3
+        ? 'Descreva a atividade com pelo menos 3 caracteres.'
+        : null
+  const failures = scheduleFailures.filter((f) => clients.some((c) => c.id === f.client.id))
+  const names = (list: Client[]) => new Intl.ListFormat('pt-BR').format(list.map((c) => c.name))
+  const submitOnce = () =>
+    onSchedule({
+      clients: eligible,
+      date,
+      note: note.trim() || undefined,
+      activity: withActivity && title ? { title, requiresPhoto: activityPhoto } : undefined,
+    })
+  const onceLabel = () => {
+    const who = eligible.length > 1 ? `${eligible.length} clientes ` : ''
+    return date === today() ? `Incluir ${who}hoje` : `Agendar ${who}para ${fmtShortDay(date)}`
+  }
+
   return (
     <section className="panel add-client" aria-label="Adicionar clientes ao roteiro">
       <div className="add-client-who">
@@ -989,42 +1171,216 @@ function AddClients({
         </ul>
         <div className="add-client-structure">
           <strong className="small">Estrutura do atendimento</strong>
-          <div className="small muted">Vale para todos os dias marcados; depois dá para mudar cliente a cliente.</div>
-          <StructurePicker value={modules} onChange={onModules} />
+          <div className="small muted">
+            {once ? 'Vale só para a visita desta data.' : 'Vale para todos os dias marcados; depois dá para mudar cliente a cliente.'}
+          </div>
+          <StructurePicker value={modules} onChange={onModules} once={once} />
         </div>
       </div>
-      <DayFrequencies
-        legend="Em quais dias? Os clientes entram no final da ordem de cada dia."
-        days={days}
-        name="add"
-        disabled={(d) => alreadyIn(d) === n}
-        note={(d) => {
-          const has = alreadyIn(d)
-          if (has === 0) return null
-          return (
-            <span className="small muted">
-              {has === n
-                ? n === 1
-                  ? 'já está neste dia'
-                  : 'todos já estão neste dia'
-                : `${has} de ${n} já ${has === 1 ? 'está' : 'estão'} neste dia e não se repete${has === 1 ? '' : 'm'}`}
-            </span>
-          )
-        }}
-        onToggle={onToggleDay}
-        onFrequency={onFrequency}
-      />
+      <div className="add-client-where">
+        <div className="segmented small" role="group" aria-label="Quando o promotor atende">
+          {(
+            [
+              ['semana', 'Repetir nos dias da semana'],
+              ['data', 'Só em uma data'],
+            ] as const
+          ).map(([value, label]) => (
+            <button key={value} type="button" className={mode === value ? 'on' : ''} aria-pressed={mode === value} onClick={() => setMode(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {once ? (
+          <div className="once-fields">
+            <p className="small muted">
+              {n === 1 ? 'O cliente entra' : 'Os clientes entram'} só nesta data, fora do roteiro fixo: no fim da lista do promotor, sem ordem de
+              atendimento. Se não for atendido, o promotor precisa justificar. Grava na hora, sem precisar salvar o roteiro.
+            </p>
+            <label className="freq-start">
+              Data
+              <select className="input" value={date} onChange={(e) => setDate(e.target.value)}>
+                {onceDates.map((d) => (
+                  <option key={d} value={d}>
+                    {fmtOnceDay(d)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {date === today() && <div className="small muted">Hoje: entra na hora no app do promotor, se ele ainda não encerrou o roteiro.</div>}
+            {inRoute.length > 0 && (
+              <div className="small muted">
+                Já {inRoute.length === 1 ? 'está' : 'estão'} no roteiro fixo nesta data e não {inRoute.length === 1 ? 'entra' : 'entram'} de novo:{' '}
+                {names(inRoute)}.
+              </div>
+            )}
+            {alreadyScheduled.length > 0 && (
+              <div className="small muted">
+                Já {alreadyScheduled.length === 1 ? 'tem' : 'têm'} visita pontual nesta data: {names(alreadyScheduled)}.
+              </div>
+            )}
+            {withActivity && (
+              <div className="once-activity">
+                <Field label={onlyActivities(modules) ? 'Atividade para o promotor' : 'Atividade para o promotor (opcional)'}>
+                  <input
+                    className="input"
+                    value={activityTitle}
+                    maxLength={200}
+                    placeholder="Ex.: Colocar as placas de preço da campanha"
+                    onChange={(e) => setActivityTitle(e.target.value)}
+                  />
+                </Field>
+                <label className="day-check">
+                  <input type="checkbox" checked={activityPhoto} disabled={!title} onChange={(e) => setActivityPhoto(e.target.checked)} />
+                  <span>Exige foto</span>
+                </label>
+                <div className="small muted">
+                  Feita uma vez, só nesta visita, e obrigatória para o check-out{n > 1 ? '; vale para cada cliente marcado' : ''}. As atividades
+                  extras do cliente cadastradas em Atividades também entram.
+                </div>
+                {activityError && <div className="small freq-error">{activityError}</div>}
+              </div>
+            )}
+            <Field label="Recado para o promotor (opcional)">
+              <textarea className="input" value={note} maxLength={500} placeholder="O que fazer neste cliente" onChange={(e) => setNote(e.target.value)} />
+            </Field>
+            {failures.length > 0 && (
+              <div className="alert">
+                {failures.length === 1 ? 'Não entrou:' : 'Não entraram:'}
+                <ul style={{ margin: 'var(--esp-1) 0 0', paddingLeft: 'var(--esp-5)' }}>
+                  {failures.map((f) => (
+                    <li key={f.client.id}>{f.message.includes(f.client.name) ? f.message : `${f.client.name}: ${f.message}`}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : (
+          <DayFrequencies
+            legend="Em quais dias? Os clientes entram no final da ordem de cada dia."
+            days={days}
+            name="add"
+            disabled={(d) => alreadyIn(d) === n}
+            note={(d) => {
+              const has = alreadyIn(d)
+              if (has === 0) return null
+              return (
+                <span className="small muted">
+                  {has === n
+                    ? n === 1
+                      ? 'já está neste dia'
+                      : 'todos já estão neste dia'
+                    : `${has} de ${n} já ${has === 1 ? 'está' : 'estão'} neste dia e não se repete${has === 1 ? '' : 'm'}`}
+                </span>
+              )
+            }}
+            onToggle={onToggleDay}
+            onFrequency={onFrequency}
+          />
+        )}
+      </div>
       <div className="btn-row add-client-actions">
-        <button className="btn" onClick={onCancel}>
+        <button className="btn" disabled={scheduling} onClick={onCancel}>
           Cancelar
         </button>
-        <button className="btn primary" disabled={selected.length === 0 || incomplete} onClick={onConfirm}>
-          {selected.length === 0
-            ? 'Adicionar'
-            : `Adicionar ${n === 1 ? '' : `${n} clientes `}em ${selected.length} ${selected.length === 1 ? 'dia' : 'dias'}`}
-        </button>
+        {once ? (
+          <button className="btn primary" disabled={scheduling || !date || eligible.length === 0 || !!activityError} onClick={submitOnce}>
+            {scheduling ? 'Gravando…' : eligible.length === 0 ? 'Agendar' : onceLabel()}
+          </button>
+        ) : (
+          <button className="btn primary" disabled={selected.length === 0 || incomplete} onClick={onConfirm}>
+            {selected.length === 0
+              ? 'Adicionar'
+              : `Adicionar ${n === 1 ? '' : `${n} clientes `}em ${selected.length} ${selected.length === 1 ? 'dia' : 'dias'}`}
+          </button>
+        )}
       </div>
     </section>
+  )
+}
+
+/** Visitas pontuais que acabaram de ser gravadas. */
+function ScheduledNotice({ notice, onClose }: { notice: { date: string; names: string[] }; onClose: () => void }) {
+  const names = new Intl.ListFormat('pt-BR').format(notice.names)
+  const one = notice.names.length === 1
+  const isToday = notice.date === today()
+  return (
+    <div className="alert ok" role="status" style={{ marginBottom: 'var(--esp-4)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--esp-3)' }}>
+        <strong>
+          {isToday
+            ? `${names} ${one ? 'entrou' : 'entraram'} no fim do roteiro de hoje do promotor.`
+            : `Visita pontual agendada para ${fmtShortDay(notice.date)}: ${names}.`}
+        </strong>
+        <button className="btn small" onClick={onClose}>
+          Fechar
+        </button>
+      </div>
+      <div className="small">
+        {isToday
+          ? 'O promotor vê a mudança ao atualizar a tela do app ou ao voltar para ele.'
+          : `${one ? 'Entra' : 'Entram'} no roteiro do promotor só nesse dia, no fim da lista. Nas outras semanas, nada muda.`}
+      </div>
+    </div>
+  )
+}
+
+/** Visitas pontuais das próximas datas que caem no dia da semana aberto, com a opção de tirar enquanto não começou. */
+function OnceList({
+  items,
+  removing,
+  error,
+  onRemove,
+}: {
+  items: ScheduledVisit[]
+  removing: boolean
+  error: unknown
+  onRemove: (s: ScheduledVisit) => void
+}) {
+  if (items.length === 0) return null
+  return (
+    <div className="once-list">
+      <h3>Só em uma data ({items.length})</h3>
+      <p className="small muted">Visitas pontuais: entram só na data, no fim da lista do promotor e fora da ordem do roteiro.</p>
+      <ul className="route-list">
+        {items.map((s) => {
+          // Atendimento já começou ou terminou: a API não deixa mais tirar
+          const locked = !!s.visit && s.visit.status !== 'PENDENTE'
+          return (
+            <li key={s.id}>
+              <span className="once-date">{fmtOnceDay(s.date)}</span>
+              <span>
+                {s.client.name}
+                <div className="small muted">
+                  {[[s.client.city, s.client.state].filter(Boolean).join(' - '), `por ${s.createdBy.name}`].filter(Boolean).join(' · ')}
+                </div>
+                {!isDefaultStructure(s.modules) && <div className="small muted">Estrutura: {structureLabel(s.modules)}</div>}
+                {s.activity && (
+                  <div className="small muted">
+                    Atividade: {s.activity.title}
+                    {s.activity.requiresPhoto ? ' (com foto)' : ''}
+                  </div>
+                )}
+                {s.note && <div className="small muted">Recado: {s.note}</div>}
+              </span>
+              {locked ? (
+                <span className="small muted">{visitStatusLabel[s.visit!.status]}</span>
+              ) : (
+                <button
+                  className="btn icon danger"
+                  aria-label={`Tirar ${s.client.name} de ${fmtOnceDay(s.date)}`}
+                  title="Tirar desta data"
+                  disabled={removing}
+                  onClick={() => onRemove(s)}
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      <ErrorBox error={error} />
+    </div>
   )
 }
 
@@ -1256,8 +1612,11 @@ const MODULE_HELP: Record<VisitModule, string> = {
   ESTOQUE: 'Contagem feita fora do app: o promotor só confirma',
 }
 
-/** Etapas do atendimento em qualquer combinação (pelo menos uma). Padrão de todo cliente novo: padrão + atividade extra. */
-function StructurePicker({ value, onChange }: { value: VisitModule[]; onChange: (modules: VisitModule[]) => void }) {
+/**
+ * Etapas do atendimento em qualquer combinação (pelo menos uma). Padrão de todo cliente novo: padrão + atividade extra.
+ * `once`: visita pontual, em que a atividade extra é escrita na hora.
+ */
+function StructurePicker({ value, onChange, once }: { value: VisitModule[]; onChange: (modules: VisitModule[]) => void; once?: boolean }) {
   const toggle = (m: VisitModule) => {
     const next = MODULE_ORDER.filter((x) => (x === m ? !value.includes(m) : value.includes(x)))
     if (next.length > 0) onChange(next)
@@ -1277,7 +1636,11 @@ function StructurePicker({ value, onChange }: { value: VisitModule[]; onChange: 
         )
       })}
       {onlyActivities(value) && (
-        <div className="small structure-note">Só com atividade extra: o cliente entra no roteiro apenas nos dias em que houver atividade para fazer.</div>
+        <div className="small structure-note">
+          {once
+            ? 'Só com atividade extra: escreva ao lado a atividade que o promotor vai fazer.'
+            : 'Só com atividade extra: o cliente entra no roteiro apenas nos dias em que houver atividade para fazer.'}
+        </div>
       )}
     </div>
   )

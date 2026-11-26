@@ -446,6 +446,20 @@ export type RouteClient = LocatedClient & { frequency: Frequency; modules: Visit
 export type RouteDay = { weekday: number; clients: RouteClient[] }
 /** Data em que o cliente foi tirado do roteiro só naquele dia (nas outras semanas continua). */
 export type RouteSkip = { id: string; clientId: string; date: string }
+/** Visita pontual: o cliente entra só numa data no dia do promotor, fora do roteiro fixo (no fim da lista, sem ordem). */
+export type ScheduledVisit = {
+  id: string
+  date: string
+  note: string | null
+  modules: VisitModule[]
+  /** Atividade escrita para esta visita: feita uma vez e obrigatória para o check-out */
+  activity: { id: string; title: string; requiresPhoto: boolean } | null
+  client: Client
+  createdBy: Ref
+  createdAt: string
+  /** A visita já gerada no dia do promotor (hoje, ou quando o dia for gerado) */
+  visit: { id: string; status: VisitStatus } | null
+}
 /** O que salvar o roteiro mudou no dia de hoje do promotor (nulo quando o dia de hoje ainda não foi gerado). */
 export type TodayRouteUpdate = {
   date: string

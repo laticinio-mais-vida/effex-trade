@@ -13,6 +13,7 @@ import { listPermissionTypes } from '../../services/permissions'
 import { frequencyColumns, serializeFrequency, zFrequency } from '../../services/route-frequency'
 import { listRouteSkips, skipRouteDate, undoRouteSkip } from '../../services/route-skips'
 import { distanceMatrix } from '../../services/routing'
+import { listScheduled, SCHEDULE_DAYS_AHEAD } from '../../services/scheduled-visits'
 import { DEFAULT_MODULES, zModules } from '../../services/visit-structure'
 import { areaWhere, assertAdmin, clientScope, inAreas, loadAreas, promotorScope } from '../../services/scope'
 import { serializeClient, serializeUser } from '../../services/serializers'
@@ -419,10 +420,11 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
     const { id } = parse(zIdParam, req.params)
     const promotor = await prisma.user.findFirst({ where: { id, ...promotorScope(req.user) }, select: { id: true, name: true } })
     if (!promotor) throw notFound('Promotor')
-    const [items, areas, skips] = await Promise.all([
+    const [items, areas, skips, scheduled] = await Promise.all([
       prisma.routeItem.findMany({ where: { promotorId: id }, include: { client: true }, orderBy: [{ weekday: 'asc' }, { position: 'asc' }] }),
       loadAreas(id),
       listRouteSkips(id),
+      listScheduled(req.user, id),
     ])
     return {
       promotor: { ...promotor, areas },
@@ -434,6 +436,12 @@ export async function adminCadastrosRoutes(app: FastifyInstance) {
       })),
       /** Datas de hoje em diante em que o cliente foi tirado do roteiro só naquele dia */
       skips,
+      /**
+       * Visitas pontuais de hoje em diante: o cliente entra só numa data, fora do roteiro fixo. São gravadas e
+       * desfeitas pelas rotas do supervisor (POST /supervisor/promotores/:id/scheduled-visits), que aceitam o admin.
+       */
+      scheduled,
+      scheduleDaysAhead: SCHEDULE_DAYS_AHEAD,
     }
   })
 

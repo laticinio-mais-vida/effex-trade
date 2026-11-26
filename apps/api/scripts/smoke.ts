@@ -576,6 +576,30 @@ check('no dia agendado a pontual entra no roteiro', (await generatedDay(d2)).som
 r = await call(supervisor, 'DELETE', `/supervisor/scheduled-visits/${futurePontual.id}`)
 check('agendamento futuro removido', r.status === 200, r.data)
 
+console.log('Visita pontual incluída pelo admin (painel, Roteiros > Só em uma data)')
+const d3 = addDays(today, 3)
+r = await call(admin, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, {
+  clientId: pontualClient2.id,
+  date: d3,
+  modules: ['ATIVIDADES'],
+  activity: { title: 'Montar a ilha da campanha', requiresPhoto: true },
+})
+check('admin agenda visita pontual com atividade', r.status === 200 && r.data.createdBy?.id && r.data.activity?.title === 'Montar a ilha da campanha', r.data)
+const adminPontual = r.data
+r = await call(admin, 'POST', `/supervisor/promotores/${testId}/scheduled-visits`, { clientId: pontualClient2.id, date: addDays(today, 4), modules: ['ATIVIDADES'] })
+check('só atividade extra sem atividade recusada', r.status === 400 && r.data.code === 'ATIVIDADE_OBRIGATORIA', r.data)
+const adminRoute = (await call(admin, 'GET', `/admin/routes/${testId}`)).data
+const listedPontual = adminRoute.scheduled?.find((s: any) => s.id === adminPontual.id)
+check(
+  'roteiro do painel devolve a visita pontual e o limite de dias',
+  listedPontual?.date === d3 && listedPontual.client.id === pontualClient2.id && listedPontual.modules.join() === 'ATIVIDADES' && adminRoute.scheduleDaysAhead > 0,
+  adminRoute.scheduled,
+)
+check('a visita pontual não entra no roteiro fixo', !adminRoute.weekdays.some((w: any) => w.clients.some((c: any) => c.id === pontualClient2.id)))
+r = await call(admin, 'DELETE', `/supervisor/scheduled-visits/${adminPontual.id}`)
+check('admin desfaz a visita pontual', r.status === 200 && !(await call(admin, 'GET', `/admin/routes/${testId}`)).data.scheduled.some((s: any) => s.id === adminPontual.id), r.data)
+check('e a atividade dela some junto', !(await prisma.task.findFirst({ where: { scheduledVisitId: adminPontual.id } })))
+
 console.log('Estrutura do atendimento (padrão, atividade extra, contagem de estoque)')
 const [fe, ff, sc1, sc2] = allClients.filter((c) => ![fa.id, fb.id, fc.id, fd.id, pontualClient.id, pontualClient2.id].includes(c.id) && !tDay.visits.some((v: any) => v.client.id === c.id))
 r = await call(admin, 'PUT', `/admin/routes/${testId}`, { days: [{ weekday: w1, items: [{ clientId: fe.id, modules: [] }] }] })
